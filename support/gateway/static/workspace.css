@@ -335,15 +335,15 @@ button:hover:not(:disabled) {
 .day-divider::before, .day-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .main-card { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; isolation: isolate; color: var(--ink-3); font-size: var(--text-small); }
 /* What asks the person (an approval, a task that needs you, a step Auto blocked): its words and buttons in an amber
-   box beside its bead. */
-.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) { padding-block: 12px; color: var(--ink-2); }
-.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"])::after { content: ""; position: absolute; inset: 0 0 0 30px; z-index: -1; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--warn-tint); }
-.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) > :is(.main-card-text, .main-card-foot) { padding-inline: 14px; }
+   box beside its bead. A step answered since (`data-answered`, read from its task) asks nothing: a line on the thread. */
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered]) { padding-block: 12px; color: var(--ink-2); }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered])::after { content: ""; position: absolute; inset: 0 0 0 30px; z-index: -1; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--warn-tint); }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered]) > :is(.main-card-text, .main-card-foot) { padding-inline: 14px; }
 /* After another item of the lane the box keeps a little space, and the thread runs on through it. */
-:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) { margin-top: 6px; }
-:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"])::before { top: -6px; height: 28px; }
-:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):has(+ :is(.echo, .main-card))::before { height: auto; }
-.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) .main-card-title { font-size: var(--text-body); font-weight: 600; color: var(--ink); }
+:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered]) { margin-top: 6px; }
+:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered])::before { top: -6px; height: 28px; }
+:is(.echo, .main-card) + .main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered]):has(+ :is(.echo, .main-card))::before { height: auto; }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]):not([data-answered]) .main-card-title { font-size: var(--text-body); font-weight: 600; color: var(--ink); }
 .main-card-mark { grid-row: span 2; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--tint); color: var(--ok); font-size: var(--text-caption); font-weight: 600; }
 .main-card[data-state="waiting"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-state="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
@@ -361,9 +361,13 @@ button:hover:not(:disabled) {
 .main-card[data-ending="draft"] .main-card-mark, .main-card[data-ending="blocked"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-ending="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card[data-ending="dropped"] .main-card-mark { background: var(--raised); color: var(--ink-3); }
+/* Its step answered since: the mark of a line on the thread, not of what asks. */
+.main-card[data-answered][data-ending] .main-card-mark { background: var(--tint); color: var(--ok); box-shadow: none; }
 .main-card-why { margin: 4px 0 0; color: var(--warn); font-size: var(--text-small); font-weight: 500; overflow-wrap: anywhere; }
 /* A ready task's note (no tests apply) is a remark, not a warning. */
 .main-card[data-ending="ready"] .main-card-why { color: var(--ink-3); font-weight: 400; }
+/* A card that asks nothing more (its step answered, or its work went on in a newer task): its question is quiet. */
+.main-card[data-answered] .main-card-why { color: var(--ink-3); font-weight: 400; }
 /* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
 .main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
 .main-card .block-card { margin: var(--space-2) 0 0; padding: 0; background: none; border: 0; box-shadow: none; }
@@ -2391,6 +2395,11 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .sched-text { display: grid; gap: 1px; }
 .sched-title { font-weight: 600; overflow-wrap: anywhere; }
 .sched-when { color: var(--ink-2); font-size: var(--text-small); }
+/* How the last run went: a line of the row that opens that run, coloured by its ending as the Activity rows are. */
+a.sched-last { display: block; width: fit-content; max-width: 100%; padding: 2px 0; color: var(--ink-3); font-size: var(--text-small); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 60%, transparent); text-underline-offset: 2px; overflow-wrap: anywhere; text-wrap: pretty; }
+a.sched-last:hover { text-decoration-color: currentColor; }
+a.sched-last:is([data-ending="draft"], [data-ending="blocked"]) { color: var(--warn); }
+a.sched-last[data-ending="failed"] { color: var(--error); }
 .sched-detail { display: grid; gap: var(--space-1); padding: var(--space-1) 0 0; }
 .sched-request { margin: 0; color: var(--ink-2); font-size: var(--text-small); line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .sched-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--space-2); margin-top: var(--space-1); }
@@ -2513,7 +2522,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
   .panel-backdrop { position: fixed; inset: 0; z-index: 29; display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
+  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
 }
 /* Settings: the sections on the left, the chosen one on the right; on a phone the list, and the section as a sheet. */
 dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); max-height: none; padding: 0; overflow: hidden; }
@@ -2704,6 +2713,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .block-once { margin-left: auto; color: var(--ink-3); font-size: var(--text-caption); }
 .block-done { color: var(--ink-2); }
 .block-card[data-state="used"] .block-done { color: var(--ok); }
+/* Answered, a blocked step asks nothing more: its facts stay, on the quiet surface of a record. */
+.block-card:is([data-state="pending"], [data-state="used"], [data-state="kept"]) { background: none; box-shadow: none; }
+.task-block:has(> .block-card:is([data-state="pending"], [data-state="used"], [data-state="kept"])) > summary { color: var(--ink-2); }
 .block-error { margin: var(--space-2) 0 0 calc(1.25em + var(--space-2)); color: var(--error); font-size: var(--text-small); }
 .task-blocked { display: grid; gap: var(--space-2); }
 .task-blocked h2 { margin-bottom: 0; }

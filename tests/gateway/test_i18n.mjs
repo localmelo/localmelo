@@ -12,7 +12,7 @@ import {phaseWords, statusLine, statusText, toolState, workSummary} from '../../
 import {levelLabel} from '../../support/gateway/static/levels.mjs';
 import {cardWords, dayLabel} from '../../support/gateway/static/main-chat.mjs';
 import {headline, stepWords} from '../../support/gateway/static/panel.mjs';
-import {rowLines, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
+import {lastLine, rowLines, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {blockFacts, reviewWords} from '../../support/gateway/static/blocked.mjs';
 import {checkedWords} from '../../support/gateway/static/settings.mjs';
@@ -67,7 +67,8 @@ test('the main chat, the panel, the Scheduled tab and Settings draw their words 
     assert.equal(headline({status: {running: {task: 2}}}).text, '正在做 2 件事');
     assert.equal(phaseWords('Explore'), '查看情况');
     assert.equal(t('failure.http.server'), '模型服务出了问题，没能回答。再试一次；如果一直这样，请重启服务。');
-    assert.deepEqual(rowLines({enabled: false, last: {state: 'done', line: ''}}, now), ['关', '上次：完成']);
+    assert.deepEqual(rowLines({enabled: false}, now), ['关']);
+    assert.equal(lastLine({last: {state: 'done', ending: {state: 'blocked', reasons: ['question']}, line: ''}}), '上次：需要你');
     assert.equal(checkedWords(42), '42 秒前检查');
   } finally {
     await useLanguage('en');

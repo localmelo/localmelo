@@ -124,6 +124,8 @@ export function setupPanel({
   folder = () => '',
   // The header's own timer (the end of the sitting, a long rest turning still): it never keeps a process alive.
   wait = (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id; }, cancelWait = (id) => clearTimeout(id),
+  // A kept answer was removed on the Scheduled tab: the chat's cards that said it read their tasks again.
+  keepRemoved = () => {},
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
@@ -135,7 +137,7 @@ export function setupPanel({
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
-  const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat, developer});
+  const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat, developer, keepRemoved});
   const live = taskLive({api: newest, changed: () => drawBody(), ...stream});
   let reads = 0;
 

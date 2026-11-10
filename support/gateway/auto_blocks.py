@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Final
 
-from localmelo.melo.contracts.approvals import keep_holds
+from localmelo.melo.contracts.approvals import ALLOW_ONCE_S, keep_holds
 from localmelo.melo.contracts.review import TITLES, ActionReview, ModelAnswer
 from localmelo.support.gateway.handover import fenced
 from localmelo.support.gateway.i18n import t
@@ -226,6 +226,42 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
             if block["turn"] == turn and not block["preview"]:
                 block["preview"] = previews.get(block["call_id"], "")
     return out
+
+
+async def ran_once(store: SessionStore, session_id: str) -> dict[str, Any]:
+    """When each step that ran on an Allow once in *session_id* ran, by its step key (the first run of each).
+
+    For a task whose job went on in a newer one (#571): the step allowed in
+    the older task runs in *session_id*, and the older task's blocks read
+    when from here.
+    """
+    out: dict[str, Any] = {}
+    for stored in await store.auto_records(session_id, limit=200):
+        for one in blocks_in(stored.event):
+            key = one.get("step_key")
+            if one.get("allowance") == "once" and isinstance(key, str):
+                out.setdefault(key, stored.event.get("ts"))
+    return out
+
+
+def own_allowances(blocks: Sequence[dict[str, Any]], given: dict[str, float]) -> None:
+    """Set each of *blocks*' ``allowed_until``: when the Allow once of its step runs out, else ``None``.
+
+    *given* is kept by step key (when each allowance runs out, given
+    :data:`ALLOW_ONCE_S` before that). An allowance given before a block was
+    made is an earlier block's, never this one's: a later block of the same
+    step reads as asked until it is allowed itself.
+    """
+    for block in blocks:
+        until = given.get(str(block.get("step_key")))
+        made = block.get("ts")
+        block["allowed_until"] = (
+            until
+            if isinstance(until, (int, float))
+            and isinstance(made, (int, float))
+            and until - ALLOW_ONCE_S >= made
+            else None
+        )
 
 
 # Who blocked a step, as a follow-up and the refusal of a repeat name them (#411).

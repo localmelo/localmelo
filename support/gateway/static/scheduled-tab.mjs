@@ -6,19 +6,21 @@
  * /api/chores/{id}` with the revision that was read (a 409 reloads the list); "Run now" is `POST
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. Under each chore, one line per site its runs may
  * type and send on without asking (`keeps`, kept from a blocked step's card), or that one was dropped because the
- * request changed; its Remove is `DELETE /api/chores/{id}/keeps?site=`. `root` is mounted in the panel's body while the
+ * request changed; its Remove is `DELETE /api/chores/{id}/keeps?site=` (then `keepRemoved()`). How the last run went
+ * links to that run's page. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
 import {formatTime, saidText, t} from './i18n.mjs';
 import {maker} from './dom.mjs';
+import {endingLabel, readEnding} from './endings.mjs';
 import {levelLabel} from './levels.mjs';
 
 // Read once, in the page's language (a new language reloads the page).
 export const EMPTY = t('sched.empty');
 export const CHECKIN = t('sched.checkinLine', {n: 30});
 const KINDS = ['daily', 'weekdays', 'hours'];
-// How a chore's last run reads, by the state of its task (`sched.ran.<state>`).
-const RAN = new Set(['done', 'failed', 'cancelled', 'expired', 'queued', 'running', 'held', 'waiting', 'parked', 'interrupted']);
+// How a chore's last run reads while it has no ending, by the state of its task (`sched.ran.<state>`).
+const RAN = new Set(['done', 'queued', 'running', 'held', 'waiting', 'parked', 'interrupted']);
 
 /** ``today at 8:30 AM``, ``tomorrow at 8:30 AM``, ``Friday at 8:30 AM``, or ``Nov 2 at 8:30 AM``. */
 export function whenWords(at, now) {
@@ -46,18 +48,29 @@ export function keepLine(keep) {
   return t('sched.keep.line', {site, date: formatTime(new Date(Number(keep?.since) * 1000), 'day')});
 }
 
-/** The lines under a row's title: when it runs next (a one-time chore that ran: when), how late, then how the last run went. */
+/** The lines under a row's title: when it runs next (a one-time chore that ran: when), then how late. */
 export function rowLines(chore, now) {
   const done = chore.schedule?.kind === 'once' && !chore.enabled && chore.last_run;
   const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_at ?? chore.next_run, now)}) : t('common.off');
   const lines = [first];
   if (chore.late_min) lines.push(lateWords(chore.late_min));
-  const ran = RAN.has(chore.last?.state) ? t(`sched.ran.${chore.last.state}`) : chore.last?.state;
-  if (chore.last) lines.push(t('sched.last', {what: [ran, chore.last.line].filter(Boolean).join(' · ')}));
   return lines;
 }
 
-export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, developer = () => false}) {
+/**
+ * How the last run went, or '': how it ended in the words of every screen (Ready, Needs you, Did not finish…, from its
+ * task's stored ending), else where it stands (Running now, Waiting for you…), and its result line.
+ */
+export function lastLine(chore) {
+  const last = chore.last;
+  if (!last) return '';
+  const ending = readEnding(last.ending);
+  // A run whose work went on in a newer task says so, in the words of its stage.
+  const ran = last.went_on ? t('panel.state.wentOn') : ending ? endingLabel(ending) : RAN.has(last.state) ? t(`sched.ran.${last.state}`) : last.state;
+  return t('sched.last', {what: [ran, last.line].filter(Boolean).join(' · ')});
+}
+
+export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, developer = () => false, keepRemoved = () => {}}) {
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
   let scope = 0; // which chat the panel follows: rescope() moves it on
@@ -213,6 +226,14 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, 
       draw();
     }));
     item.append(head);
+    if (chore.last) {
+      // The last run opens on its own page, as a card's Open task does.
+      const last = node('a', 'sched-last', lastLine(chore));
+      last.href = `#/tasks/${encodeURIComponent(chore.last.task_id)}`;
+      const ending = readEnding(chore.last.ending);
+      if (ending) last.dataset.ending = ending.state;
+      item.append(last);
+    }
     const keeps = Array.isArray(chore.keeps) ? chore.keeps : [];
     if (keeps.length) {
       const list = node('ul', 'sched-keeps');
@@ -231,6 +252,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, 
   async function unkeep(chore, keep) {
     const mine = scope;
     const done = await call(`/chores/${encodeURIComponent(chore.id)}/keeps?site=${encodeURIComponent(keep.site)}`, {method: 'DELETE'}, t('sched.keep.removeFailed'));
+    if (done) keepRemoved();
     if (mine !== scope) return;
     if (done) replace(done.chore);
     draw();

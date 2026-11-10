@@ -2,7 +2,7 @@ import {taskLive} from './task-live.mjs';
 import {maker} from './dom.mjs';
 import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
-import {allowState, blockCard, blockFacts, pageText} from './blocked.mjs';
+import {answerLine, blockCard, pageText, taskBlock} from './blocked.mjs';
 import {canFinish, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
 import {shortTime} from './main-chat.mjs';
 import {withoutFrame} from './turns.mjs';
@@ -140,7 +140,7 @@ export function projectLine(doc, task) {
 }
 
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null,
-  home = () => '#/new', back = null, titleTag = 'h1'}) {
+  home = () => '#/new', back = null, titleTag = 'h1', onTask = null}) {
   const doc = root.ownerDocument;
   const sectionTag = titleTag === 'h1' ? 'h2' : 'h3';
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
@@ -149,6 +149,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   let active = false;
   let stopPolling = null;
   let titleNode = null;
+  let told = null; // the task body `onTask` was last given
   const liveBox = doc.createElement('section');
   liveBox.className = 'task-live';
   const answerBox = doc.createElement('section');
@@ -171,9 +172,16 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const pendingOf = (task) => (Array.isArray(task.pending_approvals) ? task.pending_approvals : []);
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
-  const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
+  const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !(block.allowed_until > Date.now() / 1000));
   // A finished task's ending colours its state: Ready, Done, not finished, Needs you…
   const endingOf = (task) => (isStopped(task) ? null : readEnding(task.ending));
+  // The blocked step a Needs you stands on: the only one shown of the run that ended so (as its chat's card has it).
+  const endedOn = (task) => {
+    const ending = endingOf(task);
+    if (ending?.state !== 'blocked') return null;
+    const mine = blockedOf(task).filter((block) => block.turn === ending.turn && taskBlock(task, block.request_id, 0));
+    return mine.length === 1 ? mine[0] : null;
+  };
   // Its stage as the gateway's stage table decided it (#605), in words: whose
   // answer it waits for names the chat. A developer also sees the stored state.
   const stateText = (task) => {
@@ -227,7 +235,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const facts = full ? null : node('p', 'task-facts');
     const stateCell = full ? row(t('tasks.row.state'), stateText(task)) : node('span', '', stateText(task));
     const ending = readEnding(task.ending);
-    if (endingOf(task)) stateCell.dataset.ending = ending.state;
+    // Its work goes on in a newer task: its state says so, and nothing here still asks.
+    const wentOn = task.stage?.key === 'went_on';
+    if (endingOf(task) && !wentOn) stateCell.dataset.ending = ending.state;
     else if (task.stage?.awaited === 'person') stateCell.dataset.awaited = 'person';
     if (facts) {
       const time = node('time', '', t('tasks.updated', {when: when(task.updated_at)}));
@@ -235,8 +245,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const folder = task.workspace_label ? [node('span', '', t('tasks.in', {name: task.workspace_label}))] : [];
       facts.append(...[stateCell, time, ...folder].flatMap((part, index) => (index ? [node('span', 'task-facts-gap', ' · '), part] : [part])));
     }
-    // Why it is not ready, and the tests its run ran (from its own calls, never from its report).
-    if (ending && endingWhy(ending)) row(t('ending.row'), endingWhy(ending));
+    // Why it is not ready, and the tests its run ran (from its own calls, never from its report). A Needs you that
+    // stands on a blocked step leaves its generic words to that step's box; the model's own question always shows.
+    const why = ending ? endingWhy(ending, {asks: !endedOn(task)}) : '';
+    if (why) row(t('ending.row'), why);
     if (ending?.tests.length) {
       const tests = node('ul', 'ending-tests');
       for (const test of ending.tests) {
@@ -292,8 +304,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       actions.append(button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), {disabled: Boolean(state.busy)}));
     }
     if (task.successor?.task_id) {
-      // Its work went on in a newer task (#571): nothing here would start another.
-      nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
+      // Its work went on in a newer task (#571): nothing here would start another. The state says so already.
+      if (!wentOn) nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
     } else if (isStopped(task)) {
       actions.append(button('', t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), {disabled: Boolean(state.busy)}));
     } else if (canFinish(ending)) {
@@ -379,6 +391,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   function render() {
     if (!active) return;
+    // Each body read from the server goes to the page once, so a chat's card of the same task reads what this page does.
+    if (state.mode === 'card' && state.task && state.task !== told) {
+      told = state.task;
+      onTask?.(state.task);
+    }
     const link = node('a', 'task-back', t('tasks.back'));
     link.href = home();
     // A plain press leaves through the page (which keeps the browser's own Back from reopening the task).
@@ -623,25 +640,29 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     render();
   }
 
-  // What auto mode blocked: each opens the chat's card, with Allow once; the task went on without them.
+  // What auto mode blocked: each with Allow once, read as the chat's card reads it (`taskBlock`). The task went on
+  // without them, said while one of them is neither allowed nor ran, unless it ended on one (then its box is where that
+  // step's facts are, once).
   function blockedBox(task) {
     const box = node('section', 'task-blocked');
-    box.append(node(sectionTag, '', t('tasks.blocked.title')), node('p', 'muted', t('tasks.blocked.note')));
+    box.append(node(sectionTag, '', t('tasks.blocked.title')));
     const now = Date.now() / 1000;
+    const unanswered = blockedOf(task).some((block) => {
+      const read = taskBlock(task, block.request_id, now);
+      return read && !answerLine(read.facts, read.allowing);
+    });
+    if (!endedOn(task) && unanswered) box.append(node('p', 'muted', t('tasks.blocked.note')));
     for (const block of blockedOf(task)) {
-      const read = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
-        review: block.review, reason: block.reason, tool: block.question ?? undefined, arguments: block.arguments,
-        keep_site: block.keep_site ?? undefined, kept: block.kept === true}, name: block.name, preview: block.preview});
-      if (!read || !read.category) continue;
-      // A job that finished has no step left to allow: it is new work for the chat.
-      const facts = block.finished ? {...read, allow: false, finished: true} : read;
-      const allowing = allowState({until: task.allowances?.[block.step_key] ?? null, used: block.used_at, now});
+      const read = taskBlock(task, block.request_id, now);
+      if (!read) continue;
+      const {facts, allowing} = read;
       const fold = node('details', 'task-block');
       fold.open = state.openBlock === block.request_id;
       fold.addEventListener('toggle', () => { if (fold.open) state.openBlock = block.request_id; else if (state.openBlock === block.request_id) state.openBlock = ''; });
-      const action = facts.allow && allowing.state === 'open' ? t('auto.blocked.allow') : '';
+      const action = facts.allow && !answerLine(facts, allowing) ? t('auto.blocked.allow') : '';
       fold.append(node('summary', '', [facts.title, action].filter(Boolean).join(' · ')), blockCard(doc, facts, {
         allowing,
+        folded: true,
         busy: state.busy === `allow:${block.request_id}` ? 'allowing' : state.busy === `keep:${block.request_id}` ? 'keeping' : Boolean(state.busy),
         developer: developer(),
         error: state.blockError[block.request_id] || '',
@@ -661,9 +682,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (outcome.data) {
       delete state.blockError[requestId];
       const site = String(blockedOf(state.task).find((block) => block.request_id === requestId)?.keep_site ?? '').split('://')[1] ?? '';
-      state.task = outcome.data.task;
       state.notice = how !== 'keep' ? t('tasks.blocked.allowed')
         : t(outcome.data.message === 'kept' ? 'auto.blocked.keptLater' : 'auto.blocked.keptNow', {site});
+      // Its job went on in a fresh task (#571): this page stays on this one, read again with where its step stands.
+      if (outcome.data.message === 'successor') return refresh();
+      state.task = outcome.data.task;
       live?.sync(outcome.data.task);
     } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
@@ -778,5 +801,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     root.replaceChildren();
   }
 
-  return {show, leave, state, closeDialog, isActive: () => active, focus: () => titleNode?.focus()};
+  /** Read the task shown again when it is *id* (a step of it was answered elsewhere, such as on its chat's card). */
+  const reread = (id) => (active && state.mode === 'card' && state.task?.task_id === id && !state.busy ? refresh() : undefined);
+
+  return {show, leave, state, closeDialog, reread, isActive: () => active, focus: () => titleNode?.focus()};
 }

@@ -79,6 +79,8 @@ ROW_STATES: Final = {
     "slot": "held",
     "queued": "queued",
     "paused": "paused",
+    # Ended, its work going on in a newer task: a row of the past, as a done one is.
+    "went_on": "done",
 }
 # A task that failed because it could not use its folder (it never runs in
 # another one), as its row says it and, in English, its card.
@@ -449,11 +451,13 @@ async def _task_rows(
     for record in await console.workers.tasks.tasks_since(since):
         # A run that used all its steps is stopped, not failed, and can continue.
         stopped = is_out_of_steps(record.state, record.wait_reason)
+        went_on = await console.workers.went_on(record)
         stage = task_stage(
             {
                 "state": record.state,
                 "wait_reason": console.gate.held(record.task_id) or record.wait_reason,
                 "out_of_steps": stopped,
+                "successor": went_on,
             }
         )
         if stage.key == "finished":
@@ -490,6 +494,10 @@ async def _task_rows(
             row["ending"] = shown(record)
             if can_finish(row["ending"]):
                 row["can_continue"] = True
+            if went_on:
+                # Its work goes on in a newer task: that one's row says how it goes.
+                row.update(result=t(stage.label), ending=None)
+                row.pop("can_continue", None)
         rows.append(row)
     return rows
 

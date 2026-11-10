@@ -10,8 +10,8 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
-import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
-import {blockCard, blockFacts, pageText} from "./blocked.mjs";
+import {ENDING_MARKS, canFinish, endingLabel, endingWhy, finishLabel, readEnding} from "./endings.mjs";
+import {answerLine, blockCard, blockFacts, pageText, ranOut} from "./blocked.mjs";
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
@@ -81,14 +81,13 @@ export function readCard(row) {
     // An end that needs the person while exactly one step Auto blocked can still be allowed once: that step.
     // It holds what the step's own card shows, so the card says which step its button allows; a question its
     // tool asked itself (typing on a page, a form sent) also keeps its name and arguments: the card shows its text.
+    // Whether it may be allowed, kept, or was answered is its task's to say (`taskBlock`), never the card's copy.
     ...(state === "done" && data.block?.request_id ? {block: {
       requestId: String(data.block.request_id),
       stepKey: String(data.block.step_key ?? ""),
       name: String(data.block.name ?? ""),
       preview: String(data.block.preview ?? ""),
       review: data.block.review && typeof data.block.review === "object" ? data.block.review : {},
-      // A scheduled task's run (#619): the site its answer may be kept on for the next runs, and whether it is.
-      ...(typeof data.block.keep_site === "string" && data.block.keep_site ? {keepSite: data.block.keep_site, kept: data.block.kept === true} : {}),
       ...questionOf(data.block),
     }} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
@@ -97,11 +96,6 @@ export function readCard(row) {
       name: String(data.name ?? ""),
       preview: String(data.preview ?? ""),
       review: data.review && typeof data.review === "object" ? data.review : {},
-      canAllow: data.can_allow === true,
-      finished: data.finished === true,
-      // A scheduled task's run (#619): the site its answer may be kept on for the next runs, and whether it is.
-      keepSite: typeof data.keep_site === "string" ? data.keep_site : "",
-      kept: data.kept === true,
       ...questionOf(data),
     } : {}),
   };
@@ -114,21 +108,23 @@ function questionOf(data) {
     : {};
 }
 
-/** What a blocked card's block says (`blocked.mjs`), or null; Allow once only where the server offers it. */
-export function cardBlock(card) {
+/**
+ * What a blocked card's block says (`blocked.mjs`), or null: as its task's body reads it (*read*, from `taskBlock`),
+ * the one record of whether it was answered; until that is read, the step as the card stored it, with no choice.
+ */
+export function cardBlock(card, read = null) {
   if (card?.state !== "blocked") return null;
+  if (read) return read.facts;
   const facts = stepFacts(card);
-  if (!facts || !facts.category) return null;
-  return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
+  return facts?.category ? {...facts, allow: false} : null;
 }
 
 /**
  * What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review, and for a question
  * its tool asked itself its name and arguments; null if unusable.
  */
-const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args, keepSite, kept}) => blockFacts({
-  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args,
-    keep_site: keepSite || undefined, kept},
+const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args},
   name,
   preview,
 });
@@ -228,8 +224,12 @@ export function byDay(sessions, now) {
   return groups;
 }
 
-/** A card's words: its mark, its heading and its action. */
-export function cardWords(card) {
+/**
+ * A card's words: its mark, its heading and its action. *stage* is its task's stage once the step the card stands on
+ * was answered, or once its work went on in a newer task (`stepState`, `headStage`): the heading then says where the
+ * task is now, never the Needs you it was.
+ */
+export function cardWords(card, stage = null) {
   const open = t(card.sourceKind === "task" ? "mainChat.openTask" : "mainChat.openSideChat");
   const title = card.title;
   if (card.state === "waiting") return {mark: "!", heading: t("mainChat.card.waiting", {title}), action: t("common.review")};
@@ -242,13 +242,12 @@ export function cardWords(card) {
     return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
   if (card.reminder) return {mark: card.state === "failed" || card.state === "stopped" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
-  // A done task says how code found it ended: ready, done but not finished (Finish it), or needs you.
+  // A done task says how code found it ended, in the words of every screen: Ready, Done, not finished (Finish it),
+  // Needs you…
   const ending = card.state === "done" ? card.ending : null;
+  if (ending && stage) return {mark: "✓", heading: t("mainChat.card.ended", {state: t(stage.label, {chat: ""}), title}), action: open};
   if (ending) {
-    const name = endingName(ending);
-    // Its own keys: "blocked" cards are steps Auto blocked, a dropped task reads as stopped.
-    const key = {blocked: "needsYou", dropped: "stopped"}[name] ?? name;
-    const heading = t(`mainChat.card.${key}`, {title});
+    const heading = t("mainChat.card.ended", {state: endingLabel(ending), title});
     return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
   }
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
@@ -262,12 +261,13 @@ export function cardWords(card) {
  * `resume(card, button)` is the Continue of a stopped task's card. `approval` is a waiting task's
  * approval card, drawn inside it (its Open then only opens the task). `block` is what a blocked
  * card's Allow once needs (`blockCard`'s options: `allowing`, `busy`, `onAllow`, `error`,
- * `developer`). `step` is the Allow this step of a card that needs the person (`stepAllow`'s
- * `{state, error, onAllow}`). Its day is the divider above it.
+ * `developer`, and `facts`, as `cardBlock` reads them). `step` is the Allow this step of a card that needs the person
+ * (`stepState`'s, with `onAllow` and `onKeep`). Its day is the divider above it.
  */
 export function cardNode({doc, card, open, resume = null, approval = null, block = null, step = null}) {
   const {node: el} = maker(doc);
-  const words = cardWords(card);
+  const stage = headStage(step);
+  const words = cardWords(card, stage);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
   if (card.ending) node.dataset.ending = card.ending.state;
@@ -281,12 +281,12 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   // Cards written before a card said what it asks kept a line that repeats the heading (in English, when
   // they were stored before cards kept their words).
   const repeats = [t("turns.activity.approval"), "Waiting for your approval"].includes(card.line);
-  const facts = cardBlock(card);
+  const facts = block?.facts ?? cardBlock(card);
   // A blocked step says what and why in its block; its line is for the list and the terminal.
   const line = (card.state === "waiting" && repeats) || facts ? "" : card.line;
   if (line) text.append(el("p", "main-card-line", line));
-  // Why it is not ready: what code found missing, or its question.
-  const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending) : "";
+  // Why it is not ready: what code found missing, or its question (which the step it stands on, shown below, says).
+  const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending, {asks: !card.block}) : "";
   if (why) text.append(el("p", "main-card-why", why));
   if (card.continuedAt) text.append(el("p", "main-card-line", t("cards.continued", {when: clock(card.continuedAt)})));
   // Allow this step for a text typed or a form sent shows all of it first, as its blocked card does; the sentence that
@@ -298,6 +298,8 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
     text.append(shown);
   }
   if (facts) text.append(blockCard(doc, facts, block ?? {}));
+  // Its step was answered (as its task reads it, on any screen): it asks nothing more.
+  if (step?.state === "answered" || stage || (facts && answerLine(facts, block?.allowing ?? {state: "open"}))) node.dataset.answered = "true";
   const inline = card.state === "waiting" && approval;
   if (inline) text.append(approval);
   const action = el("button", card.state === "waiting" && !inline ? "outline-button" : "link-button", inline ? t("mainChat.openTask") : words.action);
@@ -306,7 +308,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   action.dataset.focusKey = `card:${card.id}`;
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
-  if (card.block && step) foot.append(...stepNodes(el, step, stepFacts(card.block)));
+  if (card.block && step) foot.append(...stepNodes(el, step, step.facts ?? stepFacts(card.block)));
   if (words.more && resume) {
     const more = el("button", "outline-button", words.more);
     more.type = "button";
@@ -320,29 +322,32 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 
 /**
  * The Allow this step of a card that needs the person: the step it allows in the words of its own card (*facts*),
- * then the button, what it did once clicked, or why it did not. A scheduled task's run (`facts.keepSite`) also offers
- * to keep the answer for its next runs on that site (`onKeep`), as the step's own card does.
+ * then the button, how it was answered (the quiet line its task's page shows), or why it did not take. A scheduled
+ * task's run (`facts.keepSite`) also offers to keep the answer for its next runs on that site (`onKeep`), as the step's
+ * own card does. Until its task's body is read (`reading`), and when nothing may allow it now (`closed`), no button.
  */
-function stepNodes(el, {state = "open", now = true, error = "", onAllow = null, onKeep = null}, facts = null) {
-  const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
+function stepNodes(el, {state = "open", line = "", expired = "", error = "", onAllow = null, onKeep = null}, facts = null) {
+  const what = [...(facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : []),
+    ...(expired ? [el("span", "main-card-note", expired)] : [])];
   const site = facts?.keepSite ? facts.keepSite.slice(facts.keepSite.indexOf("://") + 3) : "";
-  if (state === "allowed") {
-    // Kept: this run goes on with the step now, or (nothing was allowed now) only its later runs use it.
-    const words = facts?.kept ? (now ? "auto.blocked.keptNow" : "auto.blocked.keptLater") : "cards.allowedOnce";
-    return [...what, el("span", "main-card-note", t(words, {site}))];
+  if (state === "answered") return [...what, el("span", "main-card-note", line)];
+  if (state === "reading" || state === "closed") return what;
+  const buttons = [];
+  if (facts?.allow !== false) {
+    const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
+    allow.type = "button";
+    allow.disabled = state === "allowing";
+    if (onAllow) allow.addEventListener("click", onAllow);
+    buttons.push(allow);
   }
-  const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
-  allow.type = "button";
-  allow.disabled = state === "allowing";
-  if (onAllow) allow.addEventListener("click", onAllow);
   if (site && !facts.kept) {
     const keep = el("button", "outline-button block-keep", t("auto.blocked.keep", {site}));
     keep.type = "button";
     keep.disabled = state === "allowing";
     if (onKeep) keep.addEventListener("click", onKeep);
-    return [...what, allow, keep, ...(error ? [alertNote(el, error)] : [])];
+    buttons.push(keep);
   }
-  return [...what, allow, ...(error ? [alertNote(el, error)] : [])];
+  return [...what, ...buttons, ...(error ? [alertNote(el, error)] : [])];
 }
 
 /** Why a card's step was not allowed, read out as it appears. */
@@ -353,23 +358,27 @@ function alertNote(el, error) {
 }
 
 /**
- * Where a card's Allow this step stands: `allowed` once this page allowed the step (`given`, by request id) or the
- * chat allowed it from the person's typed yes (an echo `sent` with `how: "allowed"`), `allowing` while the request is
- * under way, else `open`; `error` is the last failure's text.
+ * Where a card's Allow this step stands, from its task's body as `taskBlock` reads it (*read*, the record every screen
+ * reads): `answered` with its `line` once the step was allowed or kept (here, on the task's page or by the person's typed
+ * yes), `closed` when nothing may allow it now, `reading` until the body is read, `allowing` while this page's request
+ * is under way, else `open`; `error` is the last failure's text, `facts` the step as read and `stage` its task's.
  */
-export function stepState(card, {given = {}, busy = {}, echoes = []} = {}) {
+/** The task's stage a card's heading says: once its step was answered, or whenever the task's work went on in a newer
+ * one (it cannot be allowed there, so its step reads `closed`). */
+const headStage = (step) => (step?.stage && (step.state === "answered" || step.stage.key === "went_on") ? step.stage : null);
+
+export function stepState(card, {read = null, busy = {}} = {}) {
   const id = card.block?.requestId;
   if (!id) return null;
-  const typed = echoes.some((echo) => echo.kind === "sent" && echo.how === "allowed" && String(echo.request_id) === id);
-  // `now`: the step goes ahead (allowed once here, by the typed yes, or a keep whose run or fresh task goes on); a keep
-  // that only later runs use says so.
-  if (typed || given[id]) {
-    const {until = null, used = null, now = null} = given[id] ?? {};
-    return {state: "allowed", now: typed || (now ?? (until != null || used != null))};
-  }
+  if (!read) return {state: "reading"};
+  const line = answerLine(read.facts, read.allowing);
+  if (line) return {state: "answered", line, facts: read.facts, stage: read.stage};
+  // An allowance that ran out unused is no answer: the step asks again, and says so.
+  const expired = ranOut(read.allowing);
+  if (!read.facts.allow && !read.facts.keepSite) return {state: "closed", facts: read.facts, expired, stage: read.stage};
   const now = busy[id];
   const going = now === "allowing" || now === "keeping";
-  return {state: going ? "allowing" : "open", error: now && !going ? now : ""};
+  return {state: going ? "allowing" : "open", error: now && !going ? now : "", facts: read.facts, expired, stage: read.stage};
 }
 
 // ── Echoes: what the main chat did with a task ──

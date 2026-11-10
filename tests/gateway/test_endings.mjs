@@ -14,7 +14,7 @@ const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'co
 test('an ending is kept only when its state is one code decides', () => {
   assert.equal(readEnding(null), null);
   assert.equal(readEnding({state: 'done'}), null, 'a scheduler state is not an ending');
-  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: [], missing: []});
+  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: [], missing: [], turn: null});
   const kept = readEnding({...DRAFT, tests: [...DRAFT.tests, {command: 'x', outcome: 'claimed'}, null]});
   assert.deepEqual(kept.tests, DRAFT.tests, 'a test without a known outcome is dropped');
 });
