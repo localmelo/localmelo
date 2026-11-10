@@ -20,7 +20,7 @@
  * the folder of the chat that is open, for a request and a view that name none. `later(fn, ms)` is
  * `setTimeout`, which the page (and its tests) may replace.
  */
-import { gistWords, reviewWords } from "./blocked.mjs";
+import { gistWords, pageText, reviewWords } from "./blocked.mjs";
 import { maker } from "./dom.mjs";
 import { t } from "./i18n.mjs";
 import { formatBytes } from "./turns.mjs";
@@ -205,17 +205,11 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
       content = "";
       noBox = true;
     }
-    if (sending) {
-      // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
+    if (sending || typing) {
+      // Where the form goes (or that the page decides) and what it holds, nothing secret in it; or the
+      // whole text typed, uncut: what goes into the page, as a blocked step's card shows it too.
       why = content;
-      const rows = Array.isArray(args.fields) ? args.fields.map(([name, value]) => `${name}: ${value}`) : [];
-      content = [args.to ? String(args.to) : t("approval.submitPage"), ...(rows.length ? ["", t("approval.submitFields"), ...rows] : [])].join("\n");
-      what = t("approval.submitAddress");
-    } else if (typing) {
-      // The whole text, uncut: it is what goes into the page.
-      why = content;
-      content = String(args.text ?? "");
-      what = t("approval.actTyped");
+      ({ what, text: content } = pageText(tool, args));
     }
   } else if (tool.startsWith("browser-attach:")) {
     // A file from this computer for a page's upload field: asked every time. The sentence names the file and its

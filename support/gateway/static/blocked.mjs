@@ -86,10 +86,33 @@ export function gistWords(gist) {
 }
 
 /**
+ * What a page question puts into the page, as its card shows it, or null for another question: typing
+ * (`browser-type:<site>`: the whole text) or a form sent (`browser-submit:<site>`: where it goes and what it
+ * holds). `title` asks it in words with its site, `what` names the text, `text` is all of it, uncut.
+ */
+export function pageText(tool, args = {}) {
+  const name = String(tool ?? '');
+  const a = isObject(args) ? args : {};
+  const site = String(a.site || name.slice(name.indexOf(':') + 1));
+  if (name.startsWith('browser-type:')) {
+    return {title: t('approval.typeSite', {site}), what: t('approval.actTyped'), text: String(a.text ?? '')};
+  }
+  if (!name.startsWith('browser-submit:')) return null;
+  const rows = (Array.isArray(a.fields) ? a.fields : []).filter(Array.isArray).map(([field, value]) => `${field}: ${value}`);
+  const to = a.to ? String(a.to) : t('approval.submitPage');
+  return {
+    title: t('approval.submitSite', {site}),
+    what: t('approval.submitAddress'),
+    text: [to, ...(rows.length ? ['', t('approval.submitFields'), ...rows] : [])].join('\n'),
+  };
+}
+
+/**
  * What a blocked call's card says, or null for a call auto mode did not block. `step` is the call's
- * code or command on one line; `gist` the sentence the card starts with, its warning and the model's note (or null);
- * `allow` whether Allow once may run it (never for `self`, never for a call a stopped turn left
- * unreviewed); `words` whether the person's words could allow it too.
+ * code or command on one line, or for a question its tool asked itself (the block's `tool`) all it puts
+ * into the page (`pageText`), under `stepLabel`; `gist` the sentence the card starts with, its warning and the
+ * model's note (or null); `allow` whether Allow once may run it (never for `self`, never for a call a
+ * stopped turn left unreviewed, never without its key); `words` whether the person's words could allow it too.
  */
 export function blockFacts({approval, name = '', arguments: args = {}, preview = '', requestId = ''} = {}) {
   if (!isBlock(approval)) return null;
@@ -98,15 +121,17 @@ export function blockFacts({approval, name = '', arguments: args = {}, preview =
   const review = isObject(approval.review) ? approval.review : {};
   const self = categories.includes('self');
   const doubts = Array.isArray(review.doubts) && review.doubts.length > 0;
+  const page = typeof approval.tool === 'string' ? pageText(approval.tool, approval.arguments) : null;
   return {
     requestId: String(approval.request_id ?? requestId ?? ''),
     stepKey: String(approval.step_key ?? ''),
     category: first,
     title: first ? t('auto.blocked.title', {title: t(`auto.title.${first}`)}) : t('auto.blocked.stopped'),
     reasons: reasonLines(review, categories),
-    gist: gistWords(review.gist),
+    gist: page ? {sentence: page.title, warning: '', note: ''} : gistWords(review.gist),
     name: String(name),
-    step: stepText(name, args, preview),
+    step: page ? page.text : stepText(name, args, preview),
+    stepLabel: page ? page.what : '',
     self,
     allow: Boolean(first) && !self && Boolean(approval.step_key),
     words: Boolean(first) && !doubts && categories.every((category) => WORDS_ALLOW.has(category)),
@@ -178,7 +203,7 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
     step.title = facts.step;
     const fold = node('details', 'block-code');
     fold.open = true;
-    fold.append(node('summary', '', t('gist.showCode')), step);
+    fold.append(node('summary', '', facts.stepLabel || t('gist.showCode')), step);
     card.append(fold);
   }
   if (!facts.allow) return card;

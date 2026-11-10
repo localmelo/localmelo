@@ -334,9 +334,9 @@ TOOLS: tuple[ToolDef, ...] = (
     _def(
         "browser_type",
         "Type into a text box from the last reading (its text is replaced). Never "
-        "a password, card or one-time-code field. The person is asked about every "
-        "text and sees all of it. With submit=true, press Enter afterwards, which "
-        "sends the form.",
+        "a password, card or one-time-code field. Every text is checked on its own "
+        "before it is typed, and when the person is asked they see all of it. With "
+        "submit=true, press Enter afterwards, which sends the form.",
         ("ref", "text"),
         acts=True,
         ref=_p("string", "A textbox ref such as e7 from the last reading."),

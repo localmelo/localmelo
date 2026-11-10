@@ -47,7 +47,9 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
     ReviewMode,
+    allowance_key,
     ask,
+    asks_in_auto,
     block_note,
     call_key,
     find_auto,
@@ -1088,36 +1090,55 @@ class _ToolAsk:
                         doubt += _NAMED_SITE
                     if kinds := _personal(reviewer, tool_name, arguments):
                         doubt += _PERSONAL.format(kinds=kinds)
-                    review = await reviewer.review(
-                        self._run.reviews,
-                        tool_name=tool_name,
-                        arguments=dict(request.arguments),
-                        preview=preview,
-                        review=ActionReview("undecided", (), (doubt,)),
-                        mode="auto",
-                        key=f"{key}|{self._call.id}" if sends or typing else key,
-                        workspace=self._workspace_root,
-                        # One routine verdict reads the site's plain pages.
-                        shared=(
-                            ""
-                            if sends or typing
-                            else plain_page_key(
-                                tool_name, request.arguments, self._workspace_root
-                            )
-                        ),
-                        refused_sites=_refused_sites(self._policy, self._run),
-                        # A click, a choice or a point carries no value: a click on
-                        # a sign-in button is no credential use (#465). A read's
-                        # address can hold a key, so its review stands.
-                        secret_free=access in _VALUE_FREE_ACCESS,
+                    undecided = ActionReview("undecided", (), (doubt,))
+                    held = find_auto(self._policy)
+                    # The person allowed this exact question once (the text, the
+                    # site, the box): no model reviews it again, as the gate does
+                    # for a call allowed once; the policy runs it on the allowance.
+                    review = (
+                        undecided
+                        if held is not None and held.allowed_once(key)
+                        else await reviewer.review(
+                            self._run.reviews,
+                            tool_name=tool_name,
+                            arguments=dict(request.arguments),
+                            preview=preview,
+                            review=undecided,
+                            mode="auto",
+                            key=f"{key}|{self._call.id}" if sends or typing else key,
+                            workspace=self._workspace_root,
+                            # One routine verdict reads the site's plain pages.
+                            shared=(
+                                ""
+                                if sends or typing
+                                else plain_page_key(
+                                    tool_name, request.arguments, self._workspace_root
+                                )
+                            ),
+                            refused_sites=_refused_sites(self._policy, self._run),
+                            # A click, a choice or a point carries no value: a click on
+                            # a sign-in button is no credential use (#465). A read's
+                            # address can hold a key, so its review stands.
+                            secret_free=access in _VALUE_FREE_ACCESS,
+                        )
                     )
                 request = dataclasses.replace(asked, review=review)
             return await self._policy.decide(request)
 
         decided = await self._ask(settle, request)
         site = question_site_key(tool_name)
+        if isinstance(decided, Allowance):
+            # The question ran on the person's Allow once: the record says so,
+            # and the step is shown as allowed and used.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": True, "origin": "user", "allowance": "once",
+                 "step_key": allowance_key(request)}
+            )  # fmt: skip
         if decided.allow and site is not None:
-            if decided.origin == "user":
+            if decided.origin == "user" and not isinstance(decided, Allowance):
+                # The person's own answer here; an Allow once given for one exact
+                # step lifts nothing else on the site.
                 self._run.reviews.allowed_sites.setdefault(site, []).append(
                     (tool_name, decided.remember)
                 )
@@ -1159,6 +1180,8 @@ class _ToolAsk:
                 words=decided.reason,
                 task=policy is not None and policy.task,
                 workspace=self._workspace_root,
+                changed=policy is not None
+                and policy.has_allowances(self._call.tool_name),
             )
             return dataclasses.replace(decided, reason=note)
         return decided
@@ -1225,10 +1248,15 @@ class _ToolAsk:
         keeps for it (#577). All of that stands before the take-back is
         written; the decision comes back with a notice if the file refused it.
         """
-        name, arguments = request.tool_name, request.arguments
-        categories = () if request.review is None else request.review.categories
+        name, arguments, review = request.tool_name, request.arguments, request.review
+        categories = () if review is None else review.categories
         site = site_key(arguments)
         reviews = self._run.reviews
+        # A site refused earlier in this task (before this refusal, which may
+        # refuse its own site) keeps its steps from an Allow once.
+        on_refused = (question_site_key(name) or "")[len(SITE_KEY) :] in (
+            _refused_sites(self._policy, self._run)
+        )
         if site is not None:
             if site[len(SITE_KEY) :] not in reviews.refused_sites:
                 reviews.refused_sites.append(site[len(SITE_KEY) :])
@@ -1241,6 +1269,15 @@ class _ToolAsk:
              "loose_keys": [*loose_keys(name, arguments, categories),
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
+        if decided.origin == "auto" and review is not None:
+            # Auto's block, kept as the gate keeps one: what the review found and
+            # the question whole, for the person to see. Only a step a chat's card
+            # would have asked about gets the key Allow once is kept under.
+            self.refused[-1].update(
+                mode="auto", review=review.to_json(), arguments=copy.deepcopy(arguments)
+            )
+            if asks_in_auto(review) and not on_refused:
+                self.refused[-1]["step_key"] = allowance_key(request)
         # An automatic block leaves the person's word: it can come from nobody
         # being there to ask.
         if site is None or decided.origin != "user":

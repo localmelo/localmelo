@@ -1,9 +1,11 @@
 """The steps auto mode blocked in a chat or a task, and their Allow once (#339).
 
-A block is the ``tool.finished`` record of a call auto mode did not run:
-its ``approval`` has origin ``auto``, ``allowed`` false, the call's
-``review`` and its ``step_key``. Allow once finds the block by the
-approval's ``request_id`` in that session's records (a client never sends a
+A block is kept in the ``tool.finished`` record of a call auto mode did not
+run: its ``approval``, or one of its ``tool_asks`` (a question the call's tool
+asked itself, such as typing on a page, ``tool`` naming the question), with
+origin ``auto``, ``allowed`` false, the ``review`` and, when Allow once may run
+it, its ``step_key``. :func:`blocks_in` reads both alike. Allow once finds the
+block by its ``request_id`` in that session's records (a client never sends a
 key), allows that key once in the session's :class:`AutoPolicy`, and sends
 the person's message that asks melo to go ahead. A block whose step ran on
 an allowance, or has one waiting, is not allowed again.
@@ -47,6 +49,26 @@ def _approval(event: dict[str, Any]) -> dict[str, Any]:
     return approval if isinstance(approval, dict) else {}
 
 
+def blocks_in(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """Auto's blocks and the allowances used in the ``tool.finished`` *event*, in order.
+
+    The call's own ``approval`` first, then its ``tool_asks``: each one whose
+    origin is ``auto`` and that is not allowed, or that ran on an Allow once
+    (``allowance`` ``once``). Anything else in the record is none.
+    """
+    data = event.get("data")
+    asks = data.get("tool_asks") if isinstance(data, dict) else None
+    return [
+        one
+        for one in [_approval(event), *(asks if isinstance(asks, list) else [])]
+        if isinstance(one, dict)
+        and (
+            (one.get("origin") == "auto" and one.get("allowed") is False)
+            or one.get("allowance") == "once"
+        )
+    ]
+
+
 def _categories(approval: dict[str, Any]) -> list[str]:
     review = approval.get("review")
     found = review.get("categories") if isinstance(review, dict) else None
@@ -88,16 +110,19 @@ async def block_to_allow(
     """
     found = None
     for stored in reversed(await store.auto_records(session_id, limit=200)):
-        approval = _approval(stored.event)
-        if (
-            approval.get("request_id") == request_id
-            and approval.get("allowed") is False
-        ):
-            found = stored
+        found = next(
+            (
+                (stored, one)
+                for one in blocks_in(stored.event)
+                if one.get("request_id") == request_id and one.get("allowed") is False
+            ),
+            None,
+        )
+        if found is not None:
             break
     if found is None:
         raise BlockError("not_found")
-    approval = _approval(found.event)
+    stored, approval = found
     allowed = allowable(approval)
     if allowed is None:
         raise BlockError("not_allowable")
@@ -112,7 +137,7 @@ async def block_to_allow(
     )
     if live(key) or (block is not None and block["used_at"] is not None):
         raise BlockError("already_allowed")
-    raw = found.event.get("data")
+    raw = stored.event.get("data")
     tool = str(raw.get("name") or "") if isinstance(raw, dict) else ""
     return key, categories, tool
 
@@ -132,39 +157,45 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
     """The steps blocked in *session_id*, newest last, each with its record.
 
     ``used_at`` is when the allowed step ran (a later call of the same key
-    allowed once), else ``None``.
+    allowed once), else ``None``. A question the call's tool asked itself
+    has its name in ``question`` and its arguments (the whole text typed,
+    what a form sends) in ``arguments``; a call's own block has ``None`` in both.
     """
     records = await store.auto_records(session_id, limit=200)
     out: list[dict[str, Any]] = []
     for stored in records:
-        event, approval = stored.event, _approval(stored.event)
+        event = stored.event
         raw = event.get("data")
         data: dict[str, Any] = raw if isinstance(raw, dict) else {}
-        if approval.get("allowance") == "once":
-            for block in out:
-                if block["step_key"] == approval.get("step_key") and not block.get(
-                    "used_at"
-                ):
-                    block["used_at"] = event.get("ts")
-            continue
-        if approval.get("allowed") is not False:
-            continue
-        review = approval.get("review")
-        out.append(
-            {
-                "request_id": approval.get("request_id"),
-                "call_id": data.get("call_id"),
-                "name": data.get("name"),
-                "step_key": approval.get("step_key"),
-                "reason": approval.get("reason", ""),
-                "review": review if isinstance(review, dict) else None,
-                "ts": event.get("ts"),
-                "turn": stored.turn,
-                "can_allow": allowable(approval) is not None,
-                "used_at": None,
-                "preview": "",
-            }
-        )
+        own = _approval(event)
+        for approval in blocks_in(event):
+            if approval.get("allowance") == "once":
+                for block in out:
+                    if block["step_key"] == approval.get("step_key") and not block.get(
+                        "used_at"
+                    ):
+                        block["used_at"] = event.get("ts")
+                continue
+            review = approval.get("review")
+            question = approval is not own
+            asked = approval.get("arguments") if question else None
+            out.append(
+                {
+                    "request_id": approval.get("request_id"),
+                    "call_id": data.get("call_id"),
+                    "name": data.get("name"),
+                    "step_key": approval.get("step_key"),
+                    "reason": approval.get("reason", ""),
+                    "review": review if isinstance(review, dict) else None,
+                    "ts": event.get("ts"),
+                    "turn": stored.turn,
+                    "can_allow": allowable(approval) is not None,
+                    "used_at": None,
+                    "preview": str(approval.get("preview") or "") if question else "",
+                    "question": str(approval.get("tool") or "") if question else None,
+                    "arguments": asked if isinstance(asked, dict) else None,
+                }
+            )
     # The step as the chat shows it: its tool.started preview.
     for turn in sorted({b["turn"] for b in out if b["turn"] is not None}):
         events = await store.list_events(session_id, turns=(turn, turn))
@@ -175,7 +206,7 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
             and isinstance(e.event.get("data"), dict)
         }
         for block in out:
-            if block["turn"] == turn:
+            if block["turn"] == turn and not block["preview"]:
                 block["preview"] = previews.get(block["call_id"], "")
     return out
 

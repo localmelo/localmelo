@@ -795,6 +795,15 @@ def _not_a_database(exc: BaseException) -> bool:
 _TURN_STOPPED: Final = "the turn stopped"
 
 
+def _auto(column: str, path: str) -> str:
+    """SQL: the approval at *path* in *column* is auto mode's block or an allowance used (``auto_records``)."""
+    field = f"json_extract({column}, '{path}.{{}}')".format
+    return (
+        f"(({field('origin')} = 'auto' AND {field('allowed')} = 0) "
+        f"OR {field('allowance')} = 'once')"
+    )
+
+
 def _block(column: str, path: str) -> str:
     """SQL: the approval at *path* in *column* is a block (``denied_records``).
 
@@ -1871,8 +1880,9 @@ class SessionStore:
     ) -> list[StoredEvent]:
         """The ``tool.finished`` events of auto mode's blocks and allowances (#339).
 
-        A block has ``approval.origin`` ``auto`` and is not allowed; an
-        allowance used has ``approval.allowance`` ``once``. The newest
+        A block has ``origin`` ``auto`` and is not allowed; an allowance used
+        has ``allowance`` ``once``: in the call's ``approval``, or in one of
+        its ``tool_asks`` (a question its tool asked itself). The newest
         *limit* (1..1000), in id order.
         """
         if (
@@ -1886,11 +1896,9 @@ class SessionStore:
             rows = await _rows(
                 conn,
                 "SELECT id, turn, event FROM events WHERE session_id = ? "
-                "AND type = 'tool.finished' AND ("
-                "(json_extract(event, '$.data.approval.origin') = 'auto' AND "
-                "json_extract(event, '$.data.approval.allowed') = 0) OR "
-                "json_extract(event, '$.data.approval.allowance') = 'once') "
-                "ORDER BY id DESC LIMIT ?",
+                f"AND type = 'tool.finished' AND ({_auto('event', '$.data.approval')} "
+                "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
+                f"WHERE {_auto('value', '$')})) ORDER BY id DESC LIMIT ?",
                 (session_id, limit),
             )
         return [

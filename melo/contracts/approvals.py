@@ -790,6 +790,22 @@ ALLOW_ONCE_S: Final = 30 * 60
 ALLOWED_ONCE: Final = "allowed once"
 
 
+def allowance_key(request: ApprovalRequest) -> str:
+    """The key an Allow once of *request* is kept under, and looked up by (:class:`AutoPolicy`).
+
+    The exact step: its tool, or the name of the question its tool asked
+    (``browser-type:<origin>``), every argument (for a question, the whole
+    text and where it goes), the folder and the files its review read.
+    """
+    review = request.review
+    return step_key(
+        request.tool_name,
+        request.arguments,
+        request.workspace_root,
+        review.inputs if review is not None else (),
+    )
+
+
 class Allowance(ApprovalDecision):
     """The decision that runs one step on the person's Allow once of it in auto mode.
 
@@ -973,12 +989,7 @@ class AutoPolicy:
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         review = request.review
-        key = step_key(
-            request.tool_name,
-            request.arguments,
-            request.workspace_root,
-            review.inputs if review is not None else (),
-        )
+        key = allowance_key(request)
         if (
             review is not None
             and self.allowed_once(key)
@@ -1360,7 +1371,9 @@ TASK_ASKS_NOBODY: Final = (
 ALLOW_IN_TASK: Final = (
     "that the task goes on without it, and that once it has finished this step is "
     "new work they ask the chat for. A task that cannot finish without the step "
-    "ends with Ending: blocked instead, and then they can allow it once."
+    "ends with Ending: blocked instead, and then they can allow it once. Until "
+    "they do, trying it again here is blocked again: their go-ahead comes to you "
+    "as a message, and then you run exactly that step again."
 )
 ALLOW_NEVER: Final = (
     "that this step cannot be allowed: melo never changes its own runtime, "
