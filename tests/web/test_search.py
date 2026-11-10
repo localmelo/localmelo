@@ -310,7 +310,7 @@ async def test_the_browser_way_reads_the_window_and_closes_its_tab() -> None:
     driver, browser = _window(_results())
     fetcher = FakeFetcher(**{"bing.com": _response("", 202)})
     answer = await _searcher(fetcher, browser=browser).search(QUERY)
-    assert (answer.way, answer.engine) == ("browser", "DuckDuckGo in Safari")
+    assert (answer.way, answer.engine) == ("browser", searching.BROWSER_ENGINE)
     assert answer.skipped == [("Bing", "asked for a check (HTTP 202)")]
     assert [hit.url for hit in answer.hits] == [
         "https://www.example.com/garden/tomato-blight",
@@ -339,7 +339,7 @@ async def test_a_challenge_page_in_the_window_is_blocked_and_the_tab_still_close
         "番茄 晚疫病 怎么防治"
     )
     assert answer.way == "baidu"
-    assert ("DuckDuckGo in Safari", searching.BLOCKED) in answer.skipped
+    assert (searching.BROWSER_ENGINE, searching.BLOCKED) in answer.skipped
     assert driver.tabs_ == {}
 
 
@@ -359,7 +359,7 @@ async def test_a_window_that_fails_or_hangs_falls_back(
         "番茄 晚疫病 怎么防治"
     )
     assert answer.way == "baidu"
-    assert ("DuckDuckGo in Safari", "could not be reached") in answer.skipped
+    assert (searching.BROWSER_ENGINE, "could not be reached") in answer.skipped
 
 
 # The browser tools' own checks: the engine's page is read as any page is.
@@ -389,7 +389,7 @@ async def test_a_page_that_leaves_the_engine_is_blocked_unread_and_nobody_is_ask
     finally:
         TOOL_ASK.reset(token)
     assert answer.way == "baidu", what
-    assert ("DuckDuckGo in Safari", searching.PAGE_REFUSED) in answer.skipped
+    assert (searching.BROWSER_ENGINE, searching.PAGE_REFUSED) in answer.skipped
     assert all(SECRET not in hit.snippet for hit in answer.hits)
     assert (
         asks.asked == []
@@ -406,7 +406,7 @@ async def test_a_page_with_a_frame_on_this_computer_is_blocked() -> None:
         "番茄 晚疫病 怎么防治"
     )
     assert answer.way == "baidu"
-    assert ("DuckDuckGo in Safari", searching.PAGE_REFUSED) in answer.skipped
+    assert (searching.BROWSER_ENGINE, searching.PAGE_REFUSED) in answer.skipped
     assert ("blank", "t1") in driver.calls and driver.tabs_ == {}
 
 

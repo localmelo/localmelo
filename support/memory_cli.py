@@ -198,7 +198,7 @@ async def _sleep(variant: str | None) -> int:
         found = len(report.changes)
         print(
             f"Sleep {report.variant}: {found} change{'s' if found != 1 else ''}, "
-            f"{report.model_calls} model calls, run {report.run_id}"
+            f"run {report.run_id}"
             + (f" ({report.aborted})" if report.aborted else "")
             + (" (more are left for the next run)" if report.capped else "")
         )

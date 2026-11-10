@@ -36,7 +36,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import config
@@ -66,7 +66,6 @@ class SleepBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variant: StrictStr | None = None
-    budget: StrictInt | None = Field(default=None, ge=1, le=100)
 
 
 class ImportBody(BaseModel):
@@ -395,13 +394,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         chats = console.store if console.store_state() == "ok" else None
         pinned = await console.memory.pinned_quotes()
         try:
-            report = await console.memory.sleep(
-                variant,
-                chats=chats,
-                budget=(
-                    body.budget if body and console.cfg.ui.mode == "developer" else None
-                ),
-            )
+            report = await console.memory.sleep(variant, chats=chats)
         except NotImplementedError as exc:
             raise ApiError(501, "not_built", str(exc)) from exc
         await identity_changed(console, pinned)

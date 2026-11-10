@@ -1,7 +1,7 @@
 import AppKit
 
-/// The menu-bar item. The localmelo logo is shown in colour, the count of what runs sits beside it, and
-/// a red dot appears beside the logo while something waits for the person. The menu starts with what
+/// The menu-bar item. Melo's head is drawn as lines in the bar's colours (MenuBarMark.swift), the count of what runs
+/// sits beside it, and a red dot appears beside the head while something waits for the person. The menu starts with what
 /// runs and with the way to what waits, so the chat that needs an answer is one click away.
 final class MenuBar {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,8 +20,8 @@ final class MenuBar {
     private let choose: Selector
     private let cancel: Selector
     private let divider = NSMenuItem.separator()
-    private let plain: NSImage?
-    private let badged: NSImage?
+    private let mark = MenuBarMark(folder: Bundle.main.resourceURL)
+    private var appearanceWatch: NSKeyValueObservation?
     private var wasWaiting = false
     private var state = MenuBarState.unknown
 
@@ -30,7 +30,6 @@ final class MenuBar {
     /// opens, so the picks are read again before the submenu shows.
     init(menu: NSMenu, waiting: Selector, showPet: Selector, chooseModel: Selector, cancelSwitch: Selector,
          menuOpens: @escaping () -> Void) {
-        let logo = MenuBar.logo()
         waitingLine = NSMenuItem(title: "", action: waiting, keyEquivalent: "").word(.waiting)
         showPetLine = NSMenuItem(title: "", action: showPet, keyEquivalent: "").word(.showPet)
         showPetLine.isHidden = true
@@ -46,11 +45,14 @@ final class MenuBar {
         let open = MenuWord.open.rawValue
         menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.identifier?.rawValue == open } ?? -1) + 1)
         menu.insertItem(modelItem, at: menu.index(of: showPetLine) + 1)
-        plain = MenuBar.image(logo, badge: false)
-        badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }
         statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeft
+        // The mark's colours are the bar's: a change of the bar's appearance (a light or a dark wallpaper behind
+        // it, or the system's setting) draws it again.
+        appearanceWatch = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.refresh() }
+        }
         models.autoenablesItems = false
         menuOpened.opened = menuOpens
         menu.delegate = menuOpened
@@ -110,11 +112,11 @@ final class MenuBar {
         if case .waiting = state { waiting = true }
         let count = menuTitle(state), label = menuBarLabel(state), line = menuStatusLine(state)
         if let button = statusItem.button {
-            if let image = waiting ? badged : plain {
-                button.image = image
+            if let mark = mark {
+                button.image = mark.image(for: button.effectiveAppearance, badge: waiting)
                 button.title = count
             } else {
-                // Without the logo the item must still be there: its name stands in for it.
+                // Without the mark the item must still be there: its name stands in for it.
                 button.image = nil
                 button.title = count.isEmpty ? "localmelo" : "localmelo · \(count)"
             }
@@ -135,39 +137,6 @@ final class MenuBar {
                                  userInfo: [.announcement: label, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
         wasWaiting = waiting
-    }
-
-    /// The logo, 18 points square: the two files the build copies, 18 and 36 px with their corners already
-    /// rounded, so the system never scales it. Nil when neither is in the bundle.
-    private static func logo() -> NSImage? {
-        let logo = NSImage(size: NSSize(width: 18, height: 18))
-        for name in ["MenuBarLogo", "MenuBarLogo@2x"] {
-            guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
-                  let data = try? Data(contentsOf: url), let rep = NSBitmapImageRep(data: data) else { continue }
-            rep.size = logo.size
-            logo.addRepresentation(rep)
-        }
-        return logo.representations.isEmpty ? nil : logo
-    }
-
-    /// The logo in colour. The badged image is wider and holds a red dot beside the logo's top-right corner,
-    /// so the logo itself is never covered. Neither image is a template, so the system leaves their colours
-    /// alone: the dot and its ring come in a light and a dark variant, drawn for the appearance of the bar
-    /// they are on.
-    private static func image(_ logo: NSImage?, badge: Bool) -> NSImage? {
-        guard let logo = logo else { return nil }
-        let image = NSImage(size: NSSize(width: badge ? 23 : 18, height: 18), flipped: false) { _ in
-            logo.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
-            if badge {
-                Palette.badgeRing.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 15, y: 10, width: 8, height: 8)).fill()
-                Palette.badge.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 16, y: 11, width: 6, height: 6)).fill()
-            }
-            return true
-        }
-        image.isTemplate = false
-        return image
     }
 }
 

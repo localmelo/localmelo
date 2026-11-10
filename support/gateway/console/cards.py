@@ -133,7 +133,7 @@ class MainChatCards:
     """Hears the store's events; turns those that come back into cards.
 
     The listener only notes an event; :meth:`flush` writes the cards, from a
-    route that reads the main chat or the list, the idle sweep, and the
+    route that reads the main chat or the list, the console's sweep timer, and the
     console's close. So no write runs behind a request's back, and a waiting
     card whose approval was answered meanwhile is never written. ``at`` in a
     card's data is when its source event happened.

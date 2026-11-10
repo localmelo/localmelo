@@ -117,7 +117,7 @@ test('errors expose retry and failed revokes preserve controls', async () => {
   assert.match(h.text(), /offline/);
   h.find('Retry').focus();
   await h.find('Retry').click();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   await h.find('Revoke').click();
   assert.match(h.text(), /denied/);
   assert.equal(h.find('Revoke').disabled, false);
@@ -212,9 +212,9 @@ test('focus stays in the drawer across removal, external focus, and close', asyn
   h.find('Revoke').focus();
   const refresh = h.find('Revoke').click();
   await Promise.resolve();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   h.trigger.focus();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   h.drawer.close();
   assert.equal(h.doc.handlers.focusin, undefined);
   const outside = h.doc.createElement('button');
@@ -229,7 +229,7 @@ test('rendering an appended page restores focus removed with the old content', a
   await h.drawer.open('runs');
   h.find('Earlier runs').focus();
   await h.find('Earlier runs').click();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
 });
 
 test('empty filtered page with earlier turns explains unavailable cursor', async () => {

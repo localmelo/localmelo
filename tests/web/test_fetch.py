@@ -142,7 +142,7 @@ async def test_a_page_built_by_scripts_says_so_and_points_to_the_browser(
         "little text without its scripts" in without and "browser_open" not in without
     )
     with_browser = _text(await _call(_provider(server, browser=True), f"{URL}/js"))
-    assert "browser_open can try it in Safari" in with_browser
+    assert "browser_open can try it in melo's browser" in with_browser
 
 
 # ── Limits ──
@@ -381,7 +381,7 @@ async def test_a_page_that_needs_a_login_or_blocks_readers_says_so(
     assert "browser_open" not in login
     blocked = _error(await _call(_provider(server, browser=True), f"{URL}/forbidden"))
     assert "refused the request (HTTP 403)" in blocked
-    assert "browser_open can try it in Safari" in blocked
+    assert "browser_open can try it in melo's browser" in blocked
     assert "answered HTTP 404." in _error(
         await _call(_provider(server), f"{URL}/missing")
     )

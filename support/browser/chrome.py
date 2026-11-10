@@ -2243,16 +2243,16 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._acting.add(session)
         try:
             spec = act_spec(act)
-            passed, failed = "", False
+            passed = ""
             result: ActResult | None = None
-            if act.point is not None or (act.native and act.kind != "select"):
+            if act.point is not None or act.kind != "select":
                 done = await self._native(session, spec, act)
                 if isinstance(done, ActResult):
                     result = done
                 else:
-                    passed, failed = done
+                    passed = done
             if result is None:
-                result = await self._scripted(spec, act, passed, failed)
+                result = await self._scripted(spec, act, passed)
         except BaseException:
             # The next act tells what was asked before this one.
             kept = browser.handoffs.setdefault(session, [])
@@ -2299,7 +2299,7 @@ class ChromeBackgroundDriver(PageScriptActs):
             await self._cmd(
                 "Page.setInterceptFileChooserDialog", {"enabled": True}, session
             )
-            result = await self.act(tab, dataclasses.replace(act, native=True))
+            result = await self.act(tab, act)
             opened = await self._chooser(browser, session)
             node = opened.get("backendNodeId") if opened else None
             if not isinstance(node, int):
@@ -2363,8 +2363,8 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     async def _native(
         self, session: str, spec: dict[str, Any], act: Act
-    ) -> ActResult | tuple[str, bool]:
-        """The act by Chrome's own input; else why not, and whether that holds for the site.
+    ) -> ActResult | str:
+        """The act by Chrome's own input; else why not.
 
         The element is scrolled to the middle of the view and a point of it
         that nothing covers is found (:meth:`_aim`). A real click that still
@@ -2375,7 +2375,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         for attempt in range(2):
             aimed = await self._aim(spec, act)
             if isinstance(aimed, str):
-                return aimed, False
+                return aimed
             x, y = aimed
             key = new_key()
             armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
@@ -2404,7 +2404,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 raise cover_stop(data.get("movedBy"), act.element.kind)
             break
         if not reached(act, data, frame=armed.get("frame") is True):
-            return PASSED_OVER["missed"], True
+            return PASSED_OVER["missed"]
         self._check_typed(act, data)
         return ActResult(
             stopped(blocked),

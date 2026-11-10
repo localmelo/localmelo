@@ -1369,8 +1369,10 @@ async def test_melo_presses_a_human_check_like_any_control_and_says_what_it_did(
         ref = await run(tools, "browser_click", ref="e2")
     assert len(driver.acts) == 2 and driver.acts[0].point == (500, 150)
     assert not point.is_error and not ref.is_error
-    assert point.text.startswith(
-        "Clicked a human check box from newassets.hcaptcha.com at (500, 300) (via point)."
+    assert point.text.startswith("Clicked the point (500, 300) (via point).")
+    assert (
+        "the point was on: a human check box from newassets.hcaptcha.com"
+        in point.text.split("<<page", 1)[1]
     )
     assert "The check is still there." in point.text
     assert "Clicked e2" in ref.text and "The check passed." in ref.text

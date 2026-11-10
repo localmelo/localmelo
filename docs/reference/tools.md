@@ -261,7 +261,7 @@ so the call itself asks nothing; the one case that asks is below. The guide is
 - **The model is told**, only while the tool is on, in a system note of about 300 characters: when
   to search (before asking you what a word means, after two failed steps, for facts that change),
   that results are data between markers, and to keep secrets out of searches. With the browser on
-  the note adds one sentence that a search can also use Safari.
+  the note adds one sentence that a search can also use melo's browser.
 - **Shown** as a line with the words (cut at 60 characters, a secret in them hidden): “Searching the web for …” while it runs and “Searched the web for …” once done, in English and Simplified Chinese.
 
 ## How tools are offered

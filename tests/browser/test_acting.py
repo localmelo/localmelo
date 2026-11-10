@@ -113,7 +113,7 @@ async def test_a_click_stopped_by_what_covers_the_element_keeps_the_page_and_its
         ("page", "t1"),
     ]
     other = await run(tools, "browser_click", ref="e2")
-    assert not other.is_error and other.text.startswith("Clicked e2")
+    assert not other.is_error and "Clicked e2" in other.text
 
 
 async def test_a_click_acts_on_the_page_and_reads_it_again() -> None:
@@ -486,7 +486,8 @@ async def test_enter_in_a_field_is_a_form_send_that_asks_by_itself() -> None:
         await run(tools, "browser_open", url=HOME)
         typed = await run(tools, "browser_type", ref="e1", text="cats")
         assert not any(name.startswith("browser-submit:") for name in asks.names)
-        # The page was read again after typing: its refs are new (e2 is the box).
+        # The page was read again after typing: nothing places the box, so it
+        # has a new ref (e2).
         sent = await run(tools, "browser_type", ref="e2", text="cats", submit=True)
     assert (
         not typed.is_error

@@ -71,6 +71,11 @@ STREAM_READ_S: Final = 45.0
 # and between two tries of a stream that was lost.
 POLL_S: Final = 5.0
 RETRY_S: Final = 2.0
+# A gateway that does not answer: after QUIET_S a line says so, after GONE_S
+# the turn that was running is given up. A turn kept until then continues from
+# the last event shown when the stream opens again.
+QUIET_S: Final = 5.0
+GONE_S: Final = 30.0
 # Finished turns the first look at a chat shows, and cards after them.
 RECAP_TURNS: Final = 3
 RECAP_CARDS: Final = 3
@@ -521,9 +526,16 @@ class GatewayClient:
         )
 
     async def events(
-        self, session_id: str, after: int
+        self,
+        session_id: str,
+        after: int,
+        *,
+        opened: Callable[[], None] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """The chat's events after *after*, as they come; ends when the stream does."""
+        """The chat's events after *after*, as they come; ends when the stream does.
+
+        *opened* is called once the gateway has answered, before the first event.
+        """
         timeout = httpx.Timeout(TIMEOUT_S, read=STREAM_READ_S)
         try:
             async with self._client().stream(
@@ -536,6 +548,8 @@ class GatewayClient:
                 if response.status_code != 200:
                     await response.aread()
                     raise _refusal(response)
+                if opened is not None:
+                    opened()
                 data: list[str] = []
                 async for line in response.aiter_lines():
                     if line.startswith("data:"):
@@ -1053,17 +1067,28 @@ class MainChat:
     # ── The stream ──
 
     async def _follow_chat(self, chat_id: str, after: int) -> None:
+        """Follow a chat's stream; when it breaks, open it again after the last event shown.
+
+        The gateway replays what came after that event, so a turn that was
+        running goes on where it was. The turn is given up only when the
+        gateway does not answer for :data:`GONE_S`.
+        """
+        gone_since: float | None = None
+
+        def opened() -> None:
+            nonlocal gone_since
+            gone_since = None
+            if self._lost:
+                self._lost = False
+                self._say("Connected to the gateway again.", "muted")
+
         while True:
             try:
-                async for event in self.client.events(chat_id, after):
-                    if self._lost:
-                        self._lost = False
-                        self._say("Connected to the gateway again.", "muted")
+                async for event in self.client.events(chat_id, after, opened=opened):
                     event_id = event.get("id")
                     if isinstance(event_id, int):
                         after = self._cursors[chat_id] = event_id
                     self._dispatch(chat_id, event)
-                problem = "its stream ended"
             except GatewayError as exc:
                 if exc.code == "not_found":
                     self._say(
@@ -1072,13 +1097,15 @@ class MainChat:
                     )
                     self._fail_turn("the chat was deleted")
                     return
-                problem = str(exc)
-            if not self._lost:
-                self._lost = True
-                self._say(
-                    f"The gateway is not answering ({problem}); trying again.", "warn"
-                )
-                self._fail_turn("the gateway stopped answering during this turn")
+                now = time.monotonic()
+                gone_since = now if gone_since is None else gone_since
+                if now - gone_since >= QUIET_S and not self._lost:
+                    self._lost = True
+                    self._say(
+                        f"The gateway is not answering ({exc}); trying again.", "warn"
+                    )
+                if now - gone_since >= GONE_S:
+                    self._fail_turn("the gateway stopped answering during this turn")
             await asyncio.sleep(RETRY_S)
 
     def _dispatch(self, chat_id: str, event: Mapping[str, Any]) -> None:

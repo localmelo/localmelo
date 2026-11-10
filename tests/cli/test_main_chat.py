@@ -1313,18 +1313,44 @@ async def test_chats_lists_the_main_chat_first_and_opens_the_one_picked(
     assert setup.session.status_bar().title == "Trip"
 
 
-async def test_a_lost_stream_ends_the_turn_with_a_line(
-    chat: tuple[Setup, FakeGateway],
+async def test_a_broken_stream_keeps_the_turn_and_shows_the_rest(
+    chat: tuple[Setup, FakeGateway], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup, gateway = chat
     session = setup.session
+    monkeypatch.setattr(main_chat, "RETRY_S", 0.05)
+    assert session.enter("long work") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and session.remote._turn.number is not None)  # fmt: skip
+    number = session.remote._turn.number  # type: ignore[union-attr]
+    assert number is not None
+    # The stream ends and the gateway does not answer for a moment.
+    gateway.lose_stream = True
+    await asyncio.sleep(0.3)
+    gateway.lose_stream = False
+    gateway.finish(MAIN, number, "completed", "The rest of the turn.")
+    await setup.idle()
+    text = " ".join(setup.out.text().split())
+    assert "The rest of the turn." in text
+    assert "not answering" not in text and "back in the input box" not in text
+    assert setup.app.buffer.text == ""
+
+
+async def test_a_gateway_that_stays_gone_ends_the_turn_with_a_line(
+    chat: tuple[Setup, FakeGateway], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    monkeypatch.setattr(main_chat, "RETRY_S", 0.05)
+    monkeypatch.setattr(main_chat, "QUIET_S", 0.1)
+    monkeypatch.setattr(main_chat, "GONE_S", 0.3)
     assert session.enter("long work") is None
     await _until(lambda: session.remote is not None and session.remote._turn is not None
                  and session.remote._turn.number is not None)  # fmt: skip
     gateway.lose_stream = True
     await setup.idle()
     text = " ".join(setup.out.text().split())
-    assert "The gateway is not answering" in text
+    assert text.count("The gateway is not answering") == 1
     assert "The gateway stopped answering during this turn" in text
     assert "back in the input box" in text
     assert setup.app.buffer.text == "long work"

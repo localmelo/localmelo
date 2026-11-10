@@ -765,7 +765,7 @@ async def test_a_buy_button_on_a_site_auto_used_does_nothing_in_ask_until_allowe
             _browse("browser_click", ref="e1"),
             _answer("done"),
             _browse("browser_open", url=home),
-            _browse("browser_click", ref="e6"),
+            _browse("browser_click", ref="e4"),  # Happy showed no change: no reading
             _answer("not bought"),
         ],
         [ON_GOAL],

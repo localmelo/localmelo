@@ -104,6 +104,27 @@ final class QuitBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// The console's top strip, where a title bar would be: a press there that is not on a control moves the window, and
+/// a second press does what a double click on a title bar does. Only the gateway's own page is heard; there is no answer.
+final class WindowBridge: NSObject, WKScriptMessageHandler {
+    static let name = "localmeloWindow"
+    private let gatewayPort: () -> Int
+    private let pressed: (WindowRequest) -> Void
+
+    init(gatewayPort: @escaping () -> Int, pressed: @escaping (WindowRequest) -> Void) {
+        self.gatewayPort = gatewayPort
+        self.pressed = pressed
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard acceptsBridgeMessage(scheme: origin.protocol, host: origin.host, port: origin.port,
+                                   isMainFrame: message.frameInfo.isMainFrame, gatewayPort: gatewayPort()),
+              let request = windowRequest(message.body) else { return }
+        pressed(request)
+    }
+}
+
 /// The console's Browser panel can ask to be shown alone in a window of its own, which can float beside other work.
 /// Only the gateway's own page is heard, and only for a source the console would open; there is no answer.
 final class BrowserBridge: NSObject, WKScriptMessageHandler {
