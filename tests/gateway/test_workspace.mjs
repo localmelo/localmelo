@@ -5997,6 +5997,14 @@ test('the page of a task that ended on its blocked step says the step once, and 
   // A developer reads the record as written.
   const developer = await openTask(routes, 't');
   assert.match(flatten(answerBox(developer)), /Ending: blocked: May I delete \.git\?/);
+  // A task whose blocked step ran on its Allow once and that then ended ready says the step ran, not that it went on
+  // without it.
+  const ran = taskRow('t', {state: 'done', card: '', title: 'Tidy the repo', allowances: {},
+    blocked: [{...R9, used_at: NOW - 10, finished: true, can_allow: false, allowed_until: null}],
+    ending: {state: 'ready', reasons: [], question: '', turn: 2}, stage: stageOf('finished', 'ending.state.ready', {ending: 'ready'})});
+  const ranText = flatten((await openTask({'GET /tasks/t': {task: ran}, [TURNS_T]: {turns: [], has_earlier: false}, 'GET /settings': {mode: 'default'}}, 't')).element('task-panel'));
+  assert.match(ranText, /Allowed once · ran at/);
+  assert.doesNotMatch(ranText, /went on without them|without this step/);
 });
 
 test('a Needs you beside its one blocked step leaves out only the generic words; two blocks keep them', async () => {
