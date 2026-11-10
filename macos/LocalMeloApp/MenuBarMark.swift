@@ -26,11 +26,14 @@ final class MenuBarMark {
         self.masks = masks
     }
 
+    /// Names the image of `image(for:badge:)`: the same key, the same image.
+    static func key(for appearance: NSAppearance, badge: Bool) -> String { "\(appearance.name.rawValue) \(badge)" }
+
     /// The item's image on a bar of `appearance`: 18 points square, or 23 wide with the red dot beside the head's top
     /// right, so the head is never covered. It is not a template: its colours are the bar's label colour, the fur pair
     /// and the dot's pair, as `appearance` resolves them.
     func image(for appearance: NSAppearance, badge: Bool) -> NSImage {
-        let key = "\(appearance.name.rawValue) \(badge)"
+        let key = Self.key(for: appearance, badge: badge)
         if let image = images[key] { return image }
         var line = NSColor.white, fur = NSColor.white, ring = NSColor.white, dot = NSColor.red
         appearance.performAsCurrentDrawingAppearance {

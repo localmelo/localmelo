@@ -254,6 +254,29 @@ precondition(waitingItems(health(none, waiting: odd)) == [WaitingItem(kind: "cha
     )
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_menu_bar_button_is_written_only_for_a_face_that_differs() -> None:
+    # Writing the button lays the item out, and a layout announces the button's appearance again. The observer of
+    # that announcement and the health poll both ask `show` for a face; one equal to the shown face writes nothing,
+    # or the item draws again without pause.
+    run_policy(
+        r"""
+let light = "NSAppearanceNameAqua false", dark = "NSAppearanceNameDarkAqua false"
+let shown = menuBarFace(.running(3), picture: light)
+precondition(menuBarFace(.running(3), picture: light) == shown)  // the observer, or a poll with nothing new
+precondition(menuBarFace(.running(3), picture: dark) != shown)  // the bar's appearance changed
+precondition(menuBarFace(.running(3), picture: "NSAppearanceNameAqua true") != shown)  // the dot came or went
+precondition(menuBarFace(.running(4), picture: light) != shown)  // the count
+precondition(menuBarFace(.idle, picture: light) != menuBarFace(.unknown, picture: light))  // the words alone
+// The title beside the mark is the count; without the mark the item's name stands in for it.
+precondition(shown.title == "3" && shown.label == menuBarLabel(.running(3)))
+precondition(menuBarFace(.idle, picture: nil).title == "localmelo")
+precondition(menuBarFace(.running(3), picture: nil).title == "localmelo \u{b7} 3")
+precondition(menuBarFace(.running(3), picture: nil) != shown)
+""",
+    )
+
+
 def contrast(one: str, other: str) -> float:
     """The WCAG contrast ratio of two #rrggbb colours, given without the #."""
 
