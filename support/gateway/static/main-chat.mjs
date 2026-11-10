@@ -226,7 +226,8 @@ export function byDay(sessions, now) {
 
 /**
  * A card's words: its mark, its heading and its action. *stage* is its task's stage once the step the card stands on
- * was answered (`stepState`): the heading then says where the task is now, never the Needs you it was.
+ * was answered, or once its work went on in a newer task (`stepState`, `headStage`): the heading then says where the
+ * task is now, never the Needs you it was.
  */
 export function cardWords(card, stage = null) {
   const open = t(card.sourceKind === "task" ? "mainChat.openTask" : "mainChat.openSideChat");
@@ -265,7 +266,8 @@ export function cardWords(card, stage = null) {
  */
 export function cardNode({doc, card, open, resume = null, approval = null, block = null, step = null}) {
   const {node: el} = maker(doc);
-  const words = cardWords(card, step?.state === "answered" ? step.stage ?? null : null);
+  const stage = headStage(step);
+  const words = cardWords(card, stage);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
   if (card.ending) node.dataset.ending = card.ending.state;
@@ -297,7 +299,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   }
   if (facts) text.append(blockCard(doc, facts, block ?? {}));
   // Its step was answered (as its task reads it, on any screen): it asks nothing more.
-  if (step?.state === "answered" || (facts && answerLine(facts, block?.allowing ?? {state: "open"}))) node.dataset.answered = "true";
+  if (step?.state === "answered" || stage || (facts && answerLine(facts, block?.allowing ?? {state: "open"}))) node.dataset.answered = "true";
   const inline = card.state === "waiting" && approval;
   if (inline) text.append(approval);
   const action = el("button", card.state === "waiting" && !inline ? "outline-button" : "link-button", inline ? t("mainChat.openTask") : words.action);
@@ -359,8 +361,12 @@ function alertNote(el, error) {
  * Where a card's Allow this step stands, from its task's body as `taskBlock` reads it (*read*, the record every screen
  * reads): `answered` with its `line` once the step was allowed or kept (here, on the task's page or by the person's typed
  * yes), `closed` when nothing may allow it now, `reading` until the body is read, `allowing` while this page's request
- * is under way, else `open`; `error` is the last failure's text and `facts` the step as read.
+ * is under way, else `open`; `error` is the last failure's text, `facts` the step as read and `stage` its task's.
  */
+/** The task's stage a card's heading says: once its step was answered, or whenever the task's work went on in a newer
+ * one (it cannot be allowed there, so its step reads `closed`). */
+const headStage = (step) => (step?.stage && (step.state === "answered" || step.stage.key === "went_on") ? step.stage : null);
+
 export function stepState(card, {read = null, busy = {}} = {}) {
   const id = card.block?.requestId;
   if (!id) return null;
@@ -369,10 +375,10 @@ export function stepState(card, {read = null, busy = {}} = {}) {
   if (line) return {state: "answered", line, facts: read.facts, stage: read.stage};
   // An allowance that ran out unused is no answer: the step asks again, and says so.
   const expired = ranOut(read.allowing);
-  if (!read.facts.allow && !read.facts.keepSite) return {state: "closed", facts: read.facts, expired};
+  if (!read.facts.allow && !read.facts.keepSite) return {state: "closed", facts: read.facts, expired, stage: read.stage};
   const now = busy[id];
   const going = now === "allowing" || now === "keeping";
-  return {state: going ? "allowing" : "open", error: now && !going ? now : "", facts: read.facts, expired};
+  return {state: going ? "allowing" : "open", error: now && !going ? now : "", facts: read.facts, expired, stage: read.stage};
 }
 
 // ── Echoes: what the main chat did with a task ──

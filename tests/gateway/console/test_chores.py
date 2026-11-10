@@ -391,6 +391,11 @@ async def test_a_chore_run_that_used_all_its_steps_says_so_in_the_readers_langua
             "/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"}
         )
         assert chinese.json()["chores"][0]["last"]["line"] == "步数用完了"
+        # Once its work went on in a newer task, the run says so and no ending (as its page's stage does).
+        record = await console.workers.tasks.get_task(task_id)
+        await console.workers.successor(record, "Go on with it.", by="person")
+        [chore] = (await client.get("/api/chores")).json()["chores"]
+        assert (chore["last"]["went_on"], chore["last"]["ending"]) == (True, None)
 
 
 async def test_a_run_waits_for_its_jitter_and_never_starts_early(

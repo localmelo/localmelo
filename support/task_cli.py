@@ -456,7 +456,10 @@ def execute(
             if approval:
                 print(f"  {_safe(approval)}", file=out)
             elif task.get("out_of_steps") is True:
-                print("  Ran out of steps: continue it from the console.", file=out)
+                # A task whose work went on in a newer one takes no Continue.
+                stage = task.get("stage")
+                if not (isinstance(stage, dict) and stage.get("key") == "went_on"):
+                    print("  Ran out of steps: continue it from the console.", file=out)
                 if task.get("left"):
                     print(f"  Left: {_safe(task['left'])}", file=out)
             elif wait:

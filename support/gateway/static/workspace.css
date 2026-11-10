@@ -366,6 +366,8 @@ button:hover:not(:disabled) {
 .main-card-why { margin: 4px 0 0; color: var(--warn); font-size: var(--text-small); font-weight: 500; overflow-wrap: anywhere; }
 /* A ready task's note (no tests apply) is a remark, not a warning. */
 .main-card[data-ending="ready"] .main-card-why { color: var(--ink-3); font-weight: 400; }
+/* A card that asks nothing more (its step answered, or its work went on in a newer task): its question is quiet. */
+.main-card[data-answered] .main-card-why { color: var(--ink-3); font-weight: 400; }
 /* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
 .main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
 .main-card .block-card { margin: var(--space-2) 0 0; padding: 0; background: none; border: 0; box-shadow: none; }

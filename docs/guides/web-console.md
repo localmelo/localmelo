@@ -1062,9 +1062,10 @@ commands and file changes.
   so once: its state reads **Needs you**, its report shows without the
   `Ending:` line (developer mode shows the report as written), and the
   step's box shows the step. Answered there or on the chat's card, both
-  say the same line and neither offers a button; a run whose work goes on
-  in a newer task reads **Goes on in a newer task** as its state, on its
-  page, in the card's heading, in the panel and in `melo task`. Once it finished, the step is new work you
+  say the same line and neither offers a button; a run whose work went on
+  in a newer task reads **Continued in a newer task** as its state, on its
+  page, in the card's heading, on the Scheduled tab, in the panel and in
+  `melo task`. Once it finished, the step is new work you
   ask the chat for. Typing on a page and sending a form are blocked steps
   like any other: the card says the site and the box and shows the whole
   text, or where the form goes and what it holds, and **Allow once** runs

@@ -1356,7 +1356,7 @@
   "panel.state.running": "工作中",
   "panel.state.stopped": "已停止",
   "panel.state.waiting": "在等你批准",
-  "panel.state.wentOn": "在新任务中继续",
+  "panel.state.wentOn": "已在新任务中继续",
   "panel.stepNow": "现在",
   "panel.tab.activity": "活动",
   "panel.tab.memory": "记忆",

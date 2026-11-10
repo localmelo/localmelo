@@ -9,9 +9,6 @@ export const CATEGORIES = new Set([
 // What the person's words can allow (their request names the step); the rest (`app_control`, `system`,
 // `money`, `account` and `open_app` among them) only an Allow once, and `self` never.
 const WORDS_ALLOW = new Set(['install', 'restore', 'env', 'download', 'outside_write', 'delete', 'send_out', 'service', 'beyond_request']);
-// How long an Allow once holds, as the server keeps it.
-export const ALLOW_ONCE_S = 30 * 60;
-
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Whether a call's approval is a block of auto mode: origin `auto`, not allowed. */

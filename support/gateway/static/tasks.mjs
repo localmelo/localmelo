@@ -641,12 +641,17 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   }
 
   // What auto mode blocked: each with Allow once, read as the chat's card reads it (`taskBlock`). The task went on
-  // without them, unless it ended on one (then its box is where that step's facts are, once) or every one of them ran.
+  // without them, said while one of them is neither allowed nor ran, unless it ended on one (then its box is where that
+  // step's facts are, once).
   function blockedBox(task) {
     const box = node('section', 'task-blocked');
     box.append(node(sectionTag, '', t('tasks.blocked.title')));
-    if (!endedOn(task) && blockedOf(task).some((block) => !block.used_at)) box.append(node('p', 'muted', t('tasks.blocked.note')));
     const now = Date.now() / 1000;
+    const unanswered = blockedOf(task).some((block) => {
+      const read = taskBlock(task, block.request_id, now);
+      return read && !answerLine(read.facts, read.allowing);
+    });
+    if (!endedOn(task) && unanswered) box.append(node('p', 'muted', t('tasks.blocked.note')));
     for (const block of blockedOf(task)) {
       const read = taskBlock(task, block.request_id, now);
       if (!read) continue;

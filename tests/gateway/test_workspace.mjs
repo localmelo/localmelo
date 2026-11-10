@@ -5945,14 +5945,26 @@ test('a step Auto blocked in a task shows in its chat; Allow once there uses the
   assert.match(flatten(cardOf(h, 6)), /A step was blocked: Tidy the repo.*Deletes \.git\..*shutil\.rmtree\('\.git'\).*Allow once.*Open task/);
   await openPanelTask(h);
   assert.ok(hasButton(h.element('task-panel'), 'block-allow'));
-  await findNode(cardOf(h, 6), (node) => node.classList?.contains('block-allow')).click();
+  const pressed = findNode(cardOf(h, 6), (node) => node.classList?.contains('block-allow'));
+  pressed.focus();
+  await pressed.click();
   await settle(); await settle();
   assert.equal(state.posts, 1);
+  // Its button left with the redraw: focus goes to the card's Open task, not to the top of the page.
+  assert.equal(h.context.document.activeElement?.dataset?.focusKey, 'card:6');
   // Both read the task again: the same quiet line, and no button on either.
   for (const screen of [cardOf(h, 6), h.element('task-panel')]) {
     assert.match(flatten(screen), /Allowed once · melo can run it until/);
     assert.equal(hasButton(screen, 'block-allow'), false);
   }
+  // Pressed and then typing in the message box: the box keeps the focus through the redraw.
+  const again = harness(blockedRoutes({allowed: false, posts: 0}, [blocked]));
+  await again.run('init()'); await settle();
+  const button = findNode(cardOf(again, 6), (node) => node.classList?.contains('block-allow'));
+  const clicked = button.click();
+  again.element('input').focus();
+  await clicked; await settle(); await settle();
+  assert.equal(again.context.document.activeElement, again.element('input'));
 });
 
 test('the chat\'s card of a step allowed on its task\'s page says so, while the page is open and after a reload', async () => {
@@ -6031,7 +6043,7 @@ test('Allow once whose job goes on in a fresh task keeps the page on its own tas
   await settle(); await settle();
   const text = flatten(h.element('task-panel'));
   assert.match(text, /Tidy the repo/);
-  assert.match(text, /Goes on in a newer task/);
+  assert.match(text, /Continued in a newer task/);
   assert.match(text, /Allowed once · melo can run it until/);
   assert.equal(h.net.callsTo('/tasks/t2').length, 0, 'the fresh task is not shown in its place');
 });
@@ -6051,6 +6063,27 @@ test('a new card re-reads the task of a step that can still be answered, not one
   h.stream().emit({id: 40, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'notice', line: 'x'}});
   await settle();
   assert.deepEqual([reads('t') - before[0], reads('u') - before[1]], [1, 0]);
+});
+
+test('a card whose first read of its task failed is read again on the next frame; a task gone is not', async () => {
+  const open = cardRow(6, {at: NOW - 30, state: 'blocked', source_id: 't', source_kind: 'task', title: 'Tidy the repo', line: 'Blocked',
+    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: '', review: R9.review});
+  const gone = cardRow(7, {at: NOW - 20, state: 'blocked', source_id: 'u', source_kind: 'task', title: 'Check the notes', line: 'Blocked',
+    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: '', review: R9.review});
+  let down = true;
+  const h = harness(mainRoutes({
+    'GET /tasks/t': () => (down ? {status: 500, body: {error: {code: 'store_unavailable', message: 'down'}}} : {task: blockedTask()}),
+    'GET /tasks/u': {status: 404, body: {error: {code: 'not_found', message: 'gone'}}},
+  }, {cards: [open, gone]}));
+  await h.run('init()'); await settle();
+  assert.equal(hasButton(cardOf(h, 6), 'block-allow'), false, 'unread: no button it could not stand behind');
+  const reads = (id) => h.net.callsTo(`/tasks/${id}`).length;
+  const before = [reads('t'), reads('u')];
+  down = false;
+  h.stream().emit({id: 40, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'notice', line: 'x'}});
+  await settle(); await settle();
+  assert.deepEqual([reads('t') - before[0], reads('u') - before[1]], [1, 0]);
+  assert.ok(hasButton(cardOf(h, 6), 'block-allow'));
 });
 
 // ── Slash commands in the composer ──

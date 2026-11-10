@@ -1511,7 +1511,7 @@ async function answerTaskApproval(request, state, choice) {
 // ── A task's blocked step on its chat's card: read from the task's own body, as its page reads it ──
 
 // The bodies of the tasks whose blocked steps cards show, by task id: `{task}` once read, with `reading` (the number of
-// the read under way) meanwhile. The body is the one record of whether a step was answered (`taskBlock`); a card keeps
+// the read under way) meanwhile, and `failed` when the read failed before any body was read (the next frame retries). The body is the one record of whether a step was answered (`taskBlock`); a card keeps
 // no copy of its own.
 const blockTasks = new Map();
 let blockReads = 0;
@@ -1534,7 +1534,8 @@ function blockCardTasks(view = S.view) {
 
 /**
  * Read a card's task body (again); the chat is drawn again when it changed. A task gone reads as none. A read that
- * failed keeps what was read before, as not reading; an answer older than the newest read of the task is dropped.
+ * failed keeps what was read before, as not reading (failed when nothing was); an answer older than the newest read of
+ * the task is dropped.
  */
 async function readBlockTask(id) {
   const mine = ++blockReads;
@@ -1545,7 +1546,7 @@ async function readBlockTask(id) {
     task = (await api(`/tasks/${encodeURIComponent(id)}`)).task ?? null;
   } catch (error) {
     if (error?.status !== 404) {
-      if (blockTasks.get(id)?.reading === mine) blockTasks.set(id, { task: known?.task ?? null });
+      if (blockTasks.get(id)?.reading === mine) blockTasks.set(id, known?.task ? { task: known.task } : { task: null, failed: true });
       return;
     }
   }
@@ -1571,12 +1572,17 @@ function rereadBlockTasks(view = S.view) {
 
 /**
  * On a new card or line: the open chat's steps that can still be answered and are not are read again (an answer may
- * have been given elsewhere). A finished job's step, one a newer task closed, and one answered already are not.
+ * have been given elsewhere), and a task whose first read failed is tried again. A finished job's step, one a newer task
+ * closed, one answered already and a task gone are not.
  */
 function rereadAsked() {
   const now = nowSeconds();
   for (const { id, requests } of blockCardTasks()) {
     const read = blockTasks.get(id);
+    if (read?.failed && !read.reading) {
+      readBlockTask(id);
+      continue;
+    }
     if (!read?.task || read.reading) continue;
     const asks = [...requests].some((request) => {
       const found = taskBlock(read.task, request, now);
@@ -1631,8 +1637,10 @@ async function allowCardBlock(card, facts, how = "allow") {
   }
   await readBlockTask(card.sourceId);
   renderMessages(false, true);
-  // The card was drawn again: focus stays in it, on its Open task, not at the top of the page.
-  if (!$("messages").contains(document.activeElement)) $("messages").querySelector(`[data-focus-key="card:${card.id}"]`)?.focus();
+  // The card was drawn again: focus lost with its button stays in it, on its Open task, not at the top of the page; focus
+  // the person moved elsewhere (the message box) is left there.
+  const lost = !document.activeElement || document.activeElement === document.body;
+  if (lost) $("messages").querySelector(`[data-focus-key="card:${card.id}"]`)?.focus();
 }
 
 /** A card's Open: the side chat, or the task. */

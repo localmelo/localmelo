@@ -8,12 +8,14 @@ melo follows up on it. Each test runs the console on scripted models (see
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from localmelo.melo.contracts.approvals import ALLOW_ONCE_S, AutoPolicy
 from localmelo.support.gateway.console import Console
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -237,6 +239,47 @@ async def test_a_plain_yes_allows_the_one_blocked_step_once(
             "check in on the site and write a note",
             "好",
         ]
+
+
+@pytest.mark.parametrize("given", ["ran_out", "before_the_block"])
+async def test_a_yes_allows_a_step_whose_allowance_is_not_its_own_now(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, given: str
+) -> None:
+    """An allowance that ran out unused, or one given before this block was made
+    (an earlier block's of the same step), leaves the block open: a yes allows it."""
+    workers: list[list[Reply]] = [
+        BLOCKED,
+        [
+            tool_call("python_exec", {"code": INSTALL}, "w-2"),
+            answer("Typed the note.\nEnding: ready"),
+        ],
+    ]
+    main = [*follows_up(), answer("The note is in."), answer("It is done already.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=workers, approvals="auto"
+    ) as (console, client, models, ran):
+        task_id = await needs_you(client, console)
+        [block] = await console.workers.open_blocks(task_id)
+        # Seeded, as the policy keeps an allowance given (it is no longer waiting).
+        policy = AutoPolicy(task=True)
+        policy.given[block["step_key"]] = (
+            time.time() - 1 if given == "ran_out" else block["ts"] - 60 + ALLOW_ONCE_S
+        )
+        console.workers._auto[task_id] = policy
+        [still] = await console.workers.open_blocks(task_id)
+        assert still["request_id"] == block["request_id"]
+        echo = (await typed(client, console, "允许"))["echo"]
+        assert (echo["echo"], echo["how"], echo["request_id"]) == (
+            "sent",
+            "allowed",
+            block["request_id"],
+        )
+        await until(lambda: len(models["workers"]) == 2)
+        head = await console.workers.newest(
+            await console.workers.tasks.get_task(task_id)
+        )
+        await until(lambda: _is(console, head.task_id, "done"))
+        await settled(console)
 
 
 async def nothing_allowed(console: Console, task_id: str, ran: Any) -> None:

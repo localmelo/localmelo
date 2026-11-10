@@ -561,8 +561,15 @@ test('a card that needs the person allows its one blocked step, then says how it
     // Its heading says where the task is now, as the task's stage words it, not the Needs you it was.
     const moved = fakeDoc();
     cardNode({doc: moved, card, open: () => {}, step: mainChat.stepState(card, {read: {...read, stage: {key: 'went_on', label: 'panel.state.wentOn'}}})});
-    assert.equal(moved.made.find((item) => item.className === 'main-card-title').textContent, 'Goes on in a newer task: Check-in');
+    assert.equal(moved.made.find((item) => item.className === 'main-card-title').textContent, 'Continued in a newer task: Check-in');
   }
+  // A step its task can no longer allow (its work went on in a newer task) says so too, answered or not, quietly.
+  const closed = fakeDoc();
+  const went = {...readOf({...stored, can_allow: false}), stage: {key: 'went_on', label: 'panel.state.wentOn'}};
+  assert.equal(mainChat.stepState(card, {read: went}).state, 'closed');
+  const wentNode = cardNode({doc: closed, card, open: () => {}, step: mainChat.stepState(card, {read: went})});
+  assert.equal(closed.made.find((item) => item.className === 'main-card-title').textContent, 'Continued in a newer task: Check-in');
+  assert.equal(wentNode.dataset.answered, 'true', 'it asks nothing: no amber box, a quiet question');
   // An allowance that ran out unused is no answer: Allow this step is back, beside the line that says so.
   const lapsed = fakeDoc();
   const node = cardNode({doc: lapsed, card, open: () => {}, step: mainChat.stepState(card, {read: readOf(stored, {k1: NOON - 1})})});

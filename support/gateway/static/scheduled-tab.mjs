@@ -65,7 +65,8 @@ export function lastLine(chore) {
   const last = chore.last;
   if (!last) return '';
   const ending = readEnding(last.ending);
-  const ran = ending ? endingLabel(ending) : RAN.has(last.state) ? t(`sched.ran.${last.state}`) : last.state;
+  // A run whose work went on in a newer task says so, in the words of its stage.
+  const ran = last.went_on ? t('panel.state.wentOn') : ending ? endingLabel(ending) : RAN.has(last.state) ? t(`sched.ran.${last.state}`) : last.state;
   return t('sched.last', {what: [ran, last.line].filter(Boolean).join(' · ')});
 }
 
