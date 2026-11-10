@@ -25,6 +25,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     grant_offered,
     kept_offered,
+    never_kept,
     review_mode,
     site_grant,
     wait_words,
@@ -597,6 +598,13 @@ def _site(
         # A folder outside the workspace by its own rule, and never a card-only kind.
         (
             dataclasses.replace(
+                _request(), outside=OutsideAccess("/x/a.txt", "/x", "read", True)
+            ),
+            False,
+            True,
+        ),
+        (
+            dataclasses.replace(
                 _request(review=ActionReview("routine", ("money",))),
                 outside=OutsideAccess("/x/a.txt", "/x", "read", True),
             ),
@@ -611,14 +619,23 @@ def test_what_a_chat_may_keep(
     assert site_grant(request_) is site
     assert kept_offered(request_) is offered
     assert grant_offered(request_) is (offered and request_.outside is None)
-    if not offered:  # the grants table refuses what the offer refuses (one list)
-        with pytest.raises(GrantRefusedError):
-            check_grant(
-                grant_kind(request_.tool_name) or "tool",
-                request_.tool_name,
-                "person",
-                request=request_,
-            )
+    # The grants table keeps what the offer offers and refuses the rest (one list).
+    outside = request_.outside
+    key = request_.tool_name if outside is None else outside.folder
+    kind = "folder" if outside is not None else grant_kind(key) or "tool"
+
+    def keep() -> None:
+        check_grant(kind, key, "person", request=request_)
+
+    if offered:
+        keep()
+    elif outside is None and grant_kind(key) is None:  # the name alone is refused
+        with pytest.raises(GrantRefusedError, match="never kept for a chat"):
+            keep()
+    else:  # past the name, a rule of the request refuses it
+        rule = "ask every time" if never_kept(request_) else "asks every time"
+        with pytest.raises(GrantRefusedError, match=rule):
+            keep()
 
 
 def _window(
