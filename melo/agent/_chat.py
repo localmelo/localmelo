@@ -55,6 +55,7 @@ from localmelo.melo.schema import (
     Message,
     ToolDef,
     answer_from_thinking,
+    broken_tool_call,
     is_no_answer_label,
     unfinished_thinking,
 )
@@ -593,6 +594,22 @@ def _quote_data_delimiter(text: str, delimiter: str) -> str:
         "> " + line if line.startswith(delimiter) else line
         for line in text.splitlines(keepends=True)
     )
+
+
+def _may_hide(text: str, reasoning: Sequence[str], tools: Sequence[ToolDef]) -> bool:
+    """Whether the streamed *text* so far may be text a check of the whole reply hides.
+
+    A tool call written as text (:func:`~localmelo.melo.schema.broken_tool_call`,
+    judged on the text so far, so markup on a line is caught before the line
+    shows), or content that so far repeats the *reasoning* word for word, as
+    unfinished thinking a server sends again as content does
+    (:func:`~localmelo.melo.schema.unfinished_thinking`).
+    """
+    if broken_tool_call(text, tools):
+        return True
+    words = text.split()
+    thought = "".join(reasoning).split()
+    return bool(thought) and words == thought[: len(words)]
 
 
 class Chat:
@@ -1181,6 +1198,12 @@ class Chat:
         the text and only the ``thinking`` indicator shows. A reply that the
         server sent whole (``StreamFragment.whole``) shows no deltas; a display
         that defines ``whole()`` is told so before it closes.
+
+        Text a check of the whole reply would hide is held, failing closed
+        (:func:`_may_hide`): a tool call written as text, and content that so
+        far repeats the reply's reasoning word for word (unfinished thinking
+        a server sends again as content). Held text shows when the text that
+        follows clears it, else at the end only if the reply is neither.
         """
         display.opened()
         hint = display.reasoning_tags
@@ -1189,6 +1212,9 @@ class Chat:
         reply: Message | None = None
         whole = False
         saw_text = False
+        offered = tools or ()
+        reasoning: list[str] = []
+        shown = kept = ""  # what the display has, and what a check holds back
         try:
             async with contextlib.aclosing(
                 self.llm.stream_chat(messages, tools=tools or None)
@@ -1207,14 +1233,17 @@ class Chat:
                             )
                         if separate:
                             filter.feed_reasoning(fragment.text)
+                            reasoning.append(fragment.text)
                         display.held()
                     elif fragment.kind == "content":
                         saw_text = True
                         if filter is None:
                             filter = StreamFilter(hint)
                         _, delta = filter.feed(fragment.text)
-                        if delta:
-                            display.content(delta)
+                        kept += delta
+                        if kept and not _may_hide(shown + kept, reasoning, offered):
+                            display.content(kept)
+                            shown, kept = shown + kept, ""
                         else:
                             display.held()
                     elif fragment.kind == "tool":
@@ -1223,9 +1252,18 @@ class Chat:
                 raise ProviderError("Streaming response ended without a reply")
             if filter is not None:
                 _, tail = filter.finish()
-                # Held text of a reply that is only unfinished thinking stays held.
-                if saw_text and tail and not self.unfinished(reply):
-                    display.content(tail)
+                rest = kept + tail
+                # Held text of a reply that is only unfinished thinking, or a
+                # tool call written as text, stays held.
+                if (
+                    saw_text
+                    and rest
+                    and not self.unfinished(reply)
+                    and (
+                        reply.tool_calls or not broken_tool_call(shown + rest, offered)
+                    )
+                ):
+                    display.content(rest)
             if whole:
                 tell = getattr(display, "whole", None)
                 if tell is not None:

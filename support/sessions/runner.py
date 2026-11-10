@@ -93,6 +93,8 @@ logger = logging.getLogger(__name__)
 
 # ChatMemory's tool that keeps a note of the person's words.
 _NOTE_TOOLS: Final = ("remember",)
+# The reasoning modes whose replies end with a note block the answer leaves out.
+_NOTE_MODES: Final = frozenset({"compress", "compress+replay"})
 # The sessions where only a person's turn acts: the main chat and the side chats.
 CHAT_KINDS: Final = frozenset({"front", "chat"})
 
@@ -935,8 +937,12 @@ class SessionRunner:
         return self._outcome(turn, task, run_exc, returned)
 
     async def _run(self, turn: _Turn, text: str, kwargs: dict[str, Any]) -> RunResult:
-        """The turn's run, with its live display when the runner has one."""
-        if self._live is None:
+        """The turn's run, with its live display when the runner has one.
+
+        A run that compresses its replies into notes has none: the ``<note>``
+        block a reply ends with is cut off the answer, so it must not show.
+        """
+        if self._live is None or turn.agent.options.reasoning in _NOTE_MODES:
             return await turn.agent.run_task(text, **kwargs)
         display = self._live(turn.turn)
         token = STREAM_DISPLAY.set(display)

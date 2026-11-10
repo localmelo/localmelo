@@ -186,6 +186,39 @@ async def test_separate_reasoning_never_reaches_content() -> None:
     assert "held" in display.kinds()
 
 
+@pytest.mark.parametrize(
+    ("fragments", "content"),
+    [
+        # A tool call written as text: never shown, though its lines are complete.
+        (["<tool_call>\n", '{"name": "echo"}\n'], '<tool_call>\n{"name": "echo"}\n'),
+        # Unfinished thinking the server sends again as content when it stops.
+        (
+            [
+                StreamFragment(kind="reasoning", text="Let me think about it.\n"),
+                "Let me think\n",
+                " about it.\n",
+            ],
+            "Let me think\n about it.\n",
+        ),
+    ],
+    ids=["tool-call-as-text", "reasoning-again"],
+)
+async def test_text_a_whole_reply_check_hides_is_never_shown(
+    fragments: list[object], content: str
+) -> None:
+    thinking = "Let me think about it.\n" if len(fragments) == 3 else ""
+    display = Display("none")
+    llm = StreamLLM(
+        [[*fragments, Message(role="assistant", content=content, thinking=thinking)]]
+    )
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert display.text() == ""
+
+
 async def test_no_display_keeps_the_complete_reply_path() -> None:
     llm = StreamLLM([[Message(role="assistant", content="unused")]])
     reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
