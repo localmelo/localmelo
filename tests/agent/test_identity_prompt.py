@@ -15,7 +15,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import PREFIX_RUN, SYSTEM_PROMPT, Chat
-from localmelo.tests.agent.test_lean_output import OFF, _run
+from localmelo.tests.agent.test_default_request_digests import OFF, _run
 from localmelo.tests.agent.test_reflection_gate import FakeLLM
 
 IDENTITY = "You are melo, the assistant of a test.\nYou run on the model T."

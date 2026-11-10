@@ -39,7 +39,6 @@ NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["chunk", "boundary"]
 ToolImages = Literal["auto", "on", "off"]
 EmptyReplyFallback = Literal["on", "off"]
-ThinkingSteps = Literal["all", "first_and_failed"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -229,20 +228,6 @@ class AgentOptions:
       the run ends ``completed``, and a failing one sends the model back to
       work, at most twice (see ``melo/agent/_brief_gate.py``). ``None`` (the
       default) changes nothing.
-    - ``brief_items``: experimental, for a brief run only. When true, the
-      brief's top-level numbered items that no edit has touched yet are named
-      in each reflection request and in the deadline check (see
-      ``melo/agent/_brief_aids.py``). Default false: nothing changes.
-    - ``lean_output``: experimental, for direct runs: fewer output tokens. The
-      system prompt asks for no text between tool calls, a final answer of at
-      most three lines, relative paths without a ``sys.path`` setup, and for
-      reading the files a task names before listing folders, in place of
-      "Think step by step. Be concise." (the compress modes keep that line:
-      their note before each tool call is such text). The reflection prompt
-      also leaves out the keys nothing reads and asks for ``best_effort_result``
-      only with ``done`` or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
-      ``-X agent.lean_output=true``; the interactive UI and the gateway never
-      do. Default false: requests are as they were before the option.
     - ``identity``: a paragraph for the system prompt of a chat surface: who
       the agent is and which model it runs on (the terminal chat and the
       gateway's sessions build it per Agent, from the backend the Agent
@@ -350,14 +335,6 @@ class AgentOptions:
       of the two happened, and each comes with a ``notice`` event
       (``thinking_off_retry``, ``answer_from_thinking``). ``"off"``: neither;
       the run ends ``failed`` as it did before the fallback existed.
-    - ``thinking_steps``: on which planning steps the model thinks (#551), for
-      comparing the two. ``"all"``, the default: every step, as the provider's
-      requests say. ``"first_and_failed"``: the first plan of an attempt and
-      the plan after a step that failed think; the plan after a tool step that
-      worked goes out with thinking off, where the provider has a switch for
-      that (``thinking_off_body``; the sessions, the console and ``melo`` set
-      it for a local server when this is on). A provider with no switch thinks
-      on every step either way.
     - ``read_folders``: folders outside the workspace that the read tools
       (``file_read``, ``list_files``) may read without a question: the agent's
       own, such as a chat's work folder (:mod:`~localmelo.melo.contracts.work_folder`).
@@ -406,8 +383,6 @@ class AgentOptions:
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
     window_messages: int | None = None
-    brief_items: bool = False
-    lean_output: bool = False
     confine_writes: bool = False
     identity: str | None = None
     tool_images: ToolImages = "auto"
@@ -421,7 +396,6 @@ class AgentOptions:
     extend_steps: int = 0
     max_extensions: int = MAX_EXTENSIONS
     empty_reply_fallback: EmptyReplyFallback = "on"
-    thinking_steps: ThinkingSteps = "all"
     read_folders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -504,7 +478,6 @@ class AgentOptions:
             ("window_eviction", get_args(WindowEviction)),
             ("tool_images", get_args(ToolImages)),
             ("empty_reply_fallback", get_args(EmptyReplyFallback)),
-            ("thinking_steps", get_args(ThinkingSteps)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):
@@ -566,8 +539,6 @@ class AgentOptions:
         for name in (
             "keep_decision_text",
             "captured_history",
-            "brief_items",
-            "lean_output",
             "answer_on_stop",
             "confine_writes",
             "task_aids",

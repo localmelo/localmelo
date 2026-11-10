@@ -88,7 +88,6 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--attempt-policy` | `-X agent.attempt_policy=VALUE` |
 | `--window-eviction` | `-X agent.window_eviction=VALUE` |
 | `--window-messages` | `-X agent.window_messages=VALUE` |
-| `--brief-items` | `-X agent.brief_items=VALUE` |
 | `--reasoning` | `-X agent.reasoning=VALUE` |
 | `--replay-turns` | `-X agent.replay_turns=VALUE` |
 | `--note-writer` | `-X agent.note_writer=VALUE` |
@@ -138,7 +137,8 @@ dot. `melo -h all` lists the keys with their defaults.
   config file that still holds one loads, the line is ignored, and `melo config`
   names it. `agent.window_eviction = "slide"` was removed too and reads as `"chunk"`.
   `memory.followup_query` was removed the same way (it has no option) and behaves as its
-  default `"recent"` did.
+  default `"recent"` did. So were `agent.brief_items` (`--brief-items`),
+  `agent.lean_output` and `agent.thinking_steps`: a run behaves as it did with the default.
 - `agent.answer_on_stop` is on by default (`-X agent.answer_on_stop=off` turns it off): it
   also answers a run whose request the server refused for a
   budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends
@@ -354,7 +354,6 @@ two equal.
 | `--embedding-base-url` | advanced |  |
 | `--embedding-model` | advanced |  |
 | `--attempt-policy` | experimental | #185 |
-| `--brief-items` | experimental | #185 |
 | `--window-eviction` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
@@ -438,7 +437,6 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--window-eviction chunk\|boundary` | `chunk` | How working memory drops old turns: `chunk` eight messages at a time; `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
 | `--window-messages N` | `64` on a local server or a URL (`256` with a token budget), `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. Overrides `[agent] window_messages`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
-| `--brief-items on\|off` | `off` | Experimental. With `--brief`, name the brief's numbered items that no edit has touched yet in each reflection request and two steps before the last attempt ends; see [Run a worker task](#brief-items). Overrides `[agent] brief_items`; inert without `--brief`. |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `100` | The most planning steps the whole run may take (also `-s N`). |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts of `agent.steps_per_attempt` steps (50) with a reflection after each. `none`: one attempt of `--max-steps` steps, no reflection. `[agent] reflection = false` (**Reflect when stuck after many steps** in Settings, or `-X agent.reflection=off` for one run) gives `none` to every run that reads the config; this option keeps its say over it. |
@@ -962,31 +960,6 @@ confinement, with the workspace the same, and a run that cannot be confined stop
 before its first command with `melo: error: writes cannot be confined to the
 workspace: <why>; set agent.confine_direct_runs to false to run without it
 (-X agent.confine_direct_runs=false for one run)` and exit code 1.
-
-<a id="brief-items"></a>
-
-**Experimental: `--brief-items on` (`[agent] brief_items = true`, off by default).**
-A brief with several numbered items and a weak check can end `completed passed`
-with one item untouched. With the option on, the harness reads the brief's
-top-level items (`1.`, `2)` and `- [ ]` lines outside code blocks; the first line
-of each, at most 12, shortened to about 120 characters; a brief with fewer than
-two gets nothing) and marks each from the files `git status` lists as changed
-since the run started: `changed` when a file the item names (a word with a `/`
-or a file extension) was edited, `not yet` when it names files and none was,
-`no file named` otherwise.
-
-A mark speaks of edits only; it never says an item is
-done. The marks go into the reflection request at each attempt boundary and into
-the check two steps before the last attempt ends, always as the same block,
-`Items in the brief with no edit yet: 2, 3` followed by those item lines, so the
-planning requests in between keep their prefix.
-
-The block is left out when no
-item is `not yet`. Each use emits a `brief_items` notice with detail
-`{"scope": "reflection" | "deadline", "marks": {"1": "changed", ...}}`.
-
-A workspace that is not a git tree gets no block. Without `--brief` the option
-does nothing.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last

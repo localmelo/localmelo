@@ -41,7 +41,6 @@ ROWS: list[tuple[str, str, list[str], list[str]]] = [
     ("agent.attempt_policy", "none", ["--attempt-policy", "none"], []),
     ("agent.window_eviction", "boundary", ["--window-eviction", "boundary"], []),
     ("agent.window_messages", "64", ["--window-messages", "64"], []),
-    ("agent.brief_items", "true", ["--brief-items", "on"], []),
     ("agent.reasoning", "compress", ["--reasoning", "compress"], []),
     ("agent.replay_turns", "2", ["--replay-turns", "2"], []),
     ("agent.note_writer", "heuristic", ["--note-writer", "heuristic"], []),
@@ -100,8 +99,8 @@ def test_each_form_of_the_setter_is_the_option(form: list[str]) -> None:
 
 def test_booleans_read_true_on_false_and_off() -> None:
     for word, flag in (("true", "on"), ("on", "on"), ("false", "off"), ("off", "off")):
-        assert _namespace(["-X", f"agent.brief_items={word}", "q"]) == _namespace(
-            ["--brief-items", flag, "q"]
+        assert _namespace(["-X", f"agent.captured_history={word}", "q"]) == _namespace(
+            ["--captured-history", flag, "q"]
         )
 
 
