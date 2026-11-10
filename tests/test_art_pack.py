@@ -925,7 +925,7 @@ def test_without_stills_heads_or_brand_the_report_names_what_stands_in(
         "heads/head-smile.png: face-idle is cut from the startup poster",
         "heads/head-neutral.png: face-brand is the idle face; the tab icons are cut from the startup poster",
         "brand/app-icon.png: AppIcon.icns stays as it is",
-        "brand/menubar.png: MenuBarLogo.png, MenuBarLogo@2x.png and the website's round logo stay as they are",
+        "brand/menubar.png: docs/assets/icon_small.png (the website's round logo) stays as it is",
         "brand/emblem.png: docs/assets/melo.png (the README emblem) stays as it is",
     ):
         assert line in out, line
@@ -1032,7 +1032,7 @@ def test_stills_and_heads_at_the_pack_root_are_accepted_and_a_folder_copy_wins(
 
 
 @pytest.mark.skipif(not ICONUTIL.exists(), reason="the app icon needs macOS's iconutil")
-def test_brand_pictures_replace_the_icon_the_menu_bar_logo_the_emblem_and_the_websites_logo(
+def test_brand_pictures_replace_the_icon_the_emblem_and_the_websites_logo(
     art: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from PIL import Image  # type: ignore[import-not-found]
@@ -1042,27 +1042,14 @@ def test_brand_pictures_replace_the_icon_the_menu_bar_logo_the_emblem_and_the_we
     assets = root / "macos/assets"
     assets.mkdir(parents=True)
     (assets / "AppIcon.icns").write_bytes(b"old icon")
-    (assets / "MenuBarLogo.png").write_bytes(b"old logo")
     code, out = applied(art, capsys, pack, root)
     assert code == 0, out
-    for line in (
-        "macos/assets/AppIcon.icns",
-        "macos/assets/MenuBarLogo.png",
-        "macos/assets/MenuBarLogo@2x.png",
-        "docs/assets/icon_small.png",
-    ):
+    for line in ("macos/assets/AppIcon.icns", "docs/assets/icon_small.png"):
         assert line in out
-    assert (
-        "changed  macos/assets/AppIcon.icns" in out
-        and "new      macos/assets/MenuBarLogo@2x.png" in out
-    )
+    assert "changed  macos/assets/AppIcon.icns" in out
     assert (assets / "AppIcon.icns").read_bytes()[:4] == b"icns"
-    with (
-        Image.open(assets / "MenuBarLogo.png") as logo,
-        Image.open(assets / "MenuBarLogo@2x.png") as big,
-    ):
-        assert logo.size == (18, 18) and big.size == (36, 36)
-        assert logo.mode == "RGBA"
+    # The menu-bar mark is drawn from the head, not from brand/menubar.png.
+    assert "MenuBarLogo" not in out
     # The README emblem is the pack's picture as it is; the website's logo is a 64 px square.
     assert (root / "docs/assets/melo.png").read_bytes() == (
         pack / "brand/emblem.png"
@@ -1078,13 +1065,11 @@ def test_without_an_app_icon_the_emblem_draws_it_and_what_the_pack_lacks_stays(
     pack = make_pack(tmp_path / "pack", brand=("emblem",))
     root = tmp_path / "root"
     (root / "macos/assets").mkdir(parents=True)
-    (root / "macos/assets/MenuBarLogo.png").write_bytes(b"old logo")
     code, out = applied(art, capsys, pack, root)
     assert code == 0, out
     assert "brand/app-icon.png: the app icon is drawn from brand/emblem.png" in out
     assert "app icon: brand/emblem.png is 40 x 50 px and draws the icon" in out
     assert (root / "macos/assets/AppIcon.icns").read_bytes()[:4] == b"icns"
-    assert (root / "macos/assets/MenuBarLogo.png").read_bytes() == b"old logo"
     assert not (root / "docs/assets/icon_small.png").exists()
 
 

@@ -38,6 +38,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
+- One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
 - Worker runs (`melo worker BRIEF`) run their `Check:` lines when the model is done, and a failed check exits 4.
 
 ### Browser
@@ -73,8 +74,11 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Settings is organized by subject; Settings → Permissions lists every allow, Everywhere and Per chat, with Revoke.
 - Every slash command of the terminal works in the console and the app.
 - The console follows every session live: chats, tasks, worker runs and terminal chats.
+- After an update, a browser tab or the app's window shows the new console at once instead of an old copy.
 - One command builds and installs the macOS development app.
 - The console reads in plain words, is easier on a phone and is readable in light and dark.
+- The app's window has no title band, and the menu-bar item is Melo's head drawn in the bar's own colour.
+- The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 
 ### Terminal
 
@@ -86,6 +90,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every question with fixed answers is a list you move through and confirm with Enter.
 - Colour tells kinds of output apart, and `NO_COLOR` or `LOCALMELO_ASCII=1` lose nothing.
 - Attach a text file with `/attach`, and run a shell command with `!`.
+- The terminal keeps a running turn when its connection to the gateway breaks, and shows the rest of it when the connection is back.
+- `melo` no longer starts tool servers it will not use when the gateway is already running.
 
 ### Setup
 
