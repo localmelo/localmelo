@@ -720,7 +720,7 @@ async def test_a_revoke_that_cannot_be_saved_raises_and_still_holds_here(
     assert "file_write" not in book.allowed_for(side)
 
 
-@pytest.mark.parametrize("wait", ["flush", "settle"])
+@pytest.mark.parametrize("wait", ["flush", "settle", "settle-failed"])
 def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
     wait: str,
 ) -> None:
@@ -729,8 +729,12 @@ def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
     Its done-callback is still queued behind the wait, and ``gather`` of a
     done task completes without yielding: a loop that waited for the callback
     to empty the set spun on one core for ever. The loop runs in a thread so
-    that a spin fails the test instead of hanging it.
+    that a spin fails the test instead of hanging it (on a failure the thread
+    spins until the test process exits). ``settle-failed``: a write queued
+    while ``settle`` waits fails as the first ends, and its own callback drops
+    it before ``settle`` looks again; ``settle`` still reports it.
     """
+    outcome: list[str] = []
 
     async def scenario() -> None:
         book = GrantBook()
@@ -739,7 +743,21 @@ def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
         async def write() -> None:
             await written.wait()
 
+        async def fails() -> None:
+            raise OSError("disk full")
+
         book._queue(write(), "grant_add")
+        if wait == "settle-failed":
+            settling = asyncio.ensure_future(book.settle())
+            await asyncio.sleep(0)
+            book._queue(fails(), "grant_add")  # waits for the first write's lock
+            written.set()
+            try:
+                await settling
+                outcome.append("settled")
+            except SessionStoreError:
+                outcome.append("failed")
+            return
 
         async def close() -> None:
             await closing.wait()
@@ -751,6 +769,7 @@ def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
         written.set()
         closing.set()
         await closer
+        outcome.append("settled")
 
     done = threading.Event()
 
@@ -760,3 +779,4 @@ def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
 
     threading.Thread(target=run, daemon=True).start()
     assert done.wait(5), f"GrantBook.{wait} spun on a write that had just finished"
+    assert outcome == ["failed" if wait == "settle-failed" else "settled"]

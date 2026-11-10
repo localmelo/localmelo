@@ -507,6 +507,10 @@ class GrantBook:
         self._open_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._pending: set[asyncio.Task[None]] = set()
+        # Queued writes that failed, and the newest failure: a wait reports
+        # those that fail while it waits, whoever dropped them.
+        self._failed = 0
+        self._failure: BaseException | None = None
         # Take-backs the file refused, grant id to when: the next write tries.
         self._owed: dict[str, float] = {}
         # Rows granted before the store opened, written when it does.
@@ -883,6 +887,8 @@ class GrantBook:
             return  # a wait below dropped it already
         self._pending.discard(task)
         if not task.cancelled() and task.exception() is not None:
+            self._failed += 1
+            self._failure = task.exception()
             logger.warning("Could not save a grant change", exc_info=task.exception())
 
     def _unfinished(self) -> list[asyncio.Task[None]]:
@@ -910,17 +916,17 @@ class GrantBook:
                 ) from exc
 
     async def settle(self) -> None:
-        """Wait for every queued write; the first that failed raises :class:`SessionStoreError`."""
-        failed: BaseException | None = None
-        while self._pending:
-            # A finished write's result counts too: :meth:`_unfinished` drops it.
-            for result in await asyncio.gather(
-                *list(self._pending), return_exceptions=True
-            ):
-                if isinstance(result, BaseException) and failed is None:
-                    failed = result
-            self._unfinished()
-        if failed is not None:
+        """Wait for every queued write; one that failed meanwhile raises :class:`SessionStoreError`.
+
+        A write that fails while this waits counts whoever drops it (its own
+        done-callback, or :meth:`_unfinished`), so a failure is never lost
+        to a write that finished between two looks.
+        """
+        before = self._failed
+        while running := self._unfinished():
+            await asyncio.gather(*running, return_exceptions=True)
+        failed = self._failure
+        if self._failed > before and failed is not None:
             raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
