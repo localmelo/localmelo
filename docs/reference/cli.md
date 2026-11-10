@@ -446,12 +446,12 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
-| `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
-| `--memory-dir DIR` | not set | Save history, long-term and procedural memory as SQLite files in `DIR`: `history.db`, `long_term.db` and `procedures.db`. |
+| `--memory on\|off` | `on` | `off` turns long-term memory off for this run, in the reasoning modes other than `legacy`; a `legacy` run has none. |
+| `--memory-dir DIR` | not set | Save history and procedural memory as SQLite files in `DIR`: `history.db` and `procedures.db`, and `long_term.db` in the reasoning modes other than `legacy`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
 | `--request-timeout SECONDS` | `300` | How long each chat request may wait for the server. |
 | `--output-format text\|json\|stream-json` | `text` (`json` with `--brief`) | Text, one JSON result, or newline-delimited events and result (`stream-json` requires `--brief`). |
-| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory; see [Set up an embedding model](../guides/embedding.md). |
+| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for the recall of the reasoning modes other than `legacy`; see [Set up an embedding model](../guides/embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
@@ -518,8 +518,8 @@ accepts the options named in [Interactive UI](#interactive-ui).
   from any folder. A blank name is a usage error. See
   [Procedural memory](../concepts/procedures.md#how-it-works).
 - `--reasoning`: `legacy` is the default and leaves the wire unchanged.
-  `drop`, `replay`, `compress` and `compress+replay` do not read `[RECALL]`
-  and remove an inline `<think>` block from an explicit-mode reply's text,
+  `drop`, `replay`, `compress` and `compress+replay`
+  remove an inline `<think>` block from an explicit-mode reply's text,
   so the result is the clean answer. `replay` sends the reasoning on
   assistant turns in scope, at most `40,000` characters per turn (a longer
   turn's reasoning is skipped and counted); a backend whose
@@ -1177,8 +1177,8 @@ SIGTERM and SIGHUP end a direct run cleanly, within 8 seconds:
 2. MCP servers are closed. A server still running 6 seconds after the signal
    is killed.
 3. The task record is saved with status `crashed` and the error
-   `Cancelled by SIGTERM` (or `Cancelled by SIGHUP`). Reflections are not
-   promoted to long-term memory.
+   `Cancelled by SIGTERM` (or `Cancelled by SIGHUP`). Nothing is written to
+   long-term memory then.
 4. `melo` exits by the signal (a shell shows 143 or 129) and prints nothing on
    stdout: no result, status line or JSON line.
 

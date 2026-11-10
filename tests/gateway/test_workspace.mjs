@@ -207,6 +207,13 @@ test('a turn that never finished an answer says so plainly and offers Try again 
   assert.equal(nextAction('failed', 'run', turns.UNFINISHED_ANSWER), 'retry');
 });
 
+test('a work checkpoint is one quiet step line, not a warning', () => {
+  const {turn, push} = fullTurn();
+  push('notice', {kind: 'checkpoint', message: 'Noted where the work stands; older results left the context.', step: 3, attempt: 1, detail: {units: 4}});
+  assert.deepEqual(turn.items.map((item) => [item.kind, item.factKind, item.step]), [['fact', 'checkpoint', 3]]);
+  assert.equal(turn.items[0].message, t('turns.checkpoint'));
+});
+
 // A local model's server can leave a tool call in the reply's content (`text`, `<function_calls>...`); the agent
 // asks again with a `tool_call_as_text` notice, and the broken text is never shown as the answer.
 test('a tool call written as text is replaced by its notice, and the answer is the next reply', () => {

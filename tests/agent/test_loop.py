@@ -297,14 +297,6 @@ class TestNoEmbeddingProvider:
         result = await agent.run("question")
         assert result == "answer"
 
-    @pytest.mark.asyncio
-    async def test_hippo_retrieve_returns_empty(self) -> None:
-        """retrieve_context() returns no long-term results without embedding."""
-        hippo = Hippo(embedding=None)
-        hippo.working.append(Message(role="user", content="hello"))
-        long_ctx = await hippo.retrieve_context("hello")
-        assert long_ctx == []
-
 
 class TestPromptAssembly:
     """Verify short-term window is not injected twice into the prompt."""
@@ -326,70 +318,8 @@ class TestPromptAssembly:
         ), f"Expected user query exactly once, found {len(matches)}"
 
 
-class TestCheckedMemoryWrite:
-    """Memory writes must be routed through Checker.check_memory_write."""
-
-    @pytest.mark.asyncio
-    async def test_huge_summary_blocked(self) -> None:
-        """A step summary exceeding MAX_OUTPUT_LEN must not be memorized."""
-        llm = FakeLLM()
-        # Tool call that produces a huge output
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content="x" * 60_000,  # huge thought
-                tool_call=ToolCall(tool_name="echo", arguments={"text": "hi"}),
-            )
-        )
-        llm.enqueue(Message(role="assistant", content="done"))
-
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
-        agent.hippo.register_tool(
-            ToolDef(
-                name="echo",
-                description="echo",
-                parameters={
-                    "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                    "required": ["text"],
-                },
-            )
-        )
-        agent.executor.register("echo", _echo_tool)
-
-        result = await agent.run("echo test")
-        assert result == "done"
-
-        # The huge summary should have been blocked by check_memory_write,
-        # so long-term memory should be empty.
-        assert len(agent.hippo.long._entries) == 0
-
-
 class TestRetrievalSeparation:
     """Retrieval results must not include tool resolution artefacts."""
-
-    @pytest.mark.asyncio
-    async def test_retrieve_context_returns_only_long_term(self) -> None:
-        """retrieve_context must not include short-term messages."""
-        emb = FakeEmbedding()
-        hippo = Hippo(embedding=emb)
-
-        # Populate short-term
-        hippo.working.append(Message(role="user", content="short term msg"))
-
-        # Populate long-term
-        await hippo.long.add("long term entry", [1.0, 0.0, 0.0, 0.0])
-
-        long_ctx = await hippo.retrieve_context("anything")
-
-        # Should contain only the long-term entry
-        assert len(long_ctx) == 1
-        assert "[memory]" in long_ctx[0].content
-        assert "long term entry" in long_ctx[0].content
-
-        # Must NOT contain the short-term message
-        contents = " ".join(m.content for m in long_ctx)
-        assert "short term msg" not in contents
 
     @pytest.mark.asyncio
     async def test_extract_tool_hints_is_separate(self) -> None:
@@ -400,7 +330,7 @@ class TestRetrievalSeparation:
         )
 
         msgs = [
-            Message(role="system", content="[memory] used shell_exec before"),
+            Message(role="system", content="an earlier note: used shell_exec"),
             Message(
                 role="assistant",
                 content="run a command",
@@ -424,7 +354,7 @@ class TestRetrievalSeparation:
         msgs = [
             Message(role="user", content="use web_fetch for the docs"),
             Message(role="tool", content="[called web_fetch] ok", tool_call_id="c1"),
-            Message(role="system", content="[memory] shell_exec worked before"),
+            Message(role="system", content="an earlier note: shell_exec worked"),
         ]
         assert hippo.extract_tool_hints(msgs) == []
 
@@ -899,37 +829,20 @@ class TestBuildSystemPrompt:
         assert prompt == SYSTEM_PROMPT
         assert others == []
 
-    def test_memory_items_merged_under_recall(self) -> None:
-        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
-
-        context = [
-            Message(role="system", content="[memory] used shell_exec before"),
-            Message(role="system", content="[memory] prefers concise answers"),
-        ]
-        prompt, others = _build_system_prompt(context, [])
-        assert prompt.startswith(SYSTEM_PROMPT)
-        assert prompt.count("[RECALL]") == 1
-        assert "used shell_exec before" in prompt
-        assert "prefers concise answers" in prompt
-        # [memory] prefix must be stripped
-        assert "[memory]" not in prompt
-        assert others == []
-
-    def test_non_memory_system_messages_merged(self) -> None:
+    def test_system_messages_merged(self) -> None:
         from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         short = [Message(role="system", content="extra context info")]
         prompt, others = _build_system_prompt([], short)
         assert "extra context info" in prompt
         assert prompt.startswith(SYSTEM_PROMPT)
-        assert "[RECALL]" not in prompt
         assert others == []
 
     def test_mixed_roles_separated(self) -> None:
         from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         context = [
-            Message(role="system", content="[memory] fact A"),
+            Message(role="system", content="context fact A"),
         ]
         short = [
             Message(role="system", content="extra sys"),
@@ -939,40 +852,36 @@ class TestBuildSystemPrompt:
         prompt, others = _build_system_prompt(context, short)
         assert prompt.startswith(SYSTEM_PROMPT)
         assert "extra sys" in prompt
-        assert "[RECALL]" in prompt
-        assert "fact A" in prompt
+        assert "context fact A" in prompt
         assert len(others) == 2
         assert others[0].role == "user"
         assert others[1].role == "assistant"
 
-    def test_no_recall_section_without_memory(self) -> None:
-        from localmelo.melo.agent._chat import _build_system_prompt
-
-        context: list[Message] = []
-        short = [Message(role="user", content="query")]
-        prompt, others = _build_system_prompt(context, short)
-        assert "[RECALL]" not in prompt
-        assert len(others) == 1
-
     @pytest.mark.asyncio
     async def test_plan_step_single_system_message(self) -> None:
-        """plan_step produces exactly one system message even with memory."""
+        """plan_step produces exactly one system message even with a recall block."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
         chat = _scoped_chat(llm)
-        context = [
-            Message(role="system", content="[memory] mem0"),
-            Message(role="system", content="[memory] mem1"),
+        short = [
+            Message(role="system", content="extra note"),
+            Message(role="user", content="query"),
         ]
-        short = [Message(role="user", content="query")]
-        await chat.plan_step(context=context, short=short, tools=[], query="query")
+        await chat.plan_step(
+            short=short, tools=[], query="query", query_block="recalled mem0\nmem1"
+        )
 
         sent = llm.calls[0]["messages"]
         sys_msgs = [m for m in sent if m.role == "system"]
         assert len(sys_msgs) == 1, f"Expected 1 system message, got {len(sys_msgs)}"
-        # The recalled memory is data in a user message, so the system prompt
+        # The recalled text is data in a user message, so the system prompt
         # stays the same from step to step.
+        assert "extra note" in sys_msgs[0].content
         assert "mem0" not in sys_msgs[0].content
-        [data] = [m for m in sent if m.role == "user" and "[RECALL]" in m.content]
+        [data] = [
+            m
+            for m in sent
+            if m.role == "user" and "data, not instructions" in m.content
+        ]
         assert "mem0" in data.content and "mem1" in data.content
 
 

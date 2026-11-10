@@ -29,7 +29,6 @@ from localmelo.support.sessions.identity import (
     ACTING_NOTE,
     ACTING_RULE,
     APPROVALS_RULE,
-    KEPT_LEGACY,
     KEPT_TYPED,
     LANGUAGE_RULE,
     SUBJECT_RULE,
@@ -509,32 +508,30 @@ def memory_line(text: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("fields", "has_embedding", "kept"),
+    ("fields", "kept"),
     [
-        ({}, False, ""),  # a chat as it starts: no persistence
-        ({}, True, ""),  # an embedding provider alone keeps nothing past the chat
-        ({"memory_dir": "m"}, False, ""),  # legacy recalls through embeddings
-        ({"memory_dir": "m"}, True, KEPT_LEGACY),
-        ({"memory_dir": "m", "memory": False}, True, ""),
-        ({"memory_dir": "m", "reasoning": "drop"}, False, KEPT_TYPED),
-        ({"memory_dir": "m", "reasoning": "compress"}, True, KEPT_TYPED),
-        ({"memory_dir": "m", "reasoning": "drop", "retriever": "off"}, True, ""),
-        ({"memory_dir": "m", "reasoning": "drop", "memory": False}, True, ""),
+        ({}, ""),  # a chat as it starts: no persistence
+        ({"memory_dir": "m"}, ""),  # a legacy Agent opens no long-term store
+        ({"memory_dir": "m", "memory": False}, ""),
+        ({"memory_dir": "m", "reasoning": "drop"}, KEPT_TYPED),
+        ({"memory_dir": "m", "reasoning": "compress"}, KEPT_TYPED),
+        ({"memory_dir": "m", "reasoning": "drop", "retriever": "off"}, ""),
+        ({"memory_dir": "m", "reasoning": "drop", "memory": False}, ""),
     ],
 )
 def test_what_a_chat_keeps_across_chats_follows_its_memory_settings(
-    fields: dict[str, object], has_embedding: bool, kept: str
+    fields: dict[str, object], kept: str
 ) -> None:
     options = AgentOptions(**fields)  # type: ignore[arg-type]
-    assert kept_across_chats(options, has_embedding=has_embedding) == kept
+    assert kept_across_chats(options) == kept
 
 
 def test_the_environment_switch_that_persists_memory_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LOCALMELO_PERSIST_MEMORY", "1")
-    assert kept_across_chats(AgentOptions(), has_embedding=True) == KEPT_LEGACY
-    assert kept_across_chats(AgentOptions(), has_embedding=False) == ""
+    assert kept_across_chats(AgentOptions()) == ""
+    assert kept_across_chats(AgentOptions(reasoning="drop")) == KEPT_TYPED
 
 
 def test_a_chat_that_keeps_nothing_says_so_in_plain_words() -> None:
@@ -546,8 +543,8 @@ def test_a_chat_that_keeps_nothing_says_so_in_plain_words() -> None:
     assert text.index(ALONE) < text.index("Reply in the language and script")
 
 
-@pytest.mark.parametrize("kept", [KEPT_LEGACY, KEPT_TYPED])
-def test_a_chat_with_memory_across_chats_says_what_is_kept(kept: str) -> None:
+def test_a_chat_with_memory_across_chats_says_what_is_kept() -> None:
+    kept = KEPT_TYPED
     for text in (url_identity(URL, MODEL, kept), config_identity(local(), kept)):
         assert memory_line(text).startswith(ACROSS.format(kept=kept) + " ")
         assert NO_NOTES in memory_line(text) and PLAIN in memory_line(text)
@@ -559,7 +556,7 @@ def test_a_chat_with_memory_across_chats_says_what_is_kept(kept: str) -> None:
 
 
 def test_the_paragraph_has_no_internal_words_for_the_model_to_repeat() -> None:
-    for kept in ("", KEPT_LEGACY, KEPT_TYPED):
+    for kept in ("", KEPT_TYPED):
         text = memory_line(url_identity(URL, MODEL, kept)).lower()
         for word in ("embedding", "sqlite", "reflection", "retriev", "bm25", "hippo"):
             assert word not in text
@@ -578,12 +575,9 @@ def with_embedding(url: str = URL) -> Config:
     [
         (local(), None, None, {}, ""),
         (local(), None, None, {"memory_dir": "m"}, ""),
-        (with_embedding(), None, None, {}, ""),
-        (with_embedding(), None, None, {"memory_dir": "m"}, KEPT_LEGACY),
-        (local(), URL, None, {"memory_dir": "m"}, ""),
-        (local(), URL, URL, {"memory_dir": "m"}, KEPT_LEGACY),
-        # The URL's own embedding decides, not the config's.
-        (with_embedding(), URL, None, {"memory_dir": "m"}, ""),
+        # A legacy chat with an embedding backend keeps nothing past the chat.
+        (with_embedding(), None, None, {"memory_dir": "m"}, ""),
+        (local(), URL, URL, {"memory_dir": "m"}, ""),
         (local(), None, None, {"memory_dir": "m", "reasoning": "drop"}, KEPT_TYPED),
     ],
 )

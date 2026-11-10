@@ -35,6 +35,7 @@ from localmelo.melo.agent._brief_aids import (
     REFLECTION_ADDENDUM,
     STEP_PUSH,
     STEP_PUSH_STEPS,
+    Dropped,
     FileStamp,
     dropped_notes,
     edited_files,
@@ -73,6 +74,7 @@ from localmelo.melo.agent._chat import (
     Chat,
     RequestStats,
 )
+from localmelo.melo.agent._checkpoint import _CheckpointLoop
 from localmelo.melo.agent._context_fit import ContextFitError, PromptCapError
 from localmelo.melo.agent._earlier import check_earlier_turns, earlier_block
 from localmelo.melo.agent._events import _Emitter, check_sink
@@ -111,7 +113,6 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
 )
 from localmelo.melo.checker.policy import builtin_set_for
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.model import recalled_part
 from localmelo.melo.checker.tiers import (
     changes_nothing,
@@ -133,6 +134,7 @@ from localmelo.melo.contracts.approvals import (
     is_cancellation,
 )
 from localmelo.melo.contracts.events import EventSink
+from localmelo.melo.contracts.folders import WRITE_TOOLS
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
@@ -166,6 +168,7 @@ from localmelo.melo.executor.models import (
     ExecutionRequest,
     ExecutionStatus,
 )
+from localmelo.melo.memory.block import strip_block
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -232,6 +235,7 @@ from localmelo.melo.schema import (
     ToolInfo,
     ToolResult,
     ToolTier,
+    WorkCheckpoint,
     answer_text,
     broken_tool_call,
     clip_session_text,
@@ -575,12 +579,6 @@ NO_CHANGE_PUSH = (
 # LOCALMELO_MEMORY_DIR. Expanded when used, not at import.
 DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
 
-# Seconds that promoting a run's reflections may take once the run is
-# over. Without a bound, a run that ended because the embedding server
-# stopped answering would wait for it again, as long as the provider's
-# own HTTP timeout.
-PROMOTION_TIMEOUT_S = 10.0
-
 # Seconds of an exit's time limit (see Agent.begin_exit) that closing the
 # tool providers leaves for saving the run's task record.
 EXIT_SAVE_RESERVE_S = 1.0
@@ -909,12 +907,6 @@ class _RunState:
     # run, the recall records not yet sent, and the aliases shown but not yet
     # in the window.
     boundary_block: str = ""
-    # Legacy recall under the fixed prefix: the long-term context the run's
-    # requests carry, and the window's first message when it was read. It is
-    # read again only once that message has left the window (see
-    # Agent._long_context), so the steps in between extend each other.
-    long_context: list[Message] | None = None
-    long_head: Message | None = None
     # A brief run (AgentOptions.brief_probe): the workspace digest at the
     # run's start, None outside a git tree.
     brief: bool = False
@@ -925,6 +917,30 @@ class _RunState:
     step_digest: str | None = None
     read_streak: int = 0
     dropped: list[str] = dataclasses.field(default_factory=list)
+    # The work checkpoint (melo.agent._checkpoint): the cues of the tool results
+    # that left the context (by call id, once each) and whether the block has
+    # yet to show the newest of them; the latest checkpoint and the message
+    # that carries it in the window; how many the run wrote; and the run's
+    # calls of the file tools that write, as (tool, arguments, status).
+    cues: list[Dropped] = dataclasses.field(default_factory=list)
+    cue_ids: set[str] = dataclasses.field(default_factory=set)
+    cues_pending: bool = False
+    checkpoint: WorkCheckpoint | None = None
+    checkpoint_msg: Message | None = None
+    checkpoints: int = 0
+    # The early line (EARLY_LINE): the trailing line the next planning request
+    # carries, and whether this fill has had it.
+    early_note: str = ""
+    early_sent: bool = False
+    # Where the window's fill began: the estimate the last checkpoint left, 0
+    # before the first. The early line comes halfway from it to the line.
+    fill_start: int = 0
+    # The person's own words for this run (run_task's user_words, else the query
+    # without its recalled-memory block): a work checkpoint's goal.
+    words: str = ""
+    writes: list[tuple[str, dict[str, Any], str]] = dataclasses.field(
+        default_factory=list
+    )
     # Its check gate (AgentOptions.brief_check): the brief's check commands,
     # the gate's runs so far and the retries it has used.
     check_commands: list[str] = dataclasses.field(default_factory=list)
@@ -1068,7 +1084,7 @@ class _ToolSetupError(Exception):
     """The tool providers could not be set up; the message is the run's error."""
 
 
-class Agent(_RecallLoop, _NotesLoop):
+class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     """Task-solving agent with tool use and memory.
 
     It is built from providers::
@@ -1192,7 +1208,8 @@ class Agent(_RecallLoop, _NotesLoop):
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
         # the procedural store are SQLite whenever persistence is on;
-        # long-term only when memory is on and an embedding provider exists.
+        # long-term only when memory is on and the reasoning mode is not
+        # legacy.
         self._memory_dir = _resolve_memory_dir(self.options)
         history_backend = None
         long_backend: LongTerm | None = None
@@ -1222,11 +1239,9 @@ class Agent(_RecallLoop, _NotesLoop):
                 os.path.join(self._memory_dir, "history.db"),
                 thinking_retention_days=retention_days,
             )
-            # In legacy the file exists only with an embedding provider,
-            # exactly as before; the explicit modes add a text-only store.
-            if self.options.memory and (
-                self._embedding is not None or self.options.reasoning != "legacy"
-            ):
+            # A legacy run opens no long-term store; an existing file is left
+            # as it is. The explicit modes keep a text-only store.
+            if self.options.memory and self.options.reasoning != "legacy":
                 long_backend = SqliteLongTerm(
                     os.path.join(self._memory_dir, "long_term.db")
                 )
@@ -1237,8 +1252,8 @@ class Agent(_RecallLoop, _NotesLoop):
 
         # memory=False runs Hippo in its no-embedding mode, which is exactly
         # the documented behavior of that option: no long-term recall, no
-        # long-term writes, no reflection promotion, and reflections are
-        # still cleared. self._embedding stays set so close() closes it.
+        # long-term writes, and reflections are still cleared.
+        # self._embedding stays set so close() closes it.
         # Pictures tools return (AgentOptions.tool_images): the store whose
         # payloads planning requests carry; "auto" asks the provider once.
         self._tool_images = ToolImageStore(
@@ -1871,51 +1886,22 @@ class Agent(_RecallLoop, _NotesLoop):
     # short status string when the loop should break, or None to
     # continue to the next stage.
 
-    async def _long_context(self, query: str, run: _RunState | None) -> list[Message]:
-        """The long-term context a legacy planning request carries.
-
-        Outside a run it is read for every request. A run reads it at its
-        first step and again only at a step whose window no longer holds the
-        message that led it when the block was last kept: an eviction has
-        changed the request there already. Between those steps the query is the same and
-        the store gains only the run's own step summaries, whose turns the
-        window still holds. Reading it on every step would repeat them and
-        change the message right after the system prompt, so a server would
-        prefill every later message again; kept, each request extends the
-        previous one.
-        """
-        if run is None:
-            return await self.hippo.retrieve_context(query)
-        if run.long_context is None or (
-            run.long_head is not None and not self.hippo.working.holds(run.long_head)
-        ):
-            run.long_context = await self.hippo.retrieve_context(query)
-        window = self.hippo.working.get_window()
-        run.long_head = window[0] if window else None
-        return list(run.long_context)
-
     async def _do_retrieval(
         self, query: str, *, run: _RunState | None = None
-    ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
-        """Stage 1+2: retrieve context, resolve tools, run boundary checks.
+    ) -> tuple[list[Message], list[ToolDef], str | None]:
+        """Stage 1+2: resolve tools and run boundary checks.
 
         With ``tool_exposure="retrieve"`` the tools are every registered
         built-in, sorted by name, then the other tools that the model's
         tool calls and BM25 resolve among themselves, also sorted by name;
         with ``"all"`` they are every registered tool, sorted by name.
 
-        In ``drop`` and ``replay`` no long-term recall is read, so the
-        system prompt has no ``[RECALL]`` section; the long-term writes are
-        unchanged. The window is returned whole: the planning request is
-        fitted on a copy when it is sent (see :class:`Chat`).
+        The window is returned whole: the planning request is fitted on a
+        copy when it is sent (see :class:`Chat`).
 
-        Returns (long_context, short_window, tools, fail_reason).
+        Returns (short_window, tools, fail_reason).
         *fail_reason* is non-None when a check fails and the loop must break.
         """
-        if self.options.reasoning == "legacy":
-            long_context = await self._long_context(query, run)
-        else:
-            long_context = []
         if (
             run is not None
             and not run.boundary_done
@@ -1954,12 +1940,10 @@ class Agent(_RecallLoop, _NotesLoop):
             builtins = self._builtin_names
             # A provider's tool group is offered like the built-ins, after them.
             offered = builtins | self._grouped_names
-            # Hints are the model's tool calls, which live in the window; the
-            # long-term messages carry none.
-            hint_sources = long_context + short_window
+            # Hints are the model's tool calls, which live in the window.
             tool_hints = [
                 name
-                for name in self.hippo.extract_tool_hints(hint_sources)
+                for name in self.hippo.extract_tool_hints(short_window)
                 if name not in offered
             ]
             tools = sorted(
@@ -1994,13 +1978,12 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         if not resolution_check.allowed:
             return (
-                long_context,
                 short_window,
                 tools,
                 (f"Tool resolution failed: {resolution_check.reason}"),
             )
 
-        return long_context, short_window, tools, None
+        return short_window, tools, None
 
     def _thinking_retry_body(self) -> Mapping[str, Any]:
         """The request fields that turn thinking off for one retry (#469), if any."""
@@ -2023,7 +2006,6 @@ class Agent(_RecallLoop, _NotesLoop):
 
     async def _do_plan(
         self,
-        long_context: list[Message],
         short_window: list[Message],
         tools: list[ToolDef],
         query: str,
@@ -2046,16 +2028,10 @@ class Agent(_RecallLoop, _NotesLoop):
 
         Returns (response, fail_reason).
         """
-        sent, skipped = _replay_plan(
-            short_window,
-            self.options,
-            task_query=task_query,
-            requires_replay=self._requires_replay,
-        )
+        sent, skipped = self._sent_window(short_window, task_query)
         ready = on_ready
         if run is not None:
-            ready = self._count_sent(run, [sent[i] for i in skipped], on_ready)
-        sent = self._tool_images.hydrate(sent)
+            ready = self._count_sent(run, skipped, on_ready)
         recalls = []
         recall_records: list[RecallRecord] = []
         query_block = ""
@@ -2070,11 +2046,25 @@ class Agent(_RecallLoop, _NotesLoop):
             plan_args["coalesce_users"] = True
         if ready is not None:
             plan_args["on_ready"] = ready
-        if on_ready is None and run is not None and run.brief and run.dropped:
+        if on_ready is None and run is not None:
             # Not at a step that carries inbox lines: they must end the request.
-            plan_args["tail_note"] = render_dropped(run.dropped, sent)
+            # A brief run's drops are named once: in the work checkpoint's cue
+            # list while the window holds one, else in its tail line.
+            named = run.checkpoint_msg is not None and self.hippo.working.holds(
+                run.checkpoint_msg
+            )
+            tail = [
+                (
+                    render_dropped(run.dropped, sent)
+                    if run.brief and run.dropped and not named
+                    else ""
+                ),
+                run.early_note,
+            ]
+            run.early_note = ""
+            if any(tail):
+                plan_args["tail_note"] = "\n\n".join(line for line in tail if line)
         response = await self.chat.plan_step(
-            context=long_context,
             short=sent,
             tools=tools,
             query=query,
@@ -2085,6 +2075,9 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         if run is not None:
             run.plan_call = getattr(self.chat, "last_call", None)
+            if run.plan_call is not None:
+                # What the fit left out of this request is no longer in context.
+                self._note_cues(run, run.plan_call.dropped)
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
         response = self._normalize_reply(response)
@@ -2094,6 +2087,23 @@ class Agent(_RecallLoop, _NotesLoop):
             return response, f"Response check failed: {check.reason}"
 
         return response, None
+
+    def _sent_window(
+        self, window: list[Message], task_query: Message | None
+    ) -> tuple[list[Message], list[Message]]:
+        """*window* as a planning request carries it, and the turns it skips.
+
+        The window of :func:`_replay_plan` with the live images' payloads; the
+        second list holds the assistant turns left without their thinking for
+        the per-turn cap (see :meth:`_count_sent`).
+        """
+        sent, skipped = _replay_plan(
+            window,
+            self.options,
+            task_query=task_query,
+            requires_replay=self._requires_replay,
+        )
+        return self._tool_images.hydrate(sent), [sent[i] for i in skipped]
 
     async def _do_execute(
         self, call: ToolCall, *, allowed: Collection[str] | None, run: _RunState
@@ -2280,6 +2290,10 @@ class Agent(_RecallLoop, _NotesLoop):
                 call.tool_name, call.arguments, outcome.status.value, exported.output
             )
         )
+        if call.tool_name in WRITE_TOOLS:
+            run.writes.append(
+                (call.tool_name, dict(call.arguments), outcome.status.value)
+            )
         if not result.error.strip() and call.tool_name in (
             "file_read",
             "file_write",
@@ -2375,9 +2389,6 @@ class Agent(_RecallLoop, _NotesLoop):
 
         - History gets one StepRecord per executed call (the assistant
           text is attached to the first), unconditionally.
-        - Long-term memory gets each record's text summary in ``legacy``,
-          if the checker allows the write. The explicit modes write no
-          raw summary (R4 keeps only unchecked bytes out of memory).
         - In the compress modes the reply's note and draft are built from
           the calls and results, checked, stored and placed into the
           working-memory turn; a pending targeted draft is pinned once,
@@ -2420,26 +2431,8 @@ class Agent(_RecallLoop, _NotesLoop):
                 capture_metadata=captured[1] if captured else None,
             )
             step.records.append(record)
-            summary = await self.hippo.store_step(task_id, record)
-            if captured:
-                thought = redact_secrets(record.thought)[0]
-                summary = f"{thought} [called {call.tool_name}] -> {redact_secrets(result.output)[0][:200]}"
+            await self.hippo.store_step(task_id, record)
             step.stored += 1
-
-            # Checked write: step summary -> long-term memory only, in
-            # legacy. The explicit modes stop writing the raw summary.
-            if self.options.reasoning == "legacy":
-                mem_check = self.checker.check_memory_write(
-                    MemoryWritePayload(
-                        text=summary,
-                        role="assistant",
-                        metadata={"step_id": record.step_id},
-                    )
-                )
-                if mem_check.allowed:
-                    await self.hippo.memorize(
-                        summary, metadata={"step_id": record.step_id}, to_working=False
-                    )
 
         recorder = CALL_RECORDER.get()
         if recorder is not None:
@@ -2969,7 +2962,10 @@ class Agent(_RecallLoop, _NotesLoop):
             if replies is not None:
                 replies.append(reply)
             if run is not None:
-                run.events.reflection_call(getattr(self.chat, "last_call", None))
+                call = getattr(self.chat, "last_call", None)
+                run.events.reflection_call(call)
+                if call is not None:
+                    self._note_cues(run, call.dropped)
             return reply
 
         response = await ask()
@@ -3108,9 +3104,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 self.hippo.working.append(reflection)
             inserted, pending = self._read_inbox(run)
             # Retrieval + tool resolution + boundary checks
-            long_context, short_window, tools, fail = await self._do_retrieval(
-                query, run=run
-            )
+            short_window, tools, fail = await self._do_retrieval(query, run=run)
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
@@ -3128,6 +3122,8 @@ class Agent(_RecallLoop, _NotesLoop):
             if (stream_display := STREAM_DISPLAY.get()) is not None:
                 stream_display.step(run.steps)
             run.note(lambda trace: trace.step(run.steps, run.attempts))
+            if await self._checkpoint_step(run, query, tools):
+                short_window = self.hippo.working.get_window()
             # The retry of a reply that was only thinking (#469) goes out with
             # the provider's thinking switched off, for this call only.
             retry_body = self._thinking_retry_body() if run.thinking_retry_armed else {}
@@ -3137,7 +3133,6 @@ class Agent(_RecallLoop, _NotesLoop):
             retry_token = LLM_REQUEST_EXTRA_BODY.set(retry_body) if retry_body else None
             try:
                 response, fail = await self._do_plan(
-                    long_context,
                     short_window,
                     tools,
                     query,
@@ -3659,13 +3654,12 @@ class Agent(_RecallLoop, _NotesLoop):
         :meth:`_record_answer`), whatever the status.
 
         Whatever happens, the task record is saved with the status and
-        ``result or error``, and the reflections are cleared (promoted
-        to long-term memory first when ``memory`` is on); a failure while
-        doing so is logged without a traceback and does not replace the
-        run's own outcome. ``timeout_s`` bounds the run itself, not this
-        final step. The save has no bound of its own; promotion has
-        :data:`PROMOTION_TIMEOUT_S`, so an embedding server that stopped
-        answering delays the return by that much at most. A cancellation
+        ``result or error``, and the reflections are cleared (an explicit
+        reasoning mode first admits the run's candidates to long-term
+        memory when ``memory`` is on); a failure while doing so is logged
+        without a traceback and does not replace the run's own outcome.
+        ``timeout_s`` bounds the run itself, not this final step, and the
+        save has no bound of its own. A cancellation
         for an exit (see :meth:`begin_exit`) that lands during this final
         step does not leave the record unsaved: the record, with the
         run's own status, is saved again as that method describes, and
@@ -3846,6 +3840,7 @@ class Agent(_RecallLoop, _NotesLoop):
         run = _RunState(
             task_id=task.task_id,
             task_text=query,
+            words=strip_block(query) if user_words is None else user_words,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,
@@ -3898,6 +3893,8 @@ class Agent(_RecallLoop, _NotesLoop):
                     workspace_root=self.executor.workspace_root,
                     approval=approval is not None,
                 )
+                # What leaves the window is kept as a cue (and a brief run's note).
+                self.hippo.working.on_drop = lambda gone: self._note_dropped(run, gone)
                 try:
                     if run.inbox is not None:
                         run.inbox.validate(self.executor.workspace_root or os.getcwd())
@@ -3908,9 +3905,6 @@ class Agent(_RecallLoop, _NotesLoop):
                         )
                         run.step_digest = run.workspace_digest
                         run.check_digest = run.workspace_digest
-                        self.hippo.working.on_drop = lambda gone: self._note_dropped(
-                            run, gone
-                        )
                         if self.options.brief_items:
                             run.items = parse_items(query)
                             if run.items:
@@ -4081,8 +4075,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 await self._learn(run, query, outcome)
                 return outcome
             finally:
-                if run.brief:
-                    self.hippo.working.on_drop = None
+                self.hippo.working.on_drop = None
                 if run.finalizer is None:
                     # Else the finalizer counts the run out when it ends.
                     self._active_runs -= 1
@@ -4249,11 +4242,7 @@ class Agent(_RecallLoop, _NotesLoop):
 
         A failure is logged, not raised, so it cannot replace the run's
         outcome or the exception that ended it, and is logged without a
-        traceback: the run did not crash because of it. Promoting the
-        reflections may take at most :data:`PROMOTION_TIMEOUT_S` seconds.
-        A failed embedding request (``ProviderError``) or one that the
-        bound cuts short is logged at INFO, as ``provider_error`` is; any
-        other failure at WARNING.
+        traceback: the run did not crash because of it.
         """
         task.status = run.status
         task.result = run.result or run.error
@@ -4267,10 +4256,9 @@ class Agent(_RecallLoop, _NotesLoop):
                     exception_text(exc),
                 )
             if self.options.reasoning != "legacy":
-                # R4 gates the promotion too: the explicit modes write
-                # nothing unchecked to long-term memory. R6-lite's flush
-                # admits the run's candidates through the boundary and
-                # policy; its failure is logged, never raised.
+                # R4: the explicit modes write nothing unchecked to long-term
+                # memory. R6-lite's flush admits the run's candidates through
+                # the boundary and policy; its failure is logged, never raised.
                 decisions = await self.hippo.flush(
                     run_request=run.remember_request,
                     digest=run.final_digest,
@@ -4279,33 +4267,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 )
                 self._drain_decisions(decisions, run)
                 self.hippo.working.clear_reflections()
-            else:
-                bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
-                try:
-                    # With memory=False Hippo has no embedding, so this only
-                    # clears the reflections (see __init__).
-                    async with bound:
-                        await self.hippo.promote_reflections(task.task_id)
-                except ProviderError as exc:
-                    logger.info(
-                        "Could not promote the reflections of task %s: %s",
-                        task.task_id,
-                        exc,
-                    )
-                except Exception as exc:
-                    if isinstance(exc, TimeoutError) and bound.expired():
-                        logger.info(
-                            "Could not promote the reflections of task %s: "
-                            "no answer within %g s",
-                            task.task_id,
-                            PROMOTION_TIMEOUT_S,
-                        )
-                    else:
-                        logger.warning(
-                            "Could not promote the reflections of task %s: %s",
-                            task.task_id,
-                            exception_text(exc),
-                        )
         finally:
             self.hippo.working.clear_reflections()
 
@@ -4755,6 +4716,7 @@ class Agent(_RecallLoop, _NotesLoop):
             answered_on_stop=run.answered_on_stop,
             format_fixed=run.format_fixed,
             handed_off=run.handed_off,
+            checkpoints=run.checkpoints,
             empty_reply=(
                 {
                     "thinking_off_retry": run.fallback_retried,
@@ -5284,10 +5246,11 @@ class Agent(_RecallLoop, _NotesLoop):
         run.events.no_change(scope="step")
         self.hippo.working.append(Message(role="user", content=STEP_PUSH))
 
-    @staticmethod
-    def _note_dropped(run: _RunState, gone: list[Message]) -> None:
-        """Keep a line for each tool result that left the window of a brief run."""
-        run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
+    def _note_dropped(self, run: _RunState, gone: list[Message]) -> None:
+        """Keep a cue for each tool result that left the window, and a brief run's line."""
+        self._note_cues(run, gone)
+        if run.brief:
+            run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
     async def _items_block(self, run: _RunState, scope: str) -> str:
         """The block that names the brief's items no edit has touched, or "".

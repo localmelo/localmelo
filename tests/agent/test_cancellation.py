@@ -821,7 +821,6 @@ class TestOtherCancellations:
 
             if exit_reason is None:
                 assert history.saves[-1] == ("crashed", "CancelledError")
-                assert len(_promoted(agent)) == 1
             else:
                 # B6: the exit's reason, and no promotion.
                 assert history.saves[-1] == ("crashed", exit_reason)

@@ -2,12 +2,12 @@
 
 An embedding model is optional. localmelo does not serve one itself: you run a model server (on a Mac the first run can set up melo_serve with one, after your OK), and localmelo calls a model that server already serves.
 
-![The first run lists the server's models and offers one for long-term memory.](../assets/img/embedding.webp)
+![The first run lists the server's models and offers one for search by meaning.](../assets/img/embedding.webp)
 
 ## What it buys
 
 - Without an embedding backend, working memory and history still work.
-- With memory on, explicit reasoning modes can keep text-only long-term entries and find them with BM25; the trigger must be enabled and include the `long` kind. In `legacy`, long-term writes and recall need an embedding backend (see [Memory](../concepts/memory.md#what-localmelo-remembers)).
+- With memory on, explicit reasoning modes can keep text-only long-term entries and find them with BM25; the trigger must be enabled and include the `long` kind. In `legacy`, a run has no long-term writes or recall, with or without an embedding backend (see [Memory](../concepts/memory.md#what-localmelo-remembers)).
 - An embedding backend adds vector-similarity search; text-only entries are still found with BM25.
 - In `compress` and `compress+replay`, the `auto` retriever also ranks task-local recall with the embedding provider; without one it uses the LLM at start and attempt and BM25 at step and tool (see [recall in the loop](../concepts/memory.md#recall-in-the-loop)).
 
@@ -162,8 +162,8 @@ See [Mix backends](model-servers.md#mix-backends).
 
 ## What changes
 
-- The memory row of `/status all` (and of `/status` in developer mode) and of developer mode's banner names the backend and model, for example `long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B` (`oMLX` where the config file says `omlx`).
-- Without one, `/status all` says `no long-term memory (no embedding backend)` and the banner says `no long-term memory · melo setup adds one` (or `-X endpoint.embedding_url=URL adds one` in a `--url` session).
+- The memory row of `/status all` (and of `/status` in developer mode) and of developer mode's banner names the backend and model, for example `embedding model · OpenAI-compatible server · Qwen3-Embedding-0.6B` (`oMLX` where the config file says `omlx`).
+- Without one, `/status all` says `no embedding model` and the banner says `no embedding model · melo setup adds one` (or `-X endpoint.embedding_url=URL adds one` in a `--url` session).
 - A new long-term store starts empty; existing text-only entries are not re-embedded.
 - Changing the model changes the vector space: a stored vector of another dimension is skipped, so old entries stop ranking instead of breaking recall. To reclaim the space, stop localmelo and remove `~/.cache/localmelo/memory/long_term.db*` (see [Reset memory](memory.md#reset-memory)).
 - The web workspace also has connection settings (see [the web workspace](web-console.md#web-workspace)).

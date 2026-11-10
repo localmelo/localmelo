@@ -83,7 +83,7 @@ SETUP_CHOICES: list[tuple[str, str]] = [
 
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
     *[(server.key, server.menu) for server in LOCAL_SERVERS],
-    ("none", "None (no long-term memory)"),
+    ("none", "None (search by words only)"),
 ]
 
 
@@ -430,7 +430,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     emb_display = [name for _, name in EMBEDDING_BACKENDS] + [
         choice.label for choice in choices
     ]
-    print("\n  Embedding model for long-term memory:\n")
+    print("\n  Embedding model, for search by meaning across chats:\n")
     emb_choice = _ask_choice("Embedding backend", emb_display, default=default_emb)
 
     picked_choice: EmbeddingChoice | None = None
@@ -451,7 +451,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         if selected_emb_key != "none":
             _onboard_embedding_local(cfg, selected_emb_key)
         else:
-            print("\n  No embedding: agent will not have long-term memory.")
+            print("\n  No embedding: melo remembers across chats by words only.")
 
     cfg.embedding_backend = selected_emb_key
 
@@ -502,7 +502,7 @@ def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> 
     Returns True if config should be saved. When the chat check fails, the
     user may retry, which calls *retry* to ask again (its False cancels),
     save anyway, or cancel, the default. A failed embedding check saves
-    with embedding off, so long-term memory never blocks the chat setup.
+    with embedding off, so the embedding model never blocks the chat setup.
     """
     while True:
         print("\n  Probing backends ...")
@@ -1114,7 +1114,7 @@ def _offer_embedding(
     asked it, else None. Returns ``(embedding_model, ollama)``: the model
     to save, or None for embedding off, and the Ollama answer to pass on so
     the first run asks the server only once. With no candidate, a *first*
-    run says only that memory is off; ``melo setup`` says how to add a model.
+    run says only that search is by words; ``melo setup`` says how to add a model.
     """
     candidates = [
         candidate

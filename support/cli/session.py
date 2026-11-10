@@ -1494,11 +1494,7 @@ class CliSession:
         self._row(
             "memory",
             f"{messages} of {window_text} messages · "
-            + (
-                f"long-term memory · {embedding}"
-                if embedding
-                else "no long-term memory (no embedding backend)"
-            ),
+            + (f"embedding model · {embedding}" if embedding else "no embedding model"),
         )
         options = self.agent.options
         limit = format_duration(SESSION_TOOL_TIMEOUT_S)

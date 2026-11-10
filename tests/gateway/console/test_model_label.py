@@ -110,7 +110,7 @@ def test_the_generic_kind_reads_in_the_page_s_language_and_names_stay_names() ->
         assert {"key": "openai", "label": "OpenAI", "kind": "cloud"} in (
             choices["chat_backends"]
         )
-        assert {"key": "none", "label": "无（没有长期记忆）"} in choices[
+        assert {"key": "none", "label": "无（只按字词搜索）"} in choices[
             "embedding_backends"
         ]
     # A client that asks for no language, and the terminal's setup, read English.

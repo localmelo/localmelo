@@ -1044,6 +1044,11 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
         }
         break;
       }
+      // A work checkpoint is a quiet step of the work, not a warning.
+      if (data.kind === "checkpoint") {
+        turn.items.push({kind: "fact", factKind: "checkpoint", step: int(data.step) ?? turn.step, message: t("turns.checkpoint")});
+        break;
+      }
       // A tool call written as text did not run and is no answer: the notice says so in its place.
       if (data.kind === "tool_call_as_text") turn.heldText = "";
       turn.items.push({

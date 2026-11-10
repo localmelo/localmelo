@@ -26,6 +26,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A question that asks for a short answer gets one in at most two steps.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
 - Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
+- Long work that outgrows the model's context keeps what it learned: when the context is nearly full, melo writes down where the work stands and what it already read, and the oldest results make room.
 - A chat's reply appears line by line as it is written, in the console, the app and the terminal; Stop ends it at once and keeps what was shown.
 - A slow reply from a local model is no longer cut at two minutes: a chat request waits up to five minutes for the server.
 
@@ -66,7 +67,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
 - A note from a page, a file or a task's result is never shown to the model as your words.
-- Long-term memory can be kept between runs, with an embedding model the first run offers.
+- A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 
 ### App and web console
 

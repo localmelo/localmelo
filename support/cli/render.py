@@ -1252,6 +1252,7 @@ class TurnRenderer:
             "tool_call_as_text",
             "thinking_off_retry",
             "answer_from_thinking",
+            "checkpoint",
         ):
             line = Text(f"{self.symbols.dot} {message}", style="muted")
         else:

@@ -16,7 +16,7 @@ page.
 | Keep memory between runs | `export LOCALMELO_PERSIST_MEMORY=1` |
 | Choose the directory | `export LOCALMELO_MEMORY_DIR=…` (default `~/.cache/localmelo/memory`) |
 | Keep the memory of one run in a directory | `melo --memory-dir ~/melo-memory "<task>"` |
-| Turn long-term memory off for one run | `melo --memory off "<task>"` |
+| Turn long-term memory off for one run | `melo --reasoning compress --memory off "<task>"` |
 | Keep the model's reasoning N days | `export LOCALMELO_THINKING_RETENTION_DAYS=N` (default 30) |
 | See past runs | `sqlite3` queries; see [Inspect memory](../guides/memory.md#inspect-memory) |
 | Delete memory | In Python, `await hippo.forget_all()` (one task: `forget(task_id)`); no command yet. See [Reset memory](../guides/memory.md#reset-memory) |
@@ -116,7 +116,8 @@ the vector the earlier store already had. With persistence on, the file
 exists in those modes even without an embedding provider; a text-only entry
 stores an empty vector and is found by the in-process BM25 index.
 
-In `legacy` the file still exists only with an embedding provider.
+A `legacy` run opens no `long_term.db`; a file an earlier version wrote there is
+left as it is, and the other modes read it as before.
 
 | Kind | What it holds | Source |
 |---|---|---|
@@ -265,8 +266,8 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
 ```text
 ~/.cache/localmelo/memory/
   history.db      tasks, steps and model calls
-  long_term.db    long-term memory, when memory is on and either an embedding
-                  backend is configured or the reasoning mode is not legacy
+  long_term.db    long-term memory, when memory is on and the reasoning
+                  mode is not legacy
   procedures.db   procedural memory, written at the end of every run
 ```
 
@@ -360,9 +361,6 @@ planning and reflection requests alike. The history in RAM keeps none.
   requires replay gets every turn in the window), under one request key
   (`reasoning_content`, `reasoning`, or Ollama's `thinking`), at most
   40,000 characters per turn (no cap on a provider that requires replay).
-  Both explicit modes skip `[RECALL]` when they build the prompt, so an
-  embedding provider's long-term memory is written but not read back;
-  `legacy` reads it as before.
 - A request that was retried gives one row, for the reply that came back.
   So the rows of a run number its `n_llm`, unless a row could not be
   written: a row that waits more than 5 seconds for another process's write
@@ -386,8 +384,7 @@ planning and reflection requests alike. The history in RAM keeps none.
   It covers `tasks.query`, `tasks.result`, `steps.thought`, every string
   in `steps.tool_call_json`'s arguments, `steps.tool_result_json`'s output
   and error, `llm_calls.content` and `llm_calls.thinking`, and the text
-  long-term memory keeps (each step's summary and the promoted
-  reflections). What the model reads is not redacted: working memory, the
+  long-term memory keeps. What the model reads is not redacted: working memory, the
   requests a run sends and a run's `result` keep the original text, so
   only the stored copies change. The run's events redact their own fields:
   `assistant.message`'s `content` and `thinking`, and `reflection`'s

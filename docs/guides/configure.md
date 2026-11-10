@@ -96,7 +96,7 @@ When something fails:
 
 - A failed check of the chat server prints `Probe failed: …` and asks `The check failed. What now?`: `Try again`, `Save anyway` or `Cancel setup` (selected first; Esc also saves nothing). Piped, the question is `[r]etry, [s]ave anyway, [N]o [N]:`.
 - An HTTP 401 or 403 from a local server adds a note that localmelo sends no API key to local servers; in oMLX, turn on **Allow inference without API key**.
-- A failed check of the embedding server saves `embedding_backend = "none"` (no long-term memory) and says so.
+- A failed check of the embedding server saves `embedding_backend = "none"` (search by words only) and says so.
 
 More about the wizard:
 

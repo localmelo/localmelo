@@ -1626,13 +1626,16 @@ def _build_parser(
         help="Only the MCP tools: --builtins none --tool-exposure all",
     )
     direct.add_argument(
-        "--memory", choices=["on", "off"], help="Long-term memory (default on)"
+        "--memory",
+        choices=["on", "off"],
+        help="Long-term memory outside legacy reasoning (default on)",
     )
     direct.add_argument(
         "--memory-dir",
         type=_non_empty,
         metavar="DIR",
-        help="Directory for SQLite memory (history.db, long_term.db, procedures.db)",
+        help="Directory for SQLite memory (history.db, procedures.db, and "
+        "long_term.db outside legacy)",
     )
     direct.add_argument(
         "--timeout",

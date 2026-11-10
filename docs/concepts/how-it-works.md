@@ -14,7 +14,7 @@ an attempt that runs out of steps (50), or repeats itself ─► reflection ─�
 
 A run works on one task in steps. Each step:
 
-1. builds a planning request from the task, the recent conversation (working memory), related long-term memories and the latest reflection, if any;
+1. builds a planning request from the task, the recent conversation (working memory), what recall finds (in the reasoning modes other than `legacy`) and the latest reflection, if any;
 2. offers the model a list of tools (see [Tools in each step](#tools-in-each-step));
 3. sends the request and reads the reply.
 
@@ -41,7 +41,7 @@ With `--reasoning compress`, each reply is compressed into a short note before t
 - The notes, the reply's code drafts and one digest per attempt stay in a RAM-only note store beside the window.
 - The loop then recalls: a frozen block of earlier thinking rides on the task query at the start of an attempt, each tool turn appends the notes and drafts the window no longer shows, and the `recall` tool lets the model ask for more.
 - Every block is delimited, framed as data and checked by the candidate boundary; the first request that carries one records it in `history.db`'s `llm_calls.recall_json`.
-- `legacy` keeps its own path unchanged. See [Recall in the loop](memory.md#recall-in-the-loop).
+- `legacy` has no recall in the loop. See [Recall in the loop](memory.md#recall-in-the-loop).
 
 ## Reflection
 
@@ -82,7 +82,6 @@ More about reflections:
 ## Memory in the loop
 
 - On each step, the planning request includes the recent conversation from working memory, and each tool call is recorded in history.
-- In `legacy`, with an embedding backend and memory on, the request also includes the long-term memories closest to the task; each tool call is summarized into long-term memory, which also receives the run's latest reflection when the run ends.
 - When the run ends, what it did (its step counts and the classes and labels of its tool calls) is recorded in [procedural memory](procedures.md), which no prompt includes.
 - In the explicit modes, a reply's note, the attempt digest and the reflection are **candidates** for long-term memory: one is written only when a signal admits it (a rehearsal, a user statement or a user request covering the run).
 - The checked write classifies the fact, compares it with the active entries of its kind and records one action (`NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`) in the store's decision log; every stored text is redacted first.

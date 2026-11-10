@@ -1,10 +1,9 @@
 """Secrets are redacted where memory stores them, not where the model reads them.
 
 History's ``tasks.query``, ``steps.thought``, ``tool_call_json`` and
-``tool_result_json``, long-term memory's stored text and the reflection
-texts promoted into it carry no secret that :func:`redact_secrets`
-recognizes; the working memory and the requests the model receives keep
-the original text.
+``tool_result_json`` carry no secret that :func:`redact_secrets` recognizes;
+the working memory and the requests the model receives keep the original
+text.
 """
 
 from __future__ import annotations
@@ -18,14 +17,12 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import REDACTED
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
-from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import (
     Message,
-    ReflectionEntry,
     StepRecord,
     TaskRecord,
     ToolCall,
@@ -38,14 +35,6 @@ from localmelo.melo.schema import (
 OTP = "Your verification code is 482913."
 CODE = "482913"
 KEY = "sk-" + "aB3" * 10
-
-
-class FakeEmbedding(BaseEmbeddingProvider):
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
-
-    async def close(self) -> None:
-        pass
 
 
 async def _echo(text: str = "", key: str = "") -> ToolOutput:
@@ -85,7 +74,7 @@ class TestStoreStep:
         assert CODE not in stored_step.tool_result.output
         assert KEY not in stored_step.tool_result.output
         assert REDACTED in stored_step.thought
-        # The summary that goes to long-term memory is redacted too.
+        # The summary it returns is redacted too.
         assert CODE not in summary
         assert KEY not in summary
         # The caller's own task and step are untouched: they are what the
@@ -122,47 +111,6 @@ class TestStoreStep:
             assert CODE not in text
             assert KEY not in text
             assert REDACTED in text
-
-
-class TestLongTermWrites:
-    async def test_memorize_stores_the_redacted_text(self, tmp_path: Path) -> None:
-        db = tmp_path / "long.db"
-        long = SqliteLongTerm(db)
-        hippo = Hippo(embedding=FakeEmbedding(), long=long)
-        try:
-            await hippo.memorize(f"the code was {OTP}", to_working=False)
-        finally:
-            await long.aclose()
-
-        [(text,)] = _rows(db, "SELECT text FROM long_term")
-        assert CODE not in text
-        assert REDACTED in text
-
-    async def test_working_memory_keeps_the_original(self) -> None:
-        hippo = Hippo(embedding=FakeEmbedding())
-        await hippo.memorize(f"the code was {OTP}")
-
-        assert hippo.working.get_window()[-1].content == f"the code was {OTP}"
-        [(text, _score, _meta)] = await hippo.long.search([1.0, 0.0, 0.0, 0.0])
-        assert CODE not in text
-
-    async def test_promoted_reflections_store_the_redacted_text(
-        self, tmp_path: Path
-    ) -> None:
-        db = tmp_path / "long.db"
-        long = SqliteLongTerm(db)
-        hippo = Hippo(embedding=FakeEmbedding(), long=long)
-        try:
-            hippo.working.add_reflection(
-                ReflectionEntry(attempt_id=0, summary=f"the OTP was {CODE}")
-            )
-            await hippo.promote_reflections("task-1")
-        finally:
-            await long.aclose()
-
-        [(text,)] = _rows(db, "SELECT text FROM long_term")
-        assert CODE not in text
-        assert REDACTED in text
 
 
 class _LeakyCaller(BaseLLMProvider):
