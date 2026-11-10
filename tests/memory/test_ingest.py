@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.support.memory import ChatMemory, ingest
 from localmelo.support.memory.index import DOC_CHARS, MAX_CHUNKS, document_chunks
 from localmelo.support.memory.ingest import Chat, Exchange, IngestError, Message
@@ -437,6 +438,56 @@ async def test_a_user_message_over_the_stores_limit_is_trimmed_and_counted(
         assert len((await chats.list_turns(session.id))[0].user_text) == MAX_QUERY_LEN
     finally:
         await close(chats, memory)
+
+
+PASSWORD = "plain-Word7"
+
+
+async def test_a_password_in_a_message_or_a_title_reaches_no_record(
+    tmp_path: Path,
+) -> None:
+    data = {
+        "sessions": [
+            chat(
+                "pw",
+                "2023-05-20T13:40:00",
+                ("user", f"Sign in to forum.example. My password is {PASSWORD}."),
+                ("assistant", "Signed in."),
+                ("user", "I live in Pittsburgh."),
+                ("assistant", "Noted."),
+                title=f"Forum password: {PASSWORD}",
+            ),
+            # No title: the store names the chat after its first message.
+            chat(
+                "untitled",
+                "2023-06-01T09:00:00",
+                ("user", f"password: {PASSWORD}"),
+                ("assistant", "ok"),
+            ),
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data)
+    try:
+        assert (report.sessions, report.turns) == (2, 3)
+        for session in await chats.list_sessions(limit=10, kinds=None):
+            turns = await chats.list_turns(session.id)
+            kept = [session.title, *(t.user_text for t in turns)]
+            kept += [t.typed_text or "" for t in turns]
+            assert not [text for text in kept if PASSWORD in text]
+        first = (await chats.list_turns(report.ids["pw"]))[0]
+        assert HANDLE.search(first.user_text), "a handle stands where the value was"
+        # The rest of what was said is kept: a lasting fact still becomes a note.
+        notes = [n.text for n in await memory.records()]
+        assert "You live in Pittsburgh." in notes
+    finally:
+        await close(chats, memory)
+    # No file the run wrote holds the value: the chat store, the index, the notes.
+    held = [
+        path.name
+        for path in tmp_path.rglob("*")
+        if path.is_file() and PASSWORD.encode() in path.read_bytes()
+    ]
+    assert held == []
 
 
 def test_load_reads_a_json_file_and_refuses_a_missing_or_broken_one(

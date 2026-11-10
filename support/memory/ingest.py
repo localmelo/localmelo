@@ -27,6 +27,12 @@ user message before it, and a message with no text, are skipped and counted.
 A user message over :data:`~localmelo.melo.checker.validators.MAX_QUERY_LEN`
 characters is cut there and counted as ``trimmed``.
 
+A password a user message or a session's title gives is replaced by its handle
+before anything is stored, indexed, kept as a note or read by a model, as at a
+chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): the
+file's value reaches no record. An assistant message is stored as it came; what
+counts as a password given is decided from the person's text only.
+
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
 chat model (:meth:`~localmelo.support.memory.service.ChatMemory.compress_chat`):
@@ -57,6 +63,7 @@ from typing import Any, Final
 
 from localmelo.melo import clock
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.memory import ChatMemory, hippo_encode, hippo_judge
 from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import is_cut
@@ -408,7 +415,8 @@ async def run(
         source: dict[str, Any] = {}
         mine: list[hippo_encode.Turn] = []
         for exchange in pairs:
-            typed = exchange.typed
+            # Hidden first, then cut: no part of a value is left at the cut.
+            typed = hide_passwords(exchange.typed)
             if len(typed) > MAX_QUERY_LEN:
                 typed = typed[:MAX_QUERY_LEN]
                 report.trimmed += 1
@@ -423,13 +431,14 @@ async def run(
                 session_id = info.session_id
                 report.sessions += 1
                 report.ids[chat.label] = session_id
-                if chat.title:
-                    await chats.rename_session(session_id, chat.title)
+                title = hide_passwords(chat.title)
+                if title:
+                    await chats.rename_session(session_id, title)
                 session = await chats.get_session(session_id)
                 source = {
                     "session_id": session_id,
                     "kind": "chat",
-                    "title": session.title if session is not None else chat.title,
+                    "title": session.title if session is not None else title,
                 }
             pin.at = exchange.answered_at
             await chats.finish_turn(
