@@ -38,6 +38,16 @@ APPROVAL = {"pending_approvals": [{"request_id": "r1"}]}
             Stage("finished", "person", "continue", "dropped"),
         ),
         ({"state": "expired"}, False, Stage("finished", ending="dropped")),
+        # Its work goes on in a newer task: that one says how it goes, however this one ended.
+        (
+            {
+                "state": "done",
+                "ending": {"state": "blocked"},
+                "successor": {"task_id": "t2"},
+            },
+            False,
+            Stage("went_on"),
+        ),
         ({"state": "running"}, True, Stage("stopping")),
         (
             {"state": "running", **APPROVAL},

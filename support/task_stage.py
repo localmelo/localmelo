@@ -94,7 +94,8 @@ class Stage:
 
     ``key`` is one of ``running``, ``stopping``, ``approval``, ``answer``,
     ``asked`` (its chat's answer), ``model``, ``slot``, ``queued``,
-    ``paused``, ``resume`` (the person's Resume after a restart) and
+    ``paused``, ``resume`` (the person's Resume after a restart),
+    ``went_on`` (it ended and its work goes on in a newer task, #571) and
     ``finished``. ``awaited`` is ``nobody``, ``person``, ``model``, ``slot`` or
     ``time``; ``need`` is ``""``, ``approval``, ``answer``, ``resume``,
     ``continue``, ``review`` or, for a slot, the gate's code. ``ending`` is how
@@ -131,6 +132,7 @@ LABELS: Final[Mapping[str, str]] = {
     "queued": "panel.state.queued",
     "paused": "panel.state.paused",
     "resume": "panel.head.waiting",
+    "went_on": "panel.state.wentOn",
 }
 
 
@@ -183,6 +185,13 @@ Row = tuple[
     Callable[[Mapping[str, Any]], Stage | None],
 ]
 ROWS: Final[tuple[Row, ...]] = (
+    # Ended, with its work going on in a newer task: that one says how it goes,
+    # so this one needs nobody, however it ended.
+    (
+        lambda task, stopping: task.get("state") in FINISHED
+        and bool(task.get("successor")),
+        lambda task: Stage("went_on"),
+    ),
     # Finished, over everything: how it ended.
     (lambda task, stopping: task.get("state") in FINISHED, _finished),
     # A Stop in progress, over every wait.
@@ -218,8 +227,8 @@ ROWS: Final[tuple[Row, ...]] = (
 def task_stage(task: Mapping[str, Any], *, stopping: bool = False) -> Stage:
     """The stage of the task whose plain facts are *task*; *stopping*: a Stop runs.
 
-    Reads ``state``, ``out_of_steps``, ``ending``, ``pending_approvals``,
-    ``ask`` and ``wait_reason``, as the task JSON has them. Anything else,
+    Reads ``state``, ``successor``, ``out_of_steps``, ``ending``,
+    ``pending_approvals``, ``ask`` and ``wait_reason``, as the task JSON has them. Anything else,
     running included, is the plain running stage.
     """
     for when, stage in ROWS:

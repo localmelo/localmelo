@@ -65,6 +65,7 @@ from localmelo.support.gateway.chore_store import (
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import FINISHED, level_word
 from localmelo.support.gateway.i18n import current, said_text, t, using
+from localmelo.support.gateway.task_endings import shown
 from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
@@ -624,7 +625,11 @@ class ChoreRunner:
     # ── How the API shows them ──
 
     async def last(self, chore: Chore) -> dict[str, Any] | None:
-        """How the chore's last run went: its state, a result line and when it ended."""
+        """How the chore's last run went: its state, how it ended (as its task's page says it), a result line and when.
+
+        ``went_on`` is true when the run's work went on in a newer task (#571);
+        its ``ending`` is then ``None``, as its page's stage says.
+        """
         if not chore.last_task_id:
             return None
         try:
@@ -640,8 +645,11 @@ class ChoreRunner:
         elif record.state in FINISHED:
             line = record.wait_reason or t("chores.stoppedEarly")
         at = record.finished_at or record.started_at or record.created_at
+        went_on = await self.console.workers.went_on(record)
         return {
             "state": record.state,
+            "ending": None if went_on else shown(record),
+            "went_on": went_on,
             "line": line,
             "task_id": record.task_id,
             "at": at,

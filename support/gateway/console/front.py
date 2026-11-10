@@ -278,6 +278,7 @@ _STAGE_WORDS: Final = {
     "queued": "waiting to start",
     "paused": "paused",
     "resume": "stopped by a restart",
+    "went_on": "its work went on in a newer task",
 }
 _ENDED_WORDS: Final = {
     "done": "done",
@@ -1261,17 +1262,20 @@ def _summary(line: str) -> str:
     return " ".join(redact_secrets(line)[0].split())
 
 
-def _row(record: TaskRecord) -> str:
+def _row(record: TaskRecord, went_on: bool = False) -> str:
     ending = shown(record)
     stage = task_stage(
         {
             "state": record.state,
             "wait_reason": record.wait_reason,
             "ending": ending,
+            "successor": went_on,
         }
     )
     state = _STAGE_WORDS.get(stage.key) or _ENDED_WORDS.get(record.state, record.state)
-    if is_out_of_steps(record.state, record.wait_reason):
+    if stage.key == "went_on":
+        pass  # however it ended, the newer task's row says how it goes
+    elif is_out_of_steps(record.state, record.wait_reason):
         state = "stopped (ran out of steps; it can continue)"
     elif ending is not None:
         # How it ended as code decided it, never as its report says.
@@ -1461,7 +1465,8 @@ class Front:
         """One task's row, with the chat it belongs to when that is not this one."""
         found = await self.foreign(record)
         owner = found.get("from_chat") or ("the main chat" if found else "")
-        return f"{_row(record)} · from {owner}" if owner else _row(record)
+        row = _row(record, await self.console.workers.went_on(record))
+        return f"{row} · from {owner}" if owner else row
 
     async def line(self, record: TaskRecord) -> str:
         """One task as this chat reads it: its row, and a finished task's answer."""
