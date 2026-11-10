@@ -574,11 +574,14 @@ def grant_offered(request: ApprovalRequest) -> bool:
 
 
 def kept_offered(request: ApprovalRequest) -> bool:
-    """Whether a kept answer is offered for *request*: a folder outside the
-    workspace by its own rule (``outside.grantable``, #405), else :func:`grant_offered`.
+    """Whether a kept answer is offered for *request*: never for what
+    :func:`never_kept` names; a folder outside the workspace by its own rule
+    (``outside.grantable``, #405), else :func:`grant_offered`.
     """
     outside = request.outside
-    return outside.grantable if outside is not None else grant_offered(request)
+    return not never_kept(request) and (
+        outside.grantable if outside is not None else grant_offered(request)
+    )
 
 
 # Set around each tool call of a run that has a policy: asks that policy about

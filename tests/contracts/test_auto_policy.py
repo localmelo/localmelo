@@ -24,6 +24,7 @@ from localmelo.melo.contracts.approvals import (
     denial_text,
     find_auto,
     grant_offered,
+    kept_offered,
     review_mode,
     site_grant,
     wait_words,
@@ -593,13 +594,23 @@ def _site(
         # Ask's own questions keep their rule: unreviewed and routine may be kept.
         (_site(review=None), False, True),
         (_request("print(1)", ActionReview("routine")), False, True),
+        # A folder outside the workspace by its own rule, and never a card-only kind.
+        (
+            dataclasses.replace(
+                _request(review=ActionReview("routine", ("money",))),
+                outside=OutsideAccess("/x/a.txt", "/x", "read", True),
+            ),
+            False,
+            False,
+        ),
     ],
 )
 def test_what_a_chat_may_keep(
     request_: ApprovalRequest, site: bool, offered: bool
 ) -> None:
     assert site_grant(request_) is site
-    assert grant_offered(request_) is offered
+    assert kept_offered(request_) is offered
+    assert grant_offered(request_) is (offered and request_.outside is None)
     if not offered:  # the grants table refuses what the offer refuses (one list)
         with pytest.raises(GrantRefusedError):
             check_grant(
