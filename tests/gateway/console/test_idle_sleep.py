@@ -402,14 +402,14 @@ async def test_a_run_that_changed_notes_adds_one_line_to_the_main_chat(
 async def test_the_line_lists_five_changes_cut_short_and_counts_the_rest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ops = ["O1", "O2", "O3", "O4", "RETIRE", "ADD", "UPDATE", "NEW"]
+    ops = ["O1", "O2", "O3", "NEW", "O2", "O3", "O1", "O3"]
     long = "You keep a very long note.  " * 12
 
     async def fake(variant: str | None = None, **kwargs: Any) -> SleepReport:
         changes = [
             Change(op, [], 1, long if op == "O3" else f"Note {op}") for op in ops
         ]
-        return SleepReport("run-long", "model", 0.0, 0.0, changes=changes)
+        return SleepReport("run-long", "rules", 0.0, 0.0, changes=changes)
 
     async with world(tmp_path) as w:
         monkeypatch.setattr(w.console.memory, "sleep", fake)
@@ -418,7 +418,7 @@ async def test_the_line_lists_five_changes_cut_short_and_counts_the_rest(
         assert (row["count"], row["more"]) == (8, 8 - SHOWN)
         assert row["line"] == "While you were away, melo tidied 8 notes"
         assert [item["change"] for item in row["items"]] == [
-            "merged", "updated", "added", "reworded", "retired",
+            "merged", "updated", "added", "changed", "updated",
         ]  # fmt: skip
         third = row["items"][2]["text"]
         assert TEXT_CHARS - 10 < len(third) <= TEXT_CHARS and third.endswith("…")

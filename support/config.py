@@ -72,7 +72,7 @@ RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 # How memory across chats finds notes: see MemoryConfig.retriever.
 MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
 # How notes are tidied while melo is idle: see MemoryConfig.sleep.
-MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
+MEMORY_SLEEP = ("off", "rules")
 # The recall budget and its bounds (inclusive): see MemoryConfig.recall_records.
 MEMORY_RECALL_RECORDS = (0, 20)
 MEMORY_RECALL_DOCS = (0, 20)
@@ -414,10 +414,9 @@ class MemoryConfig:
     makes code keep after a chat turn the plain, lasting facts the user stated
     that the model did not keep with ``remember``. ``sleep``, another developer
     setting, tidies the notes while melo is idle: ``off`` (the default) or
-    ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
-    ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
-    an optional path whose presence prevents model requests. Five more developer
-    settings shape the recall block a chat message carries: ``recall_records``
+    ``rules`` (code rules, no chat-model call). ``sleep_lock`` is an optional
+    path whose presence stops a run before an embedding request. Five more
+    developer settings shape the recall block a chat message carries: ``recall_records``
     notes (3 by default) and ``recall_docs`` chat turns (2) at most (0-20 each) in a
     block of at most ``recall_chars`` characters (200-8000, 4000 by default);
     ``recall_notes = "off"`` leaves notes out of the block and the
@@ -496,8 +495,8 @@ class MemoryConfig:
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
-    sleep: str = "off"  # off | rules | model | model+tags
-    sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
+    sleep: str = "off"  # off | rules
+    sleep_lock: str = ""  # Optional lock path: no embedding requests while it exists.
     recall_records: int = 3  # Most notes a chat message's recall block holds.
     recall_docs: int = 2  # Most chat turns it holds.
     recall_chars: int = 4000  # Its size bound, in characters.
@@ -1677,6 +1676,10 @@ def _digits_as_text(value: Any) -> Any:
 _SPELLINGS: dict[str, Callable[[Any], Any]] = {
     # "slide" was removed (settings.removed_in says so); it reads as the default.
     "agent.window_eviction": lambda value: "chunk" if value == "slide" else value,
+    # "model" and "model+tags" were removed; both did the rules first, so they read as "rules".
+    "memory.sleep": lambda value: (
+        "rules" if value in ("model", "model+tags") else value
+    ),
     "cli.colors": _digits_as_text,
     "cli.background": _digits_as_text,
     "sessions.record_direct": lambda value: value
