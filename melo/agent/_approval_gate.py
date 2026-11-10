@@ -37,6 +37,7 @@ from localmelo.melo.contracts.approvals import (
     SITE_REFUSED,
     STOPPED_NOTE,
     TAKEOVER,
+    TASK_ASKS_NOBODY,
     UNKNOWN_RESULT,
     WINDOW_READ,
     Allowance,
@@ -960,8 +961,10 @@ class _ToolAsk:
         decided = await self._ask(self._policy.decide, request)
         if not decided.allow and decided.origin == "auto":
             # Auto refused it only because nobody can be asked: say that, not the
-            # category of code melo cannot check that the fixed review carries.
-            return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
+            # category of code melo cannot check that the fixed review carries. A
+            # task that asks nobody says so itself (TASK_ASKS_NOBODY, #583).
+            told = decided.reason if decided.reason == TASK_ASKS_NOBODY else None
+            return dataclasses.replace(decided, reason=told or NOBODY_TO_ASK)
         self._ended_by_words(request, decided)
         return decided
 

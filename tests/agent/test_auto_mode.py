@@ -1180,6 +1180,40 @@ async def test_a_question_only_the_person_answers_is_denied_in_auto_with_nobody_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("task", [False, True])
+async def test_a_task_that_asks_nobody_tells_the_truth_about_a_human_check(
+    tmp_path: Path, task: bool
+) -> None:
+    """#583: a task nobody can be asked for (a chore, one melo or another agent started)
+    shows no card even with its chat open, so the model is never told to keep it open."""
+    tool = PressesACheck()
+    llm = FakeModel([_calls(("press_check", {}, "c1")), _answer("done")])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("check in on the news", approval=AutoPolicy(task=task))
+
+    [answer] = tool.answers
+    assert not answer.allow and answer.origin == "auto"
+    told = denial_text(answer)
+    assert "only the user can answer" in told and "other reason" in told
+    if task:
+        assert "nobody to ask" in told and "Always in this chat" in told
+        assert "keep the chat open" not in told
+    else:
+        assert "nobody has the chat open" in told and "keep the chat open" in told
+
+
+@pytest.mark.asyncio
 async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
     tool = ActsOnSite()
     typing = {"site": "forum.example", "access": "type", "how": "type"}

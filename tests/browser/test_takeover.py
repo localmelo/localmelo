@@ -1459,11 +1459,16 @@ async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing() -
 
 
 @pytest.mark.parametrize("sensitive", ["", "password", "code", "card"])
-async def test_a_consent_press_inside_a_check_still_asks_its_own_question_every_time(
+async def test_the_point_question_comes_before_the_check_s_for_a_hit_marked_sensitive(
     sensitive: str,
 ) -> None:
-    """A kept check answer never covers what the point question asks (never kept):
-    consent, and a password, code or card field at the point."""
+    """The order in the provider, if a hit in a check's frame ever came marked consent or a
+    password, code or card field: the point question (never kept) is asked first.
+
+    The real page script never marks one so (it reads nothing inside a frame from
+    another site), so this pins the order only; what keeps such fields out of reach
+    is that only a known provider's frame, which serves checks only, is a check.
+    """
     inside = Element("button", "", at=-1, fp="bare", sensitive=sensitive)  # type: ignore[arg-type]
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)

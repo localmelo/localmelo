@@ -1023,6 +1023,11 @@ class AutoPolicy:
             ):
                 return Chosen.of(decided)
             return decided
+        if asking is None and self.task and request.tool_name.startswith(HUMAN_CHECK):
+            # A task nobody can be asked for (a chore, one melo or another agent
+            # started) never shows a card, even with its chat open: the model reads
+            # what is true instead of "keep the chat open" (#583).
+            return ApprovalDecision(False, TASK_ASKS_NOBODY, origin="auto")
         return ApprovalDecision(
             False, block_words(review) or "needs your approval", origin="auto"
         )
@@ -1330,6 +1335,23 @@ NOBODY_TO_ASK: Final = (
     "- what you wanted to do, and that only they can answer it;\n"
     "- that they can keep the chat open so that melo asks them on a card the "
     "next time, or switch the chat to Ask.\n"
+    "That is the only reason. Do not give any other reason (a network problem, a "
+    "fault, a limit) and do not guess one.\n"
+    "Do not try to reach the same result another way."
+)
+
+# The same for a human check in a task nobody can be asked for in Auto (a scheduled
+# task, one melo or another agent started): no card comes, whoever has the chat
+# open, so the model reads what the person can do instead (#583).
+TASK_ASKS_NOBODY: Final = (
+    "Auto mode did not run this step: only the user can answer it, and this task "
+    "runs in Auto with nobody to ask (it runs on a schedule, or melo or another "
+    "agent started it), so no card is shown to them.\n"
+    "In your answer, tell the user in plain words:\n"
+    "- what you wanted to do, and that only they can answer it;\n"
+    "- that a scheduled task follows its chat: they can open that chat and "
+    "choose Always in this chat on a human check's card there, or run this task "
+    "in Ask.\n"
     "That is the only reason. Do not give any other reason (a network problem, a "
     "fault, a limit) and do not guess one.\n"
     "Do not try to reach the same result another way."
