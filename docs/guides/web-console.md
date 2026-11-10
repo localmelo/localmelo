@@ -896,9 +896,7 @@ or runs a Shortcut stays **Change system settings?**, and so do a script that re
 without naming an app, a link that is not `http`, `https` or `file` (`open shortcuts://…`),
 erasing a disk and stopping other programs. Discarding uncommitted work (`git checkout -- .`,
 `git restore`, `git clean`) asks **Delete files that cannot be restored?**. The card has **Allow once** and **Deny** only, and **Deny** is the
-filled button: there is no chat-wide allow, and the line under the buttons
-says so ("A chat-wide allow never covers installs, downloads or changes outside
-~/demo-project."). A call melo cannot read, or that it asks about for another
+filled button: there is no chat-wide allow. A call melo cannot read, or that it asks about for another
 reason, shows the plain card.
 
 When melo wants a file outside the chat's folder, the card asks about that folder
