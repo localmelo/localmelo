@@ -17,6 +17,10 @@ from localmelo.support.gateway import workers as worker_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.startup_recovery import (
+    IN_FLIGHT_REASON,
+    StartupRecovery,
+)
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
@@ -345,8 +349,15 @@ async def test_worker_context_hooks_bind_execution(
             assert await recovery.processes(
                 self.session_id, execution_id=execution
             ) == [(123, 123, "boot", "birth")]
-            await entry()
-            assert not await recovery.capture_complete(
+            # A call that can change something is named while it runs.
+            async with entry("shell_exec"):
+                assert await recovery.open_calls(
+                    self.session_id, execution_id=execution
+                ) == ["shell_exec"]
+            assert not await recovery.open_calls(
+                self.session_id, execution_id=execution
+            )
+            assert await recovery.capture_complete(
                 self.session_id, execution_id=execution
             )
             checked.set()
@@ -418,7 +429,8 @@ async def test_current_execution_guard_only_preserves_its_own_capture(
         )
     assert await recovery.capture_complete(task, execution_id="run")
 
-    # A new ordinary execution retires it and starts incomplete.
+    # A new ordinary execution retires it and starts complete: its row is
+    # written before anything of it runs.
     other = await create(tasks, tmp_path, proof=False)
     await tasks.change(
         other, state="running", actor="scheduler", _capture_execution="new"
@@ -431,15 +443,15 @@ async def test_current_execution_guard_only_preserves_its_own_capture(
                 (other, "new"),
             )
         ).fetchone()
-    assert row == (0, 0)  # the row exists and is incomplete
-    assert not await recovery.capture_complete(other, execution_id="new")
+    assert row == (1, 1)
+    assert await recovery.capture_complete(other, execution_id="new")
 
     # Leaving running retires the execution's capture.
     await tasks.change(task, state="done")
     assert not await recovery.capture_complete(task, execution_id="run")
 
 
-async def test_park_resume_starts_a_new_incomplete_execution(
+async def test_park_resume_starts_a_new_execution(
     setup: CaptureSetup, tmp_path: Path
 ) -> None:
     store, tasks, _ = setup
@@ -468,12 +480,12 @@ async def test_park_resume_starts_a_new_incomplete_execution(
     await tasks.resume(task)
     assert (await tasks.get_task(task)).state == "queued"
 
-    # The launch after a park is a new execution with incomplete capture; the
+    # The launch after a park is a new execution with its own capture; the
     # parked execution keeps its process rows as its own evidence.
     await tasks.change(
         task, state="running", actor="scheduler", _capture_execution="next"
     )
-    assert not await recovery.capture_complete(task, execution_id="next")
+    assert await recovery.processes(task, execution_id="next") == []
     assert await recovery.processes(task, execution_id="run") == [
         (11, 11, "boot", "old")
     ]
@@ -511,6 +523,12 @@ async def main():
     worker = TaskWorkers.__new__(TaskWorkers)
     worker.store, worker.tasks = store, tasks
     worker._lock, worker._closed, worker._stopping = asyncio.Lock(), False, set()
+    worker._invalid_workspace = set()
+    if mode in ("in-call", "after-call"):
+        async with TaskWorkers._call_record(worker, task.task_id, "run", "shell_exec"):
+            if mode == "in-call":
+                os._exit(9)
+        os._exit(9)
 
     async def record(pid):
         Path(pid_file).write_text(str(pid))
@@ -587,6 +605,44 @@ async def test_worker_crash_keeps_capture_before_release(
             await asyncio.sleep(0.05)
         else:
             pytest.fail("an unreleased child survived its crashed parent")
+    finally:
+        await store.aclose()
+
+
+@pytest.mark.parametrize("mode", ["in-call", "after-call"])
+async def test_a_death_in_a_changing_call_waits_and_after_it_continues(
+    tmp_path: Path, mode: str
+) -> None:
+    db, workspace = tmp_path / "sessions.db", tmp_path / "workspace"
+    workspace.mkdir()
+    driver = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _CAPTURE_CRASH_DRIVER,
+        str(db),
+        str(workspace),
+        mode,
+        str(tmp_path / "marker"),
+        str(tmp_path / "pid"),
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, errors = await asyncio.wait_for(driver.communicate(), 30)
+    assert driver.returncode == 9, errors.decode()
+    store = SessionStore(db, writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        (task,) = await tasks.list_tasks()
+        await StartupRecovery(store, tasks).run()
+        record = await tasks.get_task(task.task_id)
+        if mode == "in-call":
+            # The call may be half done: the task waits for the person.
+            assert record.state == "interrupted"
+            assert record.wait_reason == IN_FLIGHT_REASON
+        else:
+            assert record.state == "queued"
+            assert await tasks.resume_waiting_turn(task.task_id)
     finally:
         await store.aclose()
 

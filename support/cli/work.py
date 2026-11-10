@@ -15,7 +15,7 @@ import contextlib
 import io
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final, Protocol
 
@@ -40,6 +40,10 @@ LOWEST_RUNNING: Final = 4
 
 class WorkError(Exception):
     """The gateway could not be asked, or refused; the message says why."""
+
+
+class ConfirmFirstError(WorkError):
+    """A Resume asks first, as the task's page does; the message is its warning."""
 
 
 @dataclass(frozen=True)
@@ -134,11 +138,12 @@ def work_parts(summary: WorkSummary) -> list[BarPart]:
 
 @dataclass(frozen=True)
 class Action:
-    """One thing the list can do to a task: ``melo task <command> <id> [level]``."""
+    """One thing the list can do to a task: ``melo task <command> <id> [level] [-y]``."""
 
     label: str
     command: str
     level: str | None = None
+    yes: bool = False
 
 
 def actions(task: WorkTask) -> list[Action]:
@@ -189,6 +194,8 @@ class GatewayTasks:
             with self._connect(timeout=TIMEOUT_S) as client:
                 task_cli.execute(args, client, out=out, stdin=io.StringIO())
             data = json.loads(out.getvalue())
+        except task_cli.ConfirmationNeededError as exc:
+            raise ConfirmFirstError(exc.warning) from exc
         except Exception as exc:  # a bad config or gateway never ends the UI
             raise WorkError(str(exc) or type(exc).__name__) from exc
         if not isinstance(data, dict):
@@ -203,7 +210,9 @@ class GatewayTasks:
 
     def act(self, task: WorkTask, action: Action) -> WorkTask | None:
         """Do *action* to *task* (blocking); the task as the gateway now has it."""
-        data = self._run(command=action.command, id=task.task_id, level=action.level)
+        data = self._run(
+            command=action.command, id=task.task_id, level=action.level, yes=action.yes
+        )
         return WorkTask.from_json(data.get("task"))
 
 
@@ -300,7 +309,16 @@ class WorkBeside:
             if sure != 0:
                 return
         try:
-            after = await asyncio.to_thread(self.source.act, task, action)
+            try:
+                after = await asyncio.to_thread(self.source.act, task, action)
+            except ConfirmFirstError as exc:
+                sure = await app.choose_from(
+                    str(exc), ["Continue anyway", "Keep it waiting"], default=1
+                )
+                if sure != 0:
+                    return
+                action = replace(action, yes=True)
+                after = await asyncio.to_thread(self.source.act, task, action)
         except WorkError as exc:
             app.hint(f"Could not {action.label.lower()}: {exc}", 4.0)
             return

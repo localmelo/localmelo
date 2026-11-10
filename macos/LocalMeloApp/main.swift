@@ -986,7 +986,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     let alert = NSAlert()
                     alert.messageText = L10n.t("app.quit.ask", "Quit localmelo?")
                     alert.informativeText = quitMessage(counts, statusKnown: running != nil)
-                    alert.addButton(withTitle: L10n.t("app.quit.stop", "Quit and Stop"))
+                    alert.addButton(withTitle: L10n.t("app.quit.stop", "Quit"))
                     alert.addButton(withTitle: L10n.t("app.quit.cancel", "Cancel"))
                     guard alert.runModal() == .alertFirstButtonReturn else {
                         self.quitPending = false

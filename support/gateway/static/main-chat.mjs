@@ -71,6 +71,8 @@ export function readCard(row) {
     ...(data.follow_up === true ? {followUp: true} : {}),
     // Which end of its task this card is (the gateway's event id): a follow-up's row names the end it follows.
     ...(endOf(data.end_id) !== null ? {endId: endOf(data.end_id)} : {}),
+    // The start continued its task by itself after a restart: when.
+    ...(Number(data.continued_at) > 0 ? {continuedAt: Number(data.continued_at)} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
       stepKey: String(data.step_key ?? ""),
@@ -237,6 +239,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   // Why it is not ready: what code found missing, or its question.
   const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending) : "";
   if (why) text.append(el("p", "main-card-why", why));
+  if (card.continuedAt) text.append(el("p", "main-card-line", t("cards.continued", {when: clock(card.continuedAt)})));
   if (facts) text.append(blockCard(doc, facts, block ?? {}));
   const inline = card.state === "waiting" && approval;
   if (inline) text.append(approval);

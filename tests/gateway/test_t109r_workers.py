@@ -163,7 +163,7 @@ async def test_post_fence_failure_interrupts_and_counts_once(
     assert provenance.execution_id and provenance.unsafe_resume
     assert not workers.is_active(task_id)
     with pytest.raises(TaskStoreError, match="safety review"):
-        await workers.update(task_id, state="resume")
+        await workers.update(task_id, level="p1")
     assert (await workers.update(task_id, state="stop"))["state"] == "cancelled"
 
 

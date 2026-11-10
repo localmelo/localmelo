@@ -87,7 +87,7 @@ precondition(L10n.language == "en")
 precondition(quitTitle(attached: false) == "Quit localmelo")
 precondition(L10n.t("app.browser.title", "Browser") == "Browser")
 precondition(quitMessage(RunningCounts(chats: 1, tasks: 2, runs: 1, terminal: 0), statusKnown: true)
-    == "Quitting stops what is running: 2 tasks and 1 chat. Not affected: 1 run.")
+    == "Quitting stops 1 chat. 2 tasks will continue when it opens again; a task stopped in the middle of a step waits for you. Not affected: 1 run.")
 let bundle = Bundle(path: {swift(str(resources))})!
 L10n.use("zh-Hans", bundle: bundle)
 precondition(L10n.language == "zh-Hans")
@@ -103,7 +103,7 @@ precondition(L10n.language == "en" && quitTitle(attached: false) == "Quit localm
 """,
     )
     assert out.splitlines() == [
-        "退出会停止正在运行的 2 个任务和 1 个对话。不受影响：1 次运行。",
+        "退出会停止 1 个对话。2 个任务会在 localmelo 再次打开时继续；在某一步中途被停下的任务会等你处理。不受影响：1 次运行。",
         "正在登录",
     ]
 

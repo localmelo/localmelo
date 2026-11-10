@@ -598,23 +598,25 @@ class Console:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        await self.chore_runner.aclose()
-        await self.serve.aclose()
-        await self.setup.aclose()
-        await self.idle_sleep.aclose()
-        await self.idle_encode.aclose()
-        await self.explanations.aclose()
-        for each in (self.front, *self._side_fronts.values()):
-            await each.aclose()
-        if self._monitor is not None:
-            with contextlib.suppress(Exception):
-                await self._monitor.stop()
-        # No follow-up starts while the workers stop their tasks.
-        await self.followups.aclose()
         try:
+            # The tasks first: what the stop writes for a task it cuts off must
+            # not wait for the other closes (the app ends a stop that is slow).
+            # No follow-up starts while the workers stop their tasks.
             try:
+                await self.followups.aclose()
                 await self.workers.aclose()
             finally:
+                await self.chore_runner.aclose()
+                await self.serve.aclose()
+                await self.setup.aclose()
+                await self.idle_sleep.aclose()
+                await self.idle_encode.aclose()
+                await self.explanations.aclose()
+                for each in (self.front, *self._side_fronts.values()):
+                    await each.aclose()
+                if self._monitor is not None:
+                    with contextlib.suppress(Exception):
+                        await self._monitor.stop()
                 # The rows of the asks the close stopped land before the store closes.
                 await self.asks.aclose()
                 with contextlib.suppress(Exception):

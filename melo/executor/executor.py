@@ -16,6 +16,7 @@ from collections.abc import (
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.checker import HARNESS_CALL, Checker
+from localmelo.melo.checker.tiers import changes_nothing
 from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
     APPROVAL_FAILED,
@@ -96,7 +97,6 @@ class Executor:
         self.hippo = hippo
         self.checker = checker
         self._callables: dict[str, ToolCallable] = {}
-        self._process_free: set[str] = set()
         self._timeouts_ms: dict[str, float] = {}
         # The tools registered as requiring approval.
         self._marked_for_approval: set[str] = set()
@@ -123,7 +123,6 @@ class Executor:
         *,
         timeout_ms: float | None = None,
         requires_approval: bool = False,
-        process_free: bool = False,
         precheck: Precheck | None = None,
     ) -> None:
         """Register *fn* as the callable for tool *name*.
@@ -143,10 +142,6 @@ class Executor:
             self._prechecks[name] = precheck
         else:
             self._prechecks.pop(name, None)
-        if process_free:
-            self._process_free.add(name)
-        else:
-            self._process_free.discard(name)
         if timeout_ms is not None:
             self._timeouts_ms[name] = timeout_ms
         else:
@@ -518,21 +513,17 @@ class Executor:
                             ),
                             error_category=ErrorCategory.INVALID_ARGUMENTS,
                         )
-                marked = False
-                if capture is not None and request.tool_name not in self._process_free:
-                    await capture()
-                    task = asyncio.current_task()
-                    if task is not None and task.cancelling():
-                        raise asyncio.CancelledError()
-                    marked = True
-                token = _ENTRY_MARKED.set(marked)
-                # A tool that waits for the person stops this limit meanwhile (pause).
-                limit = TOOL_DEADLINE.set(deadline)
-                try:
-                    output = await fn(**request.arguments)
-                finally:
-                    TOOL_DEADLINE.reset(limit)
-                    _ENTRY_MARKED.reset(token)
+                # A call that can change something is recorded for its whole
+                # length, so a restart knows it may be half done; one that only
+                # reads here needs no record.
+                if capture is not None and not changes_nothing(tool_def):
+                    async with capture(request.tool_name):
+                        task = asyncio.current_task()
+                        if task is not None and task.cancelling():
+                            raise asyncio.CancelledError()
+                        output = await _invoke(fn, request, deadline, marked=True)
+                else:
+                    output = await _invoke(fn, request, deadline, marked=False)
         except (PathChangedError, HardLinkError) as exc:
             # The file opened is not the one checked (a part of the path
             # was swapped after the check), or it has another name (a hard
@@ -681,6 +672,24 @@ def _outside(
     if reason is not None:
         return None, never_text(path, reason)
     return access, ""
+
+
+async def _invoke(
+    fn: ToolCallable,
+    request: ExecutionRequest,
+    deadline: asyncio.Timeout,
+    *,
+    marked: bool,
+) -> str | ToolOutput:
+    """Call *fn*; *marked* says the call's entry record committed."""
+    token = _ENTRY_MARKED.set(marked)
+    # A tool that waits for the person stops this limit meanwhile (pause).
+    limit = TOOL_DEADLINE.set(deadline)
+    try:
+        return await fn(**request.arguments)
+    finally:
+        TOOL_DEADLINE.reset(limit)
+        _ENTRY_MARKED.reset(token)
 
 
 def _resolved_again(

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from localmelo.support.gateway.task_store import (
     TaskConflictError,
     TaskNotFoundError,
+    TaskStore,
     TaskStoreError,
     compare_park_identity,
 )
@@ -443,6 +445,36 @@ class RecoveryStore:
             )
         return True
 
+    async def interrupt(
+        self,
+        task_id: str,
+        *,
+        execution_id: str,
+        card: str,
+        reason: str,
+        crash: bool,
+        outcome: str = "interrupted",
+    ) -> None:
+        """Write *execution_id*'s run down as *outcome*: prepare and commit, against the identity now.
+
+        A transition between the read of the identity and the write conflicts.
+        """
+        generation, previous = await TaskStore(self.store).park_identity(task_id)
+        operation_id = uuid.uuid4().hex
+        await self.prepare(
+            task_id,
+            operation_id=operation_id,
+            execution_id=execution_id,
+            expected_generation=generation,
+            expected_operation_id=previous,
+            outcome=outcome,
+            card=card,
+            reason=reason,
+            crash=crash,
+            unsafe_resume=True,
+        )
+        await self.commit(task_id, operation_id=operation_id)
+
     async def commit(self, task_id: str, *, operation_id: str) -> None:
         """Commit a prepared task outcome, receipt and crash count together."""
         _text(operation_id, "operation_id")
@@ -583,7 +615,7 @@ class RecoveryStore:
         expected_generation: int | None,
         expected_operation_id: str | None,
     ) -> None:
-        """Irreversibly mark this execution incomplete before an untracked call."""
+        """Irreversibly mark this execution incomplete: one of its processes has no record."""
         await self._capture_change(
             task_id, execution_id, expected_generation, expected_operation_id
         )
@@ -621,6 +653,55 @@ class RecoveryStore:
                 "UPDATE recovery_capture SET complete = 0 WHERE task_id = ? AND execution_id = ?",
                 (task_id, execution_id),
             )
+
+    async def open_call(
+        self, task_id: str, *, execution_id: str, call_id: str, tool: str
+    ) -> None:
+        """Name a call that can change something before it starts.
+
+        Only the current, running execution opens one: a call of a run that
+        is being recovered does not start.
+        """
+        for value, name in (
+            (execution_id, "execution_id"),
+            (call_id, "call_id"),
+            (tool, "tool"),
+        ):
+            _text(value, name)
+        async with self.store.component_transaction("call_open") as conn:
+            current = await _one(
+                conn,
+                "SELECT t.state FROM tasks t JOIN recovery_capture c ON c.task_id = t.task_id WHERE t.task_id = ? AND c.execution_id = ? AND c.active = 1 AND NOT EXISTS (SELECT 1 FROM recovery_operations r WHERE r.task_id = t.task_id AND r.kind = 'recovery' AND r.phase = 'prepared')",
+                (task_id, execution_id),
+            )
+            if not current or current[0] != "running":
+                raise TaskConflictError("capture execution is not current and running")
+            await conn.execute(
+                "INSERT INTO recovery_calls VALUES (?, ?, ?, ?)",
+                (task_id, execution_id, call_id, tool),
+            )
+
+    async def close_call(
+        self, task_id: str, *, execution_id: str, call_id: str
+    ) -> None:
+        """The call returned, however it did: it is no longer in flight."""
+        async with self.store.component_transaction("call_close") as conn:
+            await conn.execute(
+                "DELETE FROM recovery_calls WHERE task_id = ? AND execution_id = ? AND call_id = ?",
+                (task_id, execution_id, call_id),
+            )
+
+    async def open_calls(self, task_id: str, *, execution_id: str) -> list[str]:
+        """The tools of this execution's calls that had not returned, oldest first."""
+        _text(execution_id, "execution_id")
+        async with self.store.component_transaction("calls_open") as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT tool FROM recovery_calls WHERE task_id = ? AND execution_id = ? ORDER BY rowid",
+                    (task_id, execution_id),
+                )
+            ).fetchall()
+        return [str(row[0]) for row in rows]
 
     @staticmethod
     async def _advance_start_receipt(

@@ -11,7 +11,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, replace
 from typing import Any, Final, Protocol, cast
@@ -104,7 +104,7 @@ from localmelo.support.gateway.resume_evidence import (
     decide,
 )
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
-from localmelo.support.gateway.startup_recovery import StartupRecovery
+from localmelo.support.gateway.startup_recovery import STOPPED_REASON, StartupRecovery
 from localmelo.support.gateway.task_endings import (
     FINISH_TRIED,
     Baseline,
@@ -653,6 +653,9 @@ class TaskWorkers:
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
         self._stopping: set[str] = set()
+        # The runs a gateway stop cut off, not the person's Stop: they continue
+        # at the next start instead of ending.
+        self._cut: set[str] = set()
         self._invalid_workspace: set[str] = set()
         self._ready: dict[str, asyncio.Event] = {}
         self._points: dict[str, tuple[GateCall, SessionRunner, str]] = {}
@@ -670,6 +673,7 @@ class TaskWorkers:
         self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
+        self._recovered = False
         # The main chat a task created here belongs to (its ``front_id``).
         self.front_id: str | None = None
         # The HOME folders made for running tasks' tools (see task_home).
@@ -709,7 +713,16 @@ class TaskWorkers:
         if not self._opened:
             await self.tasks.open()
             try:
-                await StartupRecovery(self.store, self.tasks).run()
+                if not self._recovered:
+                    # Once per process: a retry of open after a failure below
+                    # finds the tasks it started live, not cut off.
+                    await StartupRecovery(
+                        self.store,
+                        self.tasks,
+                        verifier=self._process_verifier,
+                        workspace_valid=self._resume_workspace,
+                    ).run()
+                    self._recovered = True
                 self._restart_fenced = set()
                 self._eligible.difference_update(self._restart_first)
                 self._restart_first.clear()
@@ -733,21 +746,9 @@ class TaskWorkers:
                         and record.level < 5
                         and await self.tasks.resume_waiting_turn(record.task_id)
                     ):
-                        # A Resume committed before the restart whose turn never
-                        # started is re-admitted, not fenced for another review.
-                        self._register(record)
-                        self._eligible.add(record.task_id)
-                    elif (
-                        record.state == "interrupted"
-                        and record.level < 5
-                        and await self.tasks.resume_waiting_turn(record.task_id)
-                    ):
-                        # The crash came after the task reached running but
-                        # before the resumed turn began: startup interrupted
-                        # it, and the committed Resume is queued again.
-                        record = await self.tasks.change(
-                            record.task_id, state="queued", actor="scheduler"
-                        )
+                        # A Resume or the start's own continue, whose turn has
+                        # not begun: it runs; only a task that waits for the
+                        # person is fenced.
                         self._register(record)
                         self._eligible.add(record.task_id)
                     else:
@@ -1496,11 +1497,14 @@ class TaskWorkers:
         state: str | None = None,
         *,
         check: Callable[[], None] | None = None,
+        confirmation_token: str | None = None,
     ) -> dict:
         """Change *task_id*'s level or state.
 
         *check* raises when the change is no longer wanted. Nothing is awaited
         between it and a stop's cancel, so what it saw is what is stopped.
+        Resuming a task the restart left waiting is :meth:`resume`, with
+        *confirmation_token* when it asks for one.
         """
         if check is not None:
             check()
@@ -1526,6 +1530,14 @@ class TaskWorkers:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined and state != "stop":
             raise TaskStoreError("worker cleanup failed; slot held until restart")
+        if state == "resume" and task_id in self._restart_fenced:
+            # Every surface resumes such a task with the page's own operation.
+            body = await self.resume(
+                task_id,
+                operation_id=uuid.uuid4().hex,
+                confirmation_token=confirmation_token,
+            )
+            return body if level is None else await self.update(task_id, level=level)
         is_p5 = level == 5 or level == "p5"
         if state == "pause" and level is not None:
             raise ValueError("pause cannot be combined with a level")
@@ -1537,11 +1549,7 @@ class TaskWorkers:
             self._pause_requested.add(task_id)
             self._ready[task_id].clear()
         if state == "stop" and task_id in self._runs:
-            self._stopping.add(task_id)
-            self._ready[task_id].clear()
-            runner = self._runners.get(task_id)
-            if runner is not None:
-                runner.cancel(cause="user_stop")
+            self._stop_run(task_id)
         if state == "resume" and task_id in self._park_winners:
             cleanup = self._runs.get(task_id)
             if cleanup is not None:
@@ -1592,38 +1600,23 @@ class TaskWorkers:
                 self.gate.finish_task(task_id, "cancelled")
                 return await self._body(record)
             pending_resume = False
-            if state == "pause" and current.level == 5:
-                async with self.store.component_transaction("worker_pending") as conn:
-                    pending = await (
-                        await conn.execute(
-                            "SELECT pause_pending FROM park_priority WHERE task_id = ?",
-                            (task_id,),
-                        )
-                    ).fetchone()
-                if pending and pending[0]:
-                    if current.state == "held":
-                        self._select_park(task_id)
-                    return await self._body(current)
+            if (
+                state == "pause"
+                and current.level == 5
+                and await self.tasks.pause_pending(task_id)
+            ):
+                if current.state == "held":
+                    self._select_park(task_id)
+                return await self._body(current)
             if state == "resume" and current.state not in ("parked", "interrupted"):
-                async with self.store.component_transaction("worker_pending") as conn:
-                    row = await (
-                        await conn.execute(
-                            "SELECT pause_pending FROM park_priority WHERE task_id = ?",
-                            (task_id,),
-                        )
-                    ).fetchone()
-                pending_resume = bool(row and row[0])
+                pending_resume = await self.tasks.pause_pending(task_id)
                 if not pending_resume:
                     raise TaskNotPausedError("task is not paused")
             if state == "stop" and task_id in self._runs:
-                # Set the stop flag under the same lock Resume holds, so a
-                # worker admitted by a Resume that finished committing just
-                # before this Stop cannot start its turn.
-                self._stopping.add(task_id)
-                self._ready[task_id].clear()
-                runner = self._runners.get(task_id)
-                if runner is not None:
-                    runner.cancel(cause="user_stop")
+                # Again under the same lock Resume holds, so a worker admitted
+                # by a Resume that finished committing just before this Stop
+                # cannot start its turn.
+                self._stop_run(task_id)
             if state == "resume" or (
                 current.level == 5
                 and level is not None
@@ -1690,6 +1683,9 @@ class TaskWorkers:
                         expected_generation=generation,
                         expected_operation_id=previous,
                         operation_id=uuid.uuid4().hex,
+                        # Making room is the scheduler's park: a restart
+                        # continues it, as it does not continue a person's.
+                        actor="scheduler" if _MAKING_ROOM.get() else "user",
                     )
                     if record.state != "held" and task_id in self._approval_points:
                         evidence = self._approval_points[task_id][2]
@@ -1735,7 +1731,7 @@ class TaskWorkers:
                     # TaskStore.change adopts the live capture of a
                     # running/held -> running transition. A resume after a
                     # full park goes back through _run, which launches a new
-                    # execution with capture incomplete.
+                    # execution with its own capture.
                     record = await self.tasks.change(
                         task_id,
                         state="running",
@@ -2291,6 +2287,19 @@ class TaskWorkers:
                     await asyncio.wait_for(self._shutdown.wait(), timeout=delay)
                 delay = min(delay * 2, 5.0)
 
+    def _stop_run(self, task_id: str) -> None:
+        """The person's Stop of *task_id*'s run: it ends ``cancelled``.
+
+        It wins over a gateway stop that cut the run off, so it never continues.
+        Nothing is awaited: what the caller checked is what is stopped.
+        """
+        self._stopping.add(task_id)
+        self._cut.discard(task_id)
+        self._ready[task_id].clear()
+        runner = self._runners.get(task_id)
+        if runner is not None:
+            runner.cancel(cause="user_stop")
+
     async def _close_worker(
         self, runner: SessionRunner | None, agent: Agent | None
     ) -> None:
@@ -2511,8 +2520,13 @@ class TaskWorkers:
             raise WorkspaceError("The task workspace has changed")
         return resolved
 
-    async def _capture_incomplete(self, task_id: str, execution_id: str) -> None:
-        """Do not admit arbitrary code without durable incomplete evidence."""
+    async def _evidence(
+        self, task_id: str, write: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Write execution evidence before what it covers runs.
+
+        A run being cancelled stands down instead: nothing starts without it.
+        """
         delay = 0.05
         try:
             async with asyncio.timeout(_CAPTURE_RETRY_SECONDS):
@@ -2524,18 +2538,8 @@ class TaskWorkers:
                                 or task_id in self._stopping
                                 or task_id in self._invalid_workspace
                             ):
-                                # The run is being cancelled: stand down rather
-                                # than start providers without evidence.
                                 raise asyncio.CancelledError()
-                            generation, previous = await self.tasks.park_identity(
-                                task_id
-                            )
-                            await RecoveryStore(self.store).mark_capture_incomplete(
-                                task_id,
-                                execution_id=execution_id,
-                                expected_generation=generation,
-                                expected_operation_id=previous,
-                            )
+                            await write()
                             if self._closed or task_id in self._stopping:
                                 raise asyncio.CancelledError()
                         return
@@ -2548,6 +2552,58 @@ class TaskWorkers:
             raise RuntimeError(
                 "execution evidence could not be recorded; the call was not run; task store unavailable"
             ) from exc
+
+    async def _capture_incomplete(self, task_id: str, execution_id: str) -> None:
+        """A process of this execution has no record: it may outlive a restart."""
+
+        async def write() -> None:
+            generation, previous = await self.tasks.park_identity(task_id)
+            await RecoveryStore(self.store).mark_capture_incomplete(
+                task_id,
+                execution_id=execution_id,
+                expected_generation=generation,
+                expected_operation_id=previous,
+            )
+
+        await self._evidence(task_id, write)
+
+    @contextlib.asynccontextmanager
+    async def _call_record(
+        self, task_id: str, execution_id: str, tool: str
+    ) -> AsyncIterator[None]:
+        """Name a call that can change something for as long as it runs.
+
+        The row is closed however the call returns, except when the gateway's
+        stop cuts the call off: it may be half done, so its row stays and the
+        restart leaves the task waiting, as it does after a kill. A close that
+        fails leaves the row too.
+        """
+        recovery = RecoveryStore(self.store)
+        call_id = uuid.uuid4().hex
+
+        async def write() -> None:
+            await recovery.open_call(
+                task_id, execution_id=execution_id, call_id=call_id, tool=tool
+            )
+
+        cut = False
+        try:
+            await self._evidence(task_id, write)
+            try:
+                yield
+            except asyncio.CancelledError:
+                cut = task_id in self._cut
+                raise
+        finally:
+            if not cut:
+                try:
+                    await asyncio.shield(
+                        recovery.close_call(
+                            task_id, execution_id=execution_id, call_id=call_id
+                        )
+                    )
+                except Exception:
+                    log.warning("Task %s: a call's record stays open", task_id)
 
     async def _capture_process(self, task_id: str, execution_id: str, pid: int) -> None:
         try:
@@ -2582,6 +2638,8 @@ class TaskWorkers:
         # How the run ended, decided by code for the phase it was decided at.
         ending: dict[str, Any] | None = None
         ending_phase = ""
+        # The stop's interrupted write was made for this run (see the finally).
+        cut_written = False
         base = Baseline(None, git=True, error=True)  # until read: never ready
         # The policy that follows the chat's mode, once a person's task has one (#576).
         followed: ModePolicy | None = None
@@ -2682,8 +2740,7 @@ class TaskWorkers:
                 # An ordinary start (a continued task, one queued again after a
                 # park) has no launch fence, but the tool-capture hook below
                 # needs this execution's capture row and a running task: it
-                # goes to running now, with a capture that starts incomplete,
-                # as an ordinary start's always did.
+                # goes to running now, with its capture, before anything runs.
                 execution_id = uuid.uuid4().hex
                 async with self._lock:
                     # A Stop, a close or a bad folder is settled where the agent
@@ -2705,13 +2762,13 @@ class TaskWorkers:
                         )
             capture_execution = execution_id
 
-            async def incomplete() -> None:
-                await self._capture_incomplete(task_id, capture_execution)
+            def call(tool: str) -> contextlib.AbstractAsyncContextManager[None]:
+                return self._call_record(task_id, capture_execution, tool)
 
             async def capture(pid: int) -> None:
                 await self._capture_process(task_id, capture_execution, pid)
 
-            tool_token = TOOL_ENTRY.set(incomplete)
+            tool_token = TOOL_ENTRY.set(call)
             process_token = PROCESS_RECORD.set(capture)
             client = self.gate.client(task_id)
             home, tool_env = task_home(task_id)
@@ -2954,9 +3011,9 @@ class TaskWorkers:
                             await runner.start_turn(
                                 text,
                                 approval=policy,
-                                client_request_id=(
-                                    execution_id if launch_committed else None
-                                ),
+                                # The execution names its turn, so a restart
+                                # knows a run of a continued task finished too.
+                                client_request_id=execution_id,
                                 **own,
                             )
                             turn_started = True
@@ -2977,10 +3034,12 @@ class TaskWorkers:
                 if result and result.status == "budget_exhausted":
                     # Out of steps is a stop the person can continue, not a failure.
                     failure_reason = OUT_OF_STEPS
-                ending_phase = phase
-                ending = await self._ending(
-                    task_id, phase, failure_reason, workspace, base, record
-                )
+                if not (phase == "cancelled" and task_id in self._cut):
+                    # A turn the stop cut off did not end: it has no ending.
+                    ending_phase = phase
+                    ending = await self._ending(
+                        task_id, phase, failure_reason, workspace, base, record
+                    )
         except WorkspaceError:
             if launch_committed and not turn_started:
                 post_fence_failure = True
@@ -3041,6 +3100,17 @@ class TaskWorkers:
                 if cleaned and not self._closed:
                     await self._retry_finalization(task_id, cleanup_failed=False)
             else:
+                if task_id in self._cut and not ending_phase:
+                    # The stop's write first: a slow close of the worker must
+                    # not push it past the end of the process.
+                    try:
+                        async with self._lock:
+                            await self._cut_off(task_id)
+                        cut_written = True
+                    except TaskNotFoundError:
+                        pass
+                    except TaskStoreError:
+                        log.exception("Could not write task %s down", task_id)
                 try:
                     await self._close_worker(runner, agent)
                 except Exception:
@@ -3068,25 +3138,14 @@ class TaskWorkers:
                         current = await self.tasks.get_task(task_id)
                         if current.state not in TERMINAL_PHASES:
                             card = current.card or await self._park_card(task_id)
-                            generation, previous = await self.tasks.park_identity(
-                                task_id
-                            )
-                            operation_id = uuid.uuid4().hex
                             assert execution_id is not None
-                            recovery = RecoveryStore(self.store)
-                            await recovery.prepare(
+                            await RecoveryStore(self.store).interrupt(
                                 task_id,
-                                operation_id=operation_id,
                                 execution_id=execution_id,
-                                expected_generation=generation,
-                                expected_operation_id=previous,
-                                outcome="interrupted",
                                 card=card,
                                 reason="launch failed before the turn; safety review required",
                                 crash=True,
-                                unsafe_resume=True,
                             )
-                            await recovery.commit(task_id, operation_id=operation_id)
                             self.gate.update_task(
                                 task_id, phase="interrupted", paused=True
                             )
@@ -3132,7 +3191,9 @@ class TaskWorkers:
                         # Finished: its allowances go, used or not (#339).
                         self._auto.pop(task_id, None)
                     try:
-                        if (
+                        if cut_written and task_id in self._cut:
+                            pass  # written down before the close, above
+                        elif (
                             task_id not in self._invalid_workspace
                             and (await self.tasks.get_task(task_id)).state
                             not in TERMINAL_PHASES
@@ -3198,6 +3259,28 @@ class TaskWorkers:
                     with contextlib.suppress(Exception):
                         if self.on_unsent is not None:
                             await self.on_unsent(ended, str(exc) or type(exc).__name__)
+
+    async def _cut_off(self, task_id: str) -> None:
+        """Leave a run the gateway stop cut off where the next start continues it.
+
+        One write, no wait: a live run becomes ``interrupted`` with the reason
+        that says so, which the next start decides; a task that had not gone
+        running yet stays as it is.
+        """
+        current = await self.tasks.get_task(task_id)
+        if current.state not in ("running", "held"):
+            return
+        recovery = RecoveryStore(self.store)
+        provenance = await recovery.provenance(task_id)
+        if provenance.execution_id is None:
+            return  # no execution to name: the next start treats it as a crash
+        await recovery.interrupt(
+            task_id,
+            execution_id=provenance.execution_id,
+            card=current.card,
+            reason=STOPPED_REASON,
+            crash=False,
+        )
 
     def _card_watch(self, task_id: str) -> CardWatch:
         """Who sees the card Auto shows for *task_id*, and how long it waits (#465).
@@ -3265,6 +3348,8 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
+        # When the start continued it by itself: its page says so, with the time.
+        body["continued_at"] = await self.tasks.continued_at(record.task_id)
         # Ask or Auto, and what Auto blocked (#339): the chat's mode now for a
         # person's task that has not ended (#576), else the mode it ended with.
         body["approvals"] = await self._chat_mode_of(record) or chat_mode(
@@ -3431,6 +3516,7 @@ class TaskWorkers:
             self._closed = True
             self._shutdown.set()
             self._eligible.clear()
+            self._cut = set(self._runs) - self._stopping
             for task_id in self._runs:
                 self._stopping.add(task_id)
             for runner in self._runners.values():

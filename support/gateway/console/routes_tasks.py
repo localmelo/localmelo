@@ -57,6 +57,8 @@ class CardSource(Body):
 class UpdateTask(Body):
     level: StrictInt | StrictStr | None = None
     state: StrictStr | None = None
+    # A resume that asked for one: the token its 409 gave (see ResumeTask).
+    confirmation_token: StrictStr | None = None
     # A browser card's Stop names what it shows: a card of an earlier run stops nothing.
     source: CardSource | None = None
 
@@ -167,8 +169,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
         try:
             task = await _call(
-                console.workers.update(
-                    task_id, level=body.level, state=body.state, check=still_shown
+                _resume_call(
+                    console.workers.update(
+                        task_id,
+                        level=body.level,
+                        state=body.state,
+                        check=still_shown,
+                        confirmation_token=body.confirmation_token,
+                    )
                 )
             )
         except StaleSourceError as exc:

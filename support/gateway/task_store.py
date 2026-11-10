@@ -42,6 +42,9 @@ from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
 SCHEDULER_VERSION: Final = 6
+# The actor of a continue the start made by itself, and the reason its
+# ``sched.resumed`` event names.
+RESTART: Final = "restart"
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -113,6 +116,13 @@ _SNAPSHOT_SCHEMA: Final = """CREATE TABLE park_priority (
   generation INTEGER NOT NULL DEFAULT 0, operation_id TEXT,
   snapshot_active INTEGER NOT NULL DEFAULT 1)"""
 
+# The calls that can change something and have not returned, one row each
+# while it runs: a restart that finds one knows the call may be half done.
+_CALLS_SCHEMA: Final = """CREATE TABLE IF NOT EXISTS recovery_calls (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  execution_id TEXT NOT NULL, call_id TEXT NOT NULL, tool TEXT NOT NULL,
+  PRIMARY KEY (task_id, execution_id, call_id))"""
+
 _RECOVERY_SCHEMA: Final = (
     """CREATE TABLE IF NOT EXISTS recovery_provenance (
   task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
@@ -137,6 +147,7 @@ _RECOVERY_SCHEMA: Final = (
   execution_id TEXT NOT NULL, complete INTEGER NOT NULL, trusted INTEGER NOT NULL,
   active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (task_id, execution_id))""",
     "CREATE UNIQUE INDEX IF NOT EXISTS recovery_one_capture ON recovery_capture(task_id) WHERE active = 1",
+    _CALLS_SCHEMA,
 )
 
 _TASK_COLUMNS: Final = (
@@ -260,7 +271,11 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _resume_request(
-    generation: int | None, previous: str | None, actor: str, next_turn: int
+    generation: int | None,
+    previous: str | None,
+    actor: str,
+    next_turn: int,
+    at: float | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -269,6 +284,8 @@ def _resume_request(
             "previous": previous,
             "actor": actor,
             "next_turn": next_turn,
+            # When the start continued the task by itself (its page shows it).
+            **({} if at is None else {"at": at}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -430,6 +447,7 @@ class TaskStore:
                 await conn.execute(
                     _CREATE_KEYS
                 )  # IF NOT EXISTS: older v6 files lack it
+                await conn.execute(_CALLS_SCHEMA)  # IF NOT EXISTS: and this table
             elif current > SCHEDULER_VERSION:
                 raise SessionStoreError(
                     f"{self._store.path} has scheduler schema version {current}; "
@@ -565,6 +583,7 @@ class TaskStore:
         request: Mapping[str, Any] | None = None,
         state: str = "",
         ending: Mapping[str, Any] | None = None,
+        reason: str = "",
     ) -> None:
         if not explicit:
             row = await _first(
@@ -627,6 +646,7 @@ class TaskStore:
                 "task_request": request,
                 "state": state,
                 **({} if ending is None else {"ending": dict(ending)}),
+                **({"reason": reason} if reason else {}),
             },
         )
 
@@ -683,6 +703,39 @@ class TaskStore:
                 (task_id, turn),
             )
             return row is not None
+
+    async def pause_pending(self, task_id: str) -> bool:
+        """Whether a pause was asked for and the run has not parked yet."""
+        async with self._store.component_transaction("task_pause_pending") as conn:
+            row = await _first(
+                conn,
+                "SELECT pause_pending FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+        return bool(row and row[0])
+
+    async def continued_at(self, task_id: str) -> float | None:
+        """When the start last continued *task_id* by itself, or ``None``.
+
+        Only while that is the newest Resume of the task: one the person made
+        since is not a restart's. One read of the newest Resume's receipt.
+        """
+        async with self._store.component_read() as conn:
+            row = await _first(
+                conn,
+                "SELECT request FROM recovery_operations WHERE task_id = ? "
+                "AND kind = 'resume' AND phase = 'committed' "
+                "ORDER BY rowid DESC LIMIT 1",
+                (task_id,),
+            )
+        try:
+            request = json.loads(row[0]) if row is not None else None
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(request, dict) or request.get("actor") != RESTART:
+            return None
+        at = request.get("at")
+        return float(at) if isinstance(at, int | float) else None
 
     async def resume_waiting_turn(self, task_id: str) -> bool:
         """Whether the newest committed Resume still waits for its first turn."""
@@ -1330,8 +1383,10 @@ class TaskStore:
                         (task_id,),
                     )
                     if _capture_execution is not None:
+                        # Complete and trusted until a process goes
+                        # unrecorded: the row is written before anything runs.
                         await conn.execute(
-                            "INSERT INTO recovery_capture VALUES (?, ?, 0, 0, 1)",
+                            "INSERT INTO recovery_capture VALUES (?, ?, 1, 1, 1)",
                             (task_id, _capture_execution),
                         )
                         # The ordinary (resumed or legacy) start becomes the
@@ -1451,11 +1506,24 @@ class TaskStore:
             if state is not None:
                 if state != "parked":
                     await self._clear_snapshot(conn, task_id)
+                # A turn that finished ends a run of crashes: the next crash
+                # is the first in a row again.
                 await conn.execute(
                     "UPDATE tasks SET state = ?, started_at = CASE WHEN ? = 'running' THEN COALESCE(started_at, ?) ELSE started_at END, "
                     "finished_at = CASE WHEN ? IN ('done','failed','cancelled','expired') THEN ? ELSE NULL END, "
+                    "crashes = CASE WHEN ? IN ('done','failed') THEN 0 ELSE crashes END, "
                     "wait_reason = ?, hold_site = '', updated_at = ? WHERE task_id = ?",
-                    (state, state, now, state, now, failure_reason or "", now, task_id),
+                    (
+                        state,
+                        state,
+                        now,
+                        state,
+                        now,
+                        state,
+                        failure_reason or "",
+                        now,
+                        task_id,
+                    ),
                 )
                 if ending is not None:
                     # A ready ending owes nothing: the next run starts a new baseline.
@@ -1582,6 +1650,28 @@ class TaskStore:
             if _guard and await self._is_retry(conn, current, _guard[2], request or {}):
                 return current
             if current.state == "parked" and current.level == 5 and not _guard:
+                if actor != "scheduler":
+                    # Parked already, by the scheduler perhaps: the person's
+                    # pause is still written, so a restart never continues it.
+                    row = await _first(
+                        conn,
+                        "SELECT generation FROM park_priority WHERE task_id = ?",
+                        (task_id,),
+                    )
+                    await self._store.append_component_event(
+                        conn,
+                        events,
+                        task_id,
+                        "sched.pause_requested",
+                        {
+                            "generation": row[0] if row else None,
+                            "operation_id": uuid.uuid4().hex,
+                            "pending_operation_id": None,
+                            "pause_pending": False,
+                            "task_request": {"kind": "pause", "actor": actor},
+                            "state": "parked",
+                        },
+                    )
                 return current
             if _guard and current.state not in ("queued", "running", "held"):
                 raise TaskStoreError("task cannot accept a pending pause")
@@ -1805,13 +1895,16 @@ class TaskStore:
         confirmed: bool,
         first_start: bool,
         actor: str = "user",
+        because: str = "",
     ) -> TaskRecord:
         """Queue one recovered task and record the Resume operation atomically.
 
         *confirmed* records a user-accepted orphan risk in
         ``sched.resume_confirmed``; it proves nothing about process death. A
         repeated ``operation_id`` returns the stored row without a second
-        transition. A terminal or changed row refuses the resume.
+        transition. A terminal or changed row refuses the resume. *because*
+        is the ``sched.resumed`` event's reason (``"restart"``: the start
+        continued the task by itself).
         """
         if not isinstance(operation_id, str) or not operation_id.strip():
             raise ValueError("operation_id must be a non-empty string")
@@ -1859,7 +1952,14 @@ class TaskStore:
             first = bool(provenance) and provenance[0] == "never_started"
             if first_start != first:
                 raise TaskConflictError("first-start evidence changed")
-            if not first and not current.card.strip():
+            if (
+                not first
+                and not current.card.strip()
+                and await _first(
+                    conn, "SELECT 1 FROM turns WHERE session_id = ?", (task_id,)
+                )
+            ):
+                # A started task with no turn yet goes on from its objective.
                 raise TaskStoreError("recovery information is missing")
             if provenance and provenance[1] != expected_execution_id:
                 raise TaskConflictError("recovery execution identity changed")
@@ -1900,6 +2000,7 @@ class TaskStore:
                 expected_operation_id=expected_operation_id,
                 operation_id=transition_id,
                 state="queued",
+                reason=because,
             )
             identity = await _first(
                 conn,
@@ -1934,6 +2035,7 @@ class TaskStore:
                 expected_operation_id,
                 actor,
                 await _next_turn_number(conn, task_id),
+                at=now if actor == RESTART else None,
             )
             await conn.execute(
                 "INSERT INTO recovery_operations VALUES "

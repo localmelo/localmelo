@@ -113,13 +113,13 @@
     "one": "{n} run",
     "other": "{n} runs"
   },
-  "app.quit.stop": "Quit and Stop",
-  "app.quit.stopsAll": "Quitting stops what is running: {what}.",
+  "app.quit.stop": "Quit",
   "app.quit.stopsOne": "Quitting stops {what}.",
   "app.quit.tasks": {
     "one": "{n} task",
     "other": "{n} tasks"
   },
+  "app.quit.tasksContinue": " {what} will continue when it opens again; a task stopped in the middle of a step waits for you.",
   "app.quit.terminal": {
     "one": "{n} terminal chat",
     "other": "{n} terminal chats"
@@ -529,6 +529,7 @@
   "cards.answer.noAnswer": "No answer in time",
   "cards.answer.withdrawn": "Not run: it stopped first",
   "cards.blocked": "Blocked: {what}",
+  "cards.continued": "Continued after a restart at {when}",
   "cards.folderRefused": "Could not use its folder: {problem}",
   "cards.outOfSteps": "Ran out of steps",
   "cards.reminderFailed": "The reminder did not run. It was: {words}",
@@ -2212,6 +2213,7 @@
   "tasks.resumeAnyway": "Resume anyway",
   "tasks.resumeTitle": "Resume this task?",
   "tasks.resuming": "Resuming…",
+  "tasks.row.continued": "Continued after a restart",
   "tasks.row.evidence": "Evidence",
   "tasks.row.left": "What is left",
   "tasks.row.mode": "Mode",

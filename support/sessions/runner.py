@@ -110,6 +110,12 @@ SINK_TIMEOUT_S: Final = 5.0
 # WRITER_BATCH_MAX, the events of one append_events transaction, is the
 # store's, imported above.
 RESUME_MAX_TURNS: Final = 10
+# What a stop stores of itself when its caller names no reason: true for its
+# cause. Any other cause says the session closed.
+_STOP_REASONS: Final = {
+    "user_stop": "Cancelled by the user",
+    "shutdown": "Stopped when localmelo closed",
+}
 # Characters of user text and answers that a pairs resume loads at most.
 RESUME_BUDGET_CHARS: Final = 32_000
 DEFAULT_RESUME_MODE: Final[ResumeMode] = "pairs"
@@ -223,6 +229,11 @@ def _check_cause(cause: object) -> Cause:
         stops = ", ".join(sorted(CAUSES - _NOT_A_STOP))
         raise ValueError(f"cause must be one of {stops}, got {cause!r}")
     return cast(Cause, cause)
+
+
+def _stop_reason(reason: str | None, cause: Cause) -> str:
+    """*reason*, or the words :data:`_STOP_REASONS` gives a stop of *cause*."""
+    return reason if reason is not None else _STOP_REASONS.get(cause, "Session closed")
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -1506,12 +1517,12 @@ class SessionRunner:
 
     def cancel(
         self,
-        reason: str = "Cancelled by the user",
+        reason: str | None = None,
         *,
         cause: Cause = "user_stop",
         turn_id: str | None = None,
     ) -> bool:
-        """Stop the running turn with *reason*, recording *cause*.
+        """Stop the running turn with *reason* (by default, words true for *cause*), recording *cause*.
 
         With *turn_id*, only when the running turn has that id. Returns
         ``False`` when it stopped nothing, so a late Stop, or a cancel by
@@ -1521,7 +1532,7 @@ class SessionRunner:
         turn = self._active
         if turn is None or (turn_id is not None and turn.turn.id != turn_id):
             return False
-        return self._cancel_turn(turn, reason, cause)
+        return self._cancel_turn(turn, _stop_reason(reason, cause), cause)
 
     def cancel_for_park(self, turn_id: str) -> bool:
         """Cancel exactly this turn for park only if it is not already stopping.
@@ -1555,7 +1566,7 @@ class SessionRunner:
         return False
 
     async def close(
-        self, *, reason: str = "Session closed", cause: Cause = "closed"
+        self, *, reason: str | None = None, cause: Cause = "closed"
     ) -> None:
         """Stop a running turn with *reason* and *cause*, wait for it, stop the tasks.
 
@@ -1563,6 +1574,7 @@ class SessionRunner:
         The caller closes the Agent.
         """
         cause = _check_cause(cause)
+        reason = _stop_reason(reason, cause)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + FINALIZE_TIMEOUT_S + 2
         self._closed = True

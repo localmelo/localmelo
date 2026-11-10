@@ -144,7 +144,6 @@ from localmelo.melo.contracts.providers import (
     ProviderError,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
-from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import (
     CALL_HANDS_OFF,
     CALL_REFUSED,
@@ -1390,7 +1389,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 "recall",
                 self._recall_tool,
                 timeout_ms=RECALL_TOOL_TIMEOUT_S * 1000,
-                process_free=True,
             )
             self._builtin_names = self._builtin_names | {"recall"}
             self._recall_tool_registered = True
@@ -1697,9 +1695,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         Setup is not retried, because the providers it closed may not
         start again: after a failure every call raises ``RuntimeError``
         naming that failure. Calls are serialized, so no provider starts
-        twice, and none starts once :meth:`close` has begun. A tool-capture
-        hook (see ``TOOL_ENTRY``) runs before the first provider starts,
-        because a provider can spawn a child of its own.
+        twice, and none starts once :meth:`close` has begun.
         """
         if self._tools_ready or not self._tool_providers:
             return
@@ -1713,12 +1709,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             started: list[BaseToolProvider] = []
             try:
                 provided: list[ProvidedTool] = []
-                capture = TOOL_ENTRY.get()
-                if capture is not None:
-                    # A provider may spawn a child of its own (an MCP stdio
-                    # server) before any tool call exists to mark: record the
-                    # execution incomplete before the first start.
-                    await capture()
                 for provider in self._tool_providers:
                     self._check_not_closing()
                     started.append(provider)

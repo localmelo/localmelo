@@ -190,27 +190,30 @@ func menuStatusLine(_ state: MenuBarState) -> String? {
     }
 }
 
-/// The quit dialog's text: what quitting stops, in the words people use for it. Quitting stops the
-/// gateway and so its chats and tasks; runs and terminal chats belong to other processes and go on.
+/// The quit dialog's text: what quitting does, in the words people use for it. Quitting stops the
+/// gateway and so its chats; its tasks continue when it opens again. Runs and terminal chats belong to
+/// other processes and go on.
 func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
     let generic = L10n.t("app.quit.generic", "Quitting stops anything that is running.")
     guard let counts = counts else {
         return statusKnown ? generic : L10n.t("app.quit.unknown", "Could not check what is running. {generic}", ["generic": generic])
     }
     let and = L10n.t("app.quit.and", " and ")
-    var stops: [String] = [], goes: [String] = []
-    if counts.tasks > 0 { stops.append(L10n.plural("app.quit.tasks", counts.tasks, one: "{n} task", other: "{n} tasks")) }
-    if counts.chats > 0 { stops.append(L10n.plural("app.quit.chats", counts.chats, one: "{n} chat", other: "{n} chats")) }
+    var says: [String] = [], goes: [String] = []
+    if counts.chats > 0 {
+        let chats = L10n.plural("app.quit.chats", counts.chats, one: "{n} chat", other: "{n} chats")
+        says.append(L10n.t("app.quit.stopsOne", "Quitting stops {what}.", ["what": chats]))
+    }
+    if counts.tasks > 0 {
+        let tasks = L10n.plural("app.quit.tasks", counts.tasks, one: "{n} task", other: "{n} tasks")
+        says.append(L10n.t("app.quit.tasksContinue", " {what} will continue when it opens again; a task stopped in the middle of a step waits for you.", ["what": tasks]))
+    }
     if counts.runs > 0 { goes.append(L10n.plural("app.quit.runs", counts.runs, one: "{n} run", other: "{n} runs")) }
     if counts.terminal > 0 {
         goes.append(L10n.plural("app.quit.terminal", counts.terminal, one: "{n} terminal chat", other: "{n} terminal chats"))
     }
-    var text = generic
-    if stops.count == 1 {
-        text = L10n.t("app.quit.stopsOne", "Quitting stops {what}.", ["what": stops[0]])
-    } else if stops.count > 1 {
-        text = L10n.t("app.quit.stopsAll", "Quitting stops what is running: {what}.", ["what": stops.joined(separator: and)])
-    }
+    // Each sentence after the first carries its own space, where the language has one.
+    var text = says.isEmpty ? generic : says.joined().trimmingCharacters(in: .whitespaces)
     if !goes.isEmpty {
         text += L10n.t("app.quit.notAffected", " Not affected: {what}.", ["what": goes.joined(separator: and)])
     }

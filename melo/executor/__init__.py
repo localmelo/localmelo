@@ -125,10 +125,6 @@ def register_builtins(
             fn,
             timeout_ms=timeout_ms,
             requires_approval=tier_requires_approval(tier),
-            # git_status starts git, but only to read: a crash leaves no
-            # effect to recover, so a task's capture skips it as a file's.
-            process_free=tool_def.name
-            in {"file_read", "file_write", "file_edit", "list_files", "git_status"},
             # A file_edit that cannot apply fails at once and asks no one.
             precheck=(
                 edit_precheck(workspace_root or None)

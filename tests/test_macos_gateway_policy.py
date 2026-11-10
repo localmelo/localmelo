@@ -96,10 +96,12 @@ precondition(runningCounts(health(#"{"chats":-1,"tasks":0,"runs":0,"terminal":0}
 precondition(runningCounts(health(#"{"chats":"1","tasks":0,"runs":0,"terminal":0}"#)) == nil)
 precondition(runningCounts(Data("not json".utf8)) == nil)
 precondition(menuTitle(.idle) == "" && menuTitle(.unknown) == "" && menuTitle(.running(7)) == "7")
-// What quitting stops, in plain words: one thing is named, several come as a list; nothing says "gateway".
+// What quitting does, in plain words: chats stop, tasks continue when it opens again; nothing says "gateway".
 let chats = runningCounts(health(#"{"chats":3,"tasks":0,"runs":0,"terminal":0}"#))
+let tasks = runningCounts(health(#"{"chats":0,"tasks":2,"runs":0,"terminal":0}"#))
 precondition(quitMessage(busy, statusKnown: true)
-    == "Quitting stops what is running: 2 tasks and 1 chat. Not affected: 1 run and 3 terminal chats.")
+    == "Quitting stops 1 chat. 2 tasks will continue when it opens again; a task stopped in the middle of a step waits for you. Not affected: 1 run and 3 terminal chats.")
+precondition(quitMessage(tasks, statusKnown: true) == "2 tasks will continue when it opens again; a task stopped in the middle of a step waits for you.")
 precondition(quitMessage(chat, statusKnown: true) == "Quitting stops 1 chat.")
 precondition(quitMessage(chats, statusKnown: true) == "Quitting stops 3 chats.")
 precondition(quitMessage(runsOnly, statusKnown: true)
@@ -107,7 +109,7 @@ precondition(quitMessage(runsOnly, statusKnown: true)
 precondition(quitMessage(none, statusKnown: true) == "Quitting stops anything that is running.")
 precondition(quitMessage(nil, statusKnown: true) == "Quitting stops anything that is running.")
 precondition(quitMessage(nil, statusKnown: false) == "Could not check what is running. Quitting stops anything that is running.")
-for counts in [none, busy, chat, chats, runsOnly, nil] {
+for counts in [none, busy, chat, chats, tasks, runsOnly, nil] {
     precondition(!quitMessage(counts, statusKnown: false).lowercased().contains("gateway"))
 }
 """)

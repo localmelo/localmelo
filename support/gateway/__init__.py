@@ -166,13 +166,15 @@ class GatewayServer:
         finally:
             own_gateway.unregister(self.port or None)
             logger.info("gateway shutting down")
-            # Each close must run even when an earlier one raises: the
-            # console's aclose releases the gateway store's owner lock last.
+            # Each close must run even when an earlier one raises. The console
+            # first: its tasks are written down before anything else closes.
+            # The older run sessions hold their own agents, not the console's
+            # store, so they close after it.
             try:
-                await self.sessions.close_all()
-            finally:
                 if self.console is not None:
                     await self.console.aclose()
+            finally:
+                await self.sessions.close_all()
 
     # ── Routes ──
 

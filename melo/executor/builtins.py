@@ -192,25 +192,40 @@ async def _shell_exec(
     return text
 
 
-def _require_incomplete_entry() -> None:
-    """Refuse a launch whose entry marker may not have committed."""
+def _require_recorded_call() -> None:
+    """Refuse a launch outside a call whose record committed."""
     if not _ENTRY_MARKED.get():
         raise RuntimeError(
             "execution evidence could not be recorded; the call was not run"
         )
 
 
-async def _gated_or_fallback(
-    argv: list[str], *, record: Any, **kwargs: Any
-) -> asyncio.subprocess.Process:
-    try:
-        return await gated_exec(argv, record=record, **kwargs)
-    except UnsupportedProcessGateError:
-        # Only Executor can establish that the incomplete marker committed.
-        _require_incomplete_entry()
-        return await asyncio.create_subprocess_exec(
-            *argv, start_new_session=True, **kwargs
-        )
+async def _spawn(argv: list[str], **kwargs: Any) -> asyncio.subprocess.Process:
+    """Start *argv* in a new process group, through the gate when a run records it.
+
+    A run that records its processes (``PROCESS_RECORD``) releases the child
+    only once its record is written. Where the gate cannot run, the child
+    starts only inside a recorded call (see :func:`_require_recorded_call`)
+    and is recorded once it runs: the record says what it is, or that this
+    execution has a process without one. A child it cannot record is killed.
+    """
+    record = PROCESS_RECORD.get()
+    if record is not None and gate_supported():
+        try:
+            return await gated_exec(argv, record=record, **kwargs)
+        except UnsupportedProcessGateError:
+            pass
+    if record is not None:
+        # Only Executor can establish that the call's record committed.
+        _require_recorded_call()
+    proc = await asyncio.create_subprocess_exec(*argv, start_new_session=True, **kwargs)
+    if record is not None:
+        try:
+            await record(proc.pid)
+        except BaseException:
+            await _kill_process_group(proc)
+            raise
+    return proc
 
 
 async def _run_shell(
@@ -244,30 +259,15 @@ async def _run_shell(
     # A new session puts the shell and everything it starts in one process
     # group, which is killed as a whole when the command times out or the
     # call is cancelled (the executor's timeout, the run's timeout_s).
-    record = PROCESS_RECORD.get()
-    if record is None or not gate_supported():
-        if record is not None:
-            _require_incomplete_entry()
-        # argv is what create_subprocess_shell runs: /bin/sh -c command.
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=stdin,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-            start_new_session=True,
-        )
-    else:
-        proc = await _gated_or_fallback(
-            argv,
-            record=record,
-            stdin=stdin,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
+    # argv is what create_subprocess_shell runs: /bin/sh -c command.
+    proc = await _spawn(
+        argv,
+        stdin=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+    )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=limit)
     except TimeoutError:
@@ -678,29 +678,14 @@ async def _run_python(
     if confinement is not None:
         argv = confinement.argv(argv)
         env.update(confinement.env())
-    record = PROCESS_RECORD.get()
-    if record is None or not gate_supported():
-        if record is not None:
-            _require_incomplete_entry()
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-            start_new_session=True,
-        )
-    else:
-        proc = await _gated_or_fallback(
-            argv,
-            record=record,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
+    proc = await _spawn(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+    )
     try:
         stdout, stderr = await proc.communicate(code.encode("utf-8", "surrogatepass"))
     except BaseException:

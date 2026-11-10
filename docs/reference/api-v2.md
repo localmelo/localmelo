@@ -867,16 +867,27 @@ becomes invalid before a run or resume fails the task with
 At most four workers are resident at once, including quarantined workers.
 Task rows persist across gateway restarts.
 
-Startup interrupts uncertain tasks,
-retains valid parked cards and preserves pending pause, without replay. Every
-create records a durable never-started proof inside the create transaction,
-before any launch; a runnable queued task with that proof may run once after a
-start fence.
+A gateway stop leaves a task it cut off `interrupted` with `wait_reason`
+"localmelo stopped; this task continues when it opens again", never
+`cancelled` (that is the person's Stop). At the next start a task cut off with
+nothing in flight (no call that can change something open, every recorded
+process group verified gone) continues by itself: it is `queued` again with a
+resumed turn, the same id, level and rank, and one `sched.resumed` event with
+`data.reason` `"restart"`; its task JSON then has `continued_at`, the time of
+that continue (`null` otherwise, or once the person resumes it). A task with
+something in flight (a stop in the middle of a call that can change something
+included), whose folder is missing at start, or cut off by a crash for the
+second time since it last ended `done` or `failed` (`crashes` is reset then),
+stays `interrupted` with its reason and waits for the person; a person's pause
+stays paused. A task's turns carry `client_request_id`, its execution id. The decision
+table is in the [scheduler reference](scheduler.md). Every create records a
+durable never-started proof inside the create transaction, before any launch;
+a runnable queued task with that proof may run once after a start fence.
 
-Recovered tasks with
-uncertain history reject `PATCH` resume and priority changes until controlled
-Resume is used; Stop remains available. A failure to persist
-startup recovery keeps the store unavailable.
+A task that waits after a restart rejects priority changes until it is resumed;
+`PATCH` `{"state": "resume", "confirmation_token"?}` is controlled Resume with a
+fresh operation id, and answers as the route below does. Stop remains available.
+A failure to persist startup recovery keeps the store unavailable.
 
 Retrying the same `request_key`
 returns the existing task and does not restart it.
@@ -884,9 +895,8 @@ returns the existing task and does not restart it.
 ### Controlled Resume
 
 `POST /api/tasks/{task_id}/resume` accepts `operation_id` (required, non-empty,
-at most 200 characters) and an optional `confirmation_token`. It is the only
-route that resumes a task recovered by startup; `PATCH` stays fenced for that
-work.
+at most 200 characters) and an optional `confirmation_token`. `PATCH` resume
+of a task that waits after a restart runs the same operation.
 
 It returns 202 `{"task": ..., "operation_id": ...}` when the transition
 is committed.
@@ -897,14 +907,16 @@ The route consumes evidence, never absence of evidence:
   first launch through the durable launch fence, with no card and no
   confirmation. A queued never-started create is admitted by startup recovery,
   not by this route, so calling the route for one returns `invalid_transition`.
-- A started task needs a card and a valid workspace. It resumes without
-  confirmation only when its trusted, complete capture covers the whole
-  execution and every recorded process group is verifiably gone. A verified
+- A started task needs a valid workspace, and a card once a turn of it began.
+  It resumes without confirmation only when nothing is in flight: no call that
+  can change something was open, its capture is trusted and complete, and every
+  recorded process group is verifiably gone. A verified
   boot change (both ids read, well formed and different) counts as gone only on
   the host that recorded the group; a change read on another host, a record
   without a host, and an unreadable host are all unknown.
-- Anything else, including missing, untrusted or incomplete capture or a group
-  whose liveness cannot be checked, returns 409 `confirmation_required` with
+- Anything else, including an open changing call, missing, untrusted or
+  incomplete capture or a group whose liveness cannot be checked, returns 409
+  `confirmation_required` with
   `details.confirmation_token`, `details.expires_in_s` (300), a
   `details.warning`, and `details.reason`. Present the token to accept the
   recorded risk and resume. That accepted transition writes one
@@ -912,7 +924,7 @@ The route consumes evidence, never absence of evidence:
   nothing. The token is single use, held in memory only, and bound to the task,
   source execution, evidence identity and CAS generation. A restart drops it,
   and Stop invalidates it.
-- A terminal task, invalid workspace, missing card for a started task, or stale
+- A terminal task, invalid workspace, missing card for a task whose turn began, or stale
   execution identity returns 409 `invalid_transition` with a `details.reason`;
   a missing card says to start again as a new task. An unresolved earlier
   recovery operation or an unsettled worker cleanup returns 409
@@ -924,9 +936,10 @@ starts a second turn or re-authorizes a transition; a token is consumed at most
 once.
 
 A restart drops tokens. A Resume committed before a restart is re-admitted
-on startup when its turn never started; once that turn has started, a retry of
-the operation returns 409 `invalid_transition` instead of pretending the queued
-work still waits.
+on startup when its turn never started; a retry of it re-queues a task the
+restart left waiting before that turn began; once that turn has started, a retry
+of the operation returns 409 `invalid_transition` instead of pretending the
+queued work still waits.
 
 Stop always wins: it invalidates pending tokens and cancels a queued resumed turn before a
 worker starts a provider or tool. Neither a free Resume nor a confirmation
@@ -1283,7 +1296,8 @@ Its `data`:
   none is written when the waiting card never was.
 - A side chat's run counts when its turn ends by its run (`cause` `run`); a
   stop by the person, a shutdown or a crash makes no card. A task counts when
-  it ends `done`, `failed` or `expired`; a stop by the person makes none.
+  it ends `done`, `failed` or `expired`; a stop by the person makes none. The
+  card of a task the start continued by itself has `continued_at`.
 - The gateway writes the cards when the main chat or the list is read, and
   once a minute; a waiting card whose approval was answered first is never
   written, and an approval answered later is followed by its `answered` card. The main chat's stream carries new cards as `attention.card` frames.

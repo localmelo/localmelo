@@ -71,6 +71,8 @@ class _Source:
     # The card last written for the run (None before its first), and how the run ended once it did.
     card: dict[str, Any] | None = None
     ended: tuple[str, str] | None = None
+    # A step of the run was seen: the card it begins is written even when the step is over by then.
+    stepped: bool = False
     dirty: bool = False
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     # What is pinned to the run (see :meth:`BrowserCards.pin`); a stream that is gone is dropped from it by itself.
@@ -229,6 +231,9 @@ class BrowserCards:
         """Something the card says may have changed: note it, and write it soon (never blocks)."""
         if self._sources.get(source.session_id) is not source or not source.run:
             return
+        provider = source.provider()
+        if provider is not None and provider.live_busy():
+            source.stepped = True
         if source.ended is None:
             self._schedule(source)
 
@@ -242,6 +247,11 @@ class BrowserCards:
             source.run = str(stored.event.get("run_id") or "")
             source.turn = stored.turn or 0
             source.card, source.ended = None, None
+            # The run's first step may be under way already: its events can be stored after it began.
+            provider = source.provider()
+            source.stepped = provider is not None and provider.live_busy()
+            if source.stepped:
+                self._schedule(source)
         elif kind == "turn.finished" and source.run:
             data = stored.event.get("data")
             data = data if isinstance(data, dict) else {}
@@ -318,7 +328,9 @@ class BrowserCards:
         facts = provider.card() if provider is not None else None
         if facts is None:
             return None
-        if found is None and not (facts.busy or facts.state != "working"):
+        if found is None and not (
+            facts.busy or source.stepped or facts.state != "working"
+        ):
             return None  # a page left open is no browsing: a step, or a person who has it, begins the card
         return {
             "card_key": f"{source.session_id}:{source.run}",
