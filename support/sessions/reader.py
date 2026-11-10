@@ -43,7 +43,9 @@ class TurnChange:
     ``events`` holds the turn's stored events, in id order, with
     ``with_events``. ``origin`` names who began a turn the person did not
     (``ask_owner``: a task's question, whose ``user_text`` is the task's
-    words); ``""`` for the person's own and in a file of schema 2.
+    words); ``""`` for the person's own and in a file of schema 2. ``composed``
+    marks a turn whose ``user_text`` is not what a person typed (a stopped task's
+    card, a task another made); ``False`` in a file from before the column.
     """
 
     event_id: int
@@ -69,6 +71,7 @@ class TurnChange:
     finished_at: float
     events: tuple[dict[str, Any], ...] | None
     origin: str = ""
+    composed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -206,12 +209,15 @@ class SessionReader:
                 }
                 # Schema 2 has no origin: every turn there is the person's.
                 origin = "t.origin" if "origin" in columns else "''"
+                # Nor has a file from before turns.composed: no turn there is.
+                composed = "t.composed" if "composed" in columns else "0"
                 rows = list(
                     await conn.execute_fetchall(
                         "SELECT e.id, e.type, e.event, s.kind, s.title, s.workspace, "
                         "s.model, t.session_id, t.turn, t.id, t.run_id, t.user_text, "
                         "t.typed_text, t.status, t.cause, t.answer, t.result, t.note, "
-                        f"t.undone, t.started_at, t.finished_at, {origin} FROM events e "
+                        f"t.undone, t.started_at, t.finished_at, {origin}, {composed} "
+                        "FROM events e "
                         "JOIN turns t ON t.id = json_extract(e.event, '$.data.turn_id') "
                         "JOIN sessions s ON s.id = t.session_id "
                         "WHERE e.id > ? AND e.type IN ('turn.finished', 'turn.undone') "
@@ -261,6 +267,7 @@ class SessionReader:
                             finished_at=finished_at,
                             events=events,
                             origin=row[21],
+                            composed=bool(row[22]),
                         )
                     )
             finally:

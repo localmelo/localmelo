@@ -84,6 +84,7 @@ import {
   turnFace,
   UNFINISHED_ANSWER,
   unreachableUrl,
+  withoutFrame,
   workSummary,
 } from "./turns.mjs";
 
@@ -1562,7 +1563,7 @@ function turnNode(turn, newest = false, asked = askTurn(turn)) {
   if (turn.undone) section.classList.add("undone");
   section.dataset.turnId = turn.id || String(turn.turn);
   // A task's question is the row above it, not a message the person typed.
-  if (!asked) section.append(userNode(turn, newest));
+  if (!asked) section.append(turn.composed ? composedNode(turn) : userNode(turn, newest));
   section.append(assistantNode(turn, newest));
   return section;
 }
@@ -1604,6 +1605,18 @@ function entryMedia(items) {
     pictures: items.filter((item) => item.kind === "picture").map((item) => ({ name: item.name, url: item.url, bytes: item.bytes })),
     files: items.filter((item) => item.kind === "file").map((item) => ({ name: item.name })),
   };
+}
+
+// A turn whose text the person did not type (where a stopped task goes on, a task another made):
+// no bubble of theirs, one folded line (the thinking fold) that opens on the text.
+function composedNode(turn) {
+  const fold = el("details", "thinking");
+  fold.open = turn.composedOpen;
+  fold.append(el("summary", "", t("chat.notTyped")), el("div", "thinking-body", withoutFrame(turn.userText)));
+  fold.addEventListener("toggle", () => {
+    turn.composedOpen = fold.open;
+  });
+  return fold;
 }
 
 function userNode(turn, newest = false) {

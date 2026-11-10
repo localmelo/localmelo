@@ -298,6 +298,7 @@ class StartupRecovery:
                 "tool.finished",
                 "assistant.message",
                 "reflection",
+                "notice",
             }
         ]
         card = (

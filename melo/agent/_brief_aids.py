@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.memory.procedures.mask import mask_credentials
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import Message, ReflectionEntry
@@ -57,11 +58,12 @@ def _key_arg(arguments: dict[str, object]) -> tuple[str, str]:
 
 
 def _describe(name: str, arguments: dict[str, object]) -> str:
-    """The tool name and its key argument, shortened and redacted."""
+    """The tool name and its key argument, redacted whole and then shortened, so
+    that no cut leaves a piece of a secret no pattern matches."""
     key, value = _key_arg(arguments)
     if not key:
         return name
-    arg = redact_secrets(_shorten(value, ARG_LIMIT))[0]
+    arg = _shorten(mask_credentials(redact_secrets(value)[0]), ARG_LIMIT)
     return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
 
 
@@ -80,8 +82,8 @@ class Dropped:
     *target* is the call's key argument whole, *source* the tool and that
     argument shortened and redacted, for display; *part*
     the part of a page the call read (``None`` for a tool that reads no parts),
-    *status* ``exit N`` for a command, ``failed`` for a call with an error, else
-    ``""``.
+    *status* ``exit N`` for a command, ``failed`` for a call with an error,
+    ``effect unknown`` for a call whose result was never kept, else ``""``.
     """
 
     call_id: str
@@ -93,39 +95,51 @@ class Dropped:
     status: str
 
 
+def cue(
+    call_id: str,
+    name: str,
+    arguments: Mapping[str, object],
+    *,
+    outcome: str = "",
+    exit_code: int | None = None,
+    chars: int = 0,
+) -> Dropped:
+    """The entry of one call whose result left the context (or was never kept).
+
+    *outcome* is ``failed`` for a call with an error, ``unknown`` for one whose
+    result was never kept (it may have done part of its work), else ``""``.
+    """
+    given = dict(arguments)
+    part = given.get("part")
+    status = {"failed": "failed", "unknown": "effect unknown"}.get(outcome, "")
+    if not status and name in _COMMANDS:
+        status = f"exit {exit_code or 0}"
+    if type(part) is not int:
+        part = 1 if name == "web_fetch" or "part" in given else None
+    return Dropped(
+        call_id, name, _key_arg(given)[1], _describe(name, given), chars, part, status
+    )
+
+
 def dropped_calls(messages: Sequence[Message]) -> list[Dropped]:
     """One entry per tool result among the dropped *messages*, in their order."""
     calls = {call.id: call for msg in messages for call in msg.tool_calls if call.id}
     found = []
     for msg in messages:
-        if msg.role != "tool":
-            continue
-        call = calls.get(msg.tool_call_id)
-        name = call.tool_name if call is not None else "tool"
-        arguments = call.arguments if call is not None else {}
-        part = arguments.get("part")
-        exits = _EXIT.findall(msg.content)
-        if msg.tool_result is not None and msg.tool_result.error:
-            status = "failed"
-        elif name in _COMMANDS:
-            status = f"exit {exits[-1] if exits else 0}"
-        else:
-            status = ""
-        found.append(
-            Dropped(
-                call_id=msg.tool_call_id,
-                tool=name,
-                target=_key_arg(arguments)[1],
-                source=_describe(name, arguments),
-                chars=len(msg.content),
-                part=(
-                    part
-                    if type(part) is int
-                    else 1 if name == "web_fetch" or "part" in arguments else None
-                ),
-                status=status,
+        if msg.role == "tool":
+            call = calls.get(msg.tool_call_id)
+            exits = _EXIT.findall(msg.content)
+            failed = msg.tool_result is not None and msg.tool_result.error
+            found.append(
+                cue(
+                    msg.tool_call_id,
+                    call.tool_name if call is not None else "tool",
+                    call.arguments if call is not None else {},
+                    outcome="failed" if failed else "",
+                    exit_code=int(exits[-1]) if exits else None,
+                    chars=len(msg.content),
+                )
             )
-        )
     return found
 
 
@@ -146,7 +160,8 @@ def _spans(parts: Sequence[int]) -> str:
 
 
 def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> list[str]:
-    """The cue list of a work checkpoint: one line per source, oldest first.
+    """The cue list of a work checkpoint: one line per source, by their newest
+    call, oldest first (a source called again moves to the end).
 
     A source is a tool and its key argument, whole (two long addresses that
     share their start are two sources), shown shortened; its line names the parts read of a
@@ -156,7 +171,8 @@ def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> lis
     """
     order: dict[tuple[str, str], list[Dropped]] = {}
     for entry in dropped:
-        order.setdefault((entry.tool, entry.target), []).append(entry)
+        key = (entry.tool, entry.target)
+        order[key] = [*order.pop(key, []), entry]
     lines = []
     for entries in order.values():
         line = entries[0].source

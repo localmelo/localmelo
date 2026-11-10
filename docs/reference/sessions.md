@@ -133,7 +133,11 @@ redaction limitations.
   stores are migrated in place: version 1 gains nullable `turns.attachments`
   metadata, and versions 1 and 2 gain `turns.origin` (`''` on every turn the
   person began; `ask_owner` on a chat's internal turn that answers a task's
-  question, `TurnInfo.origin`, which gives a session no title).
+  question, `TurnInfo.origin`, which gives a session no title). Every
+  version-3 file gains `turns.composed` when it is opened (`0` on the turns it
+  had; `1` on a turn whose text is not what a person typed,
+  `TurnInfo.composed`), with no new version, so an older localmelo still
+  opens it.
 - **The owner lock.** The gateway's store holds a lock on `<path>.owner` for
   its life. A second gateway on the file gets `StoreOwnedError`:
   `Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.`
@@ -397,7 +401,9 @@ It prints, for example:
   model, and the turn's `run_id`, the `task_id` of its run in `history.db`.
   Its `origin` is `ask_owner` for a chat's turn on a task's question, whose
   `user_text` is the task's words, not the person's; `""` otherwise, and in
-  a file of schema 2.
+  a file of schema 2. Its `composed` is `true` for a turn whose `user_text`
+  is not what a person typed either (where a stopped task goes on, a task
+  another agent or a channel made); `false` in a file from before the column.
 - A turn undone later appears again as an `undone` record, so applying the
   records in order is always right. Running turns appear once they end.
 - `export_turns(paths, out, after=None)` writes one JSON line per record,

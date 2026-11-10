@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -32,6 +33,7 @@ from localmelo.support.gateway.startup_recovery import (
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import TaskStore
 from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.memory.service import recent_said
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import Cause, SessionStore
@@ -330,6 +332,7 @@ def _fakes(monkeypatch: pytest.MonkeyPatch, runs: _Runs) -> None:
                 text,
                 holder="worker",
                 client_request_id=kwargs.get("client_request_id"),
+                composed=kwargs.get("composed", False),
             )
             self.turn, self.busy = turn.turn, True
             # A changing call that returned, so nothing is in flight.
@@ -446,11 +449,19 @@ async def test_a_clean_stop_then_a_start_continues_the_task(
     record = await again.tasks.get_task(task_id)
     assert record.state == "running"
     # The continued turn starts from the card of where the run stopped.
+    # The continued turn is where the work stands, from melo's records.
     assert runs.texts[-1].startswith("Where stopped")
-    assert "file_write" in runs.texts[-1]
+    assert "Goal: " in runs.texts[-1] and "- file_write" in runs.texts[-1]
     resumed = await _resumed(again.store, task_id)
     assert [data.get("reason") for data in resumed] == ["restart"]
     assert (await again.get(task_id))["continued_at"] is not None
+    # The card is melo's text: no later turn reads it as the person's words.
+    first_turn, card_turn = await again.store.list_turns(task_id)
+    assert (first_turn.composed, card_turn.composed) == (False, True)
+    later = dataclasses.replace(card_turn, turn=card_turn.turn + 1)
+    assert not any(
+        "Where stopped" in w for w in await recent_said(again.store, later, None)
+    )
 
 
 async def test_the_stop_writes_a_cut_task_down_before_its_worker_closes(

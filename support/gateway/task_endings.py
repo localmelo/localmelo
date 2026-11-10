@@ -54,7 +54,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -62,7 +62,7 @@ from localmelo.melo.agent._brief_aids import FileStamp, edited_files
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts import shell_lexer
 from localmelo.support.gateway.front_rules import asks_tests
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, StoredEvent
 from localmelo.support.words import LANGUAGES, t_in
 
 from .finishing import OUT_OF_STEPS
@@ -725,19 +725,14 @@ def _python_writes(code: str) -> bool:
     return False
 
 
-# The start of a call's output (or error) a turn's calls keep beside its end.
-HEAD_CHARS: Final = 1000
-
-
 @dataclass
 class TurnCall:
     """One tool call of a run, as its stored events show it (:func:`turn_calls`).
 
     *start* and *finish* are the ids of its ``tool.started`` and
     ``tool.finished`` events (``None`` while no finish is kept). *output* is
-    the end of what it returned, as stored, and *head* the start of that, or of
-    its error (:data:`HEAD_CHARS`), redacted before it is cut. *key* is the live
-    call's key its start kept (``run_key``), ``""`` for a call stored without one.
+    the end of what it returned, as stored. *key* is the live call's key its
+    start kept (``run_key``), ``""`` for a call stored without one.
     """
 
     start: int
@@ -750,7 +745,6 @@ class TurnCall:
     step: int = 0
     preview: str = ""
     error: str = ""
-    head: str = ""
     key: str = ""
 
     def _command(self) -> tuple[str, bool]:
@@ -1070,39 +1064,50 @@ async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[Tu
     *turn* is a stored turn (its ``turn`` and ``run_id``): of a task, or of a
     chat whose run hands its work on (#571).
     """
-    calls: list[TurnCall] = []
-    waiting: dict[str, list[TurnCall]] = {}
+    events: list[StoredEvent] = []
     after = 0
     while True:
         page = await store.list_events(
             session_id, after_id=after, limit=1000, turns=(turn.turn, turn.turn)
         )
-        for stored in page:
-            kind, data = stored.event.get("type"), stored.event.get("data") or {}
-            key = str(data.get("call_id") or "")
-            if stored.event.get("run_id") != turn.run_id or not stored.id or not key:
-                continue
-            if kind == "tool.started":
-                given = data.get("arguments")
-                given = given if isinstance(given, dict) else {}
-                call = TurnCall(stored.id, str(data.get("name") or ""), given)
-                call.step = int(data.get("step") or 0)
-                call.preview = str(data.get("preview") or "")
-                call.key = str(data.get("run_key") or "")
-                calls.append(call)
-                waiting.setdefault(key, []).append(call)
-            elif kind == "tool.finished" and waiting.get(key):
-                call = waiting[key].pop(0)
-                code = data.get("exit_code")
-                call.finish, call.status = stored.id, str(data.get("status") or "")
-                call.exit_code = code if type(code) is int else None
-                output = str(data.get("output") or "")
-                call.output = output[-4000:]
-                call.error = str(data.get("error") or "")
-                call.head = redact_secrets(call.error or output)[0][:HEAD_CHARS]
+        events += page
         if len(page) < 1000:
-            return calls
+            return paired_calls(events, turn.run_id)
         after = page[-1].id or after
+
+
+def paired_calls(
+    events: Iterable[StoredEvent], run_id: str | None = None
+) -> list[TurnCall]:
+    """The tool calls of stored *events* (*run_id*'s only, when given) in the
+    order they started, each paired with its finish by run and call id."""
+    calls: list[TurnCall] = []
+    waiting: dict[tuple[object, str], list[TurnCall]] = {}
+    for stored in events:
+        kind, data = stored.event.get("type"), stored.event.get("data") or {}
+        run, key = stored.event.get("run_id"), str(data.get("call_id") or "")
+        if (run_id is not None and run != run_id) or not stored.id or not key:
+            continue
+        if kind == "tool.started":
+            given = data.get("arguments")
+            call = TurnCall(
+                stored.id,
+                str(data.get("name") or ""),
+                given if isinstance(given, dict) else {},
+                step=int(data.get("step") or 0),
+                preview=str(data.get("preview") or ""),
+                key=str(data.get("run_key") or ""),
+            )
+            calls.append(call)
+            waiting.setdefault((run, key), []).append(call)
+        elif kind == "tool.finished" and waiting.get((run, key)):
+            call = waiting[(run, key)].pop(0)
+            code = data.get("exit_code")
+            call.finish, call.status = stored.id, str(data.get("status") or "")
+            call.exit_code = code if type(code) is int else None
+            call.output = str(data.get("output") or "")[-4000:]
+            call.error = str(data.get("error") or "")
+    return calls
 
 
 @dataclass(frozen=True)

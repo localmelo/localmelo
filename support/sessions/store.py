@@ -174,7 +174,15 @@ RUN_STATUSES: Final = frozenset(
 SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset(
-            {"turn", "turn_id", "user_text", "client_request_id", "origin", "images"}
+            {
+                "turn",
+                "turn_id",
+                "user_text",
+                "client_request_id",
+                "origin",
+                "images",
+                "composed",
+            }
         ),
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
@@ -228,7 +236,8 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         # images: the pictures the person added, as references into blobs.
-        "turn.started": frozenset({"origin", "images"}),
+        # composed: only on a turn whose text is not what a person typed.
+        "turn.started": frozenset({"origin", "images", "composed"}),
         # Only on a note that carried pictures.
         "turn.note": frozenset({"images"}),
         # searched and opened: only once a memory search found something, or the
@@ -308,6 +317,7 @@ _SCHEMA: Final = (
     finished_at REAL,
     note        TEXT NOT NULL DEFAULT '',
     origin      TEXT NOT NULL DEFAULT '',
+    composed    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, turn)
 )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS turns_running ON turns(session_id) "
@@ -468,6 +478,9 @@ class TurnInfo:
     # ``""``: the person's turn; ``"ask_owner"``: the chat answers a task (#369);
     # ``"followup"``: the chat follows up on a task it started that stopped (#411).
     origin: str = ""
+    # The turn's text is not what a person typed (a stop card, a task melo or
+    # another agent made): no reader takes it for the person's words.
+    composed: bool = False
 
 
 def check_attachment_submission(
@@ -831,7 +844,7 @@ _TURN_COLUMNS: Final = (
     "t.answer, t.result, t.holder, t.undone, t.started_at, t.finished_at, "
     "(SELECT a.client_request_id FROM submissions a WHERE a.session_id = t.session_id "
     "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text, t.attachments, "
-    "t.origin"
+    "t.origin, t.composed"
 )
 _SUBMISSION_COLUMNS: Final = (
     "u.client_request_id, u.scope, u.state, u.session_id, u.text_sha256, u.error, "
@@ -858,6 +871,7 @@ def _turn_info(row: Sequence[Any]) -> TurnInfo:
         typed_text=row[14],
         attachments=decode_attachments(row[15]),
         origin=row[16],
+        composed=bool(row[17]),
     )
 
 
@@ -1094,6 +1108,13 @@ class SessionStore:
                             "ALTER TABLE turns ADD COLUMN origin TEXT NOT NULL DEFAULT ''"
                         )
                     await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                # Added in version 3 without a new version, so that a build from
+                # before it still opens the file: it never reads the column.
+                rows = await _rows(conn, "PRAGMA table_info(turns)")
+                if "composed" not in {row[1] for row in rows}:
+                    await conn.execute(
+                        "ALTER TABLE turns ADD COLUMN composed INTEGER NOT NULL DEFAULT 0"
+                    )
         # 7. Retention (T-2) and 8. recovery (T-3), before anything serves.
         self._stop_if_closed()
         await self._retain(conn)
@@ -2395,6 +2416,7 @@ class SessionStore:
         typed_text: str | None = None,
         origin: str = "",
         images: Sequence[ImagePart] = (),
+        composed: bool = False,
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
@@ -2412,7 +2434,8 @@ class SessionStore:
         text, else the user text), the submission, and the events
         ``turn.started`` and, with that title, ``session.title``. *origin*
         (:data:`TURN_ORIGINS`) marks a turn the person did not begin, which
-        gives the session no title. *images* are the pictures the person added:
+        gives the session no title; *composed* marks a turn whose text is not
+        what a person typed (:attr:`TurnInfo.composed`). *images* are the pictures the person added:
         their payloads go to ``blobs`` in the same transaction and
         ``turn.started`` lists them (``sha256``, ``mime_type``, ``size_bytes``),
         so they show again after a reload.
@@ -2510,8 +2533,8 @@ class SessionStore:
                 turn_id = uuid.uuid4().hex
                 await conn.execute(
                     "INSERT INTO turns (session_id, turn, id, user_text, typed_text, "
-                    "attachments, holder, started_at, origin) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "attachments, holder, started_at, origin, composed) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session_id,
                         number,
@@ -2522,6 +2545,7 @@ class SessionStore:
                         holder,
                         now,
                         origin,
+                        int(composed),
                     ),
                 )
                 for image in images:
@@ -2576,6 +2600,7 @@ class SessionStore:
                             "client_request_id": client_request_id,
                             # Only on a turn the person did not begin (#369).
                             **({"origin": origin} if origin else {}),
+                            **({"composed": True} if composed else {}),
                             **(
                                 {
                                     "images": [

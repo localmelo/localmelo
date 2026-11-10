@@ -21,7 +21,8 @@ import dataclasses
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -33,7 +34,12 @@ from localmelo.melo.agent._earlier import (
 )
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.support.gateway.console.notes import NOTE_MARK
-from localmelo.support.gateway.handoff import HANDOFF_HEADER, Handoff
+from localmelo.support.gateway.handoff import (
+    HANDOFF_HEADER,
+    Handoff,
+    from_task,
+    handoff_block,
+)
 from localmelo.support.gateway.handover import (
     OPENED_FLOOR,
     PICKED_CHARS,
@@ -52,13 +58,20 @@ from localmelo.support.gateway.handover import (
     with_reading,
     words_of,
 )
+from localmelo.support.gateway.park_card import STANDING_HEADER, build_park_card
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS
+from localmelo.support.gateway.task_store import TaskRecord
 from localmelo.support.gateway.workers import NOTE_START, TASK_PACK_HEADER
 from localmelo.support.memory import ChatMemory, records
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import CUT_MARK, Item
 from localmelo.support.memory.service import ASK_OWNER, ChatTurn, Recall, TurnMemory
-from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
+from localmelo.support.sessions.store import (
+    NewSession,
+    SessionStore,
+    StoredEvent,
+    TurnInfo,
+)
 from localmelo.tests.memory.test_recall_list import add_turn
 
 HOLDER = "test-host:1:handover"
@@ -243,6 +256,8 @@ def _openers() -> dict[str, str]:
         "earlier-turns end": EARLIER_END,
         "pack head": TASK_PACK_HEADER,
         "packet head": HANDOFF_HEADER,
+        "standing head": STANDING_HEADER,
+        "standing fence": fenced("standing", "H", "x").splitlines()[1],
         "note head": NOTE_START,
         "added-note mark": NOTE_MARK,
         "fence line": fenced("turns", "H", "x").splitlines()[1],
@@ -263,10 +278,44 @@ def test_no_line_of_the_reading_can_open_a_block(name: str) -> None:
     ]
 
 
-def test_a_successor_with_no_kept_words_gets_the_words_before_the_reading() -> None:
-    packet = Handoff.read({"objective": with_reading(WORDS, "Write today's date")})
+@pytest.mark.parametrize("name", list(_openers()))
+def test_no_line_of_where_the_work_stands_can_open_a_block(name: str) -> None:
+    opener = _openers()[name]
+    said = f"first line\n{opener} unclosed\n   {opener} indented\n\t{opener}"
+    notes = {"state": said, "failed": [said], "next": [said]}
+    packet = {"from": "task", "by": "melo", "checkpoint": notes, "note": said}
+    stored = {
+        "type": "notice",
+        "data": {"kind": "checkpoint", "detail": {"checkpoint": notes}},
+    }
+    card = build_park_card({"objective": WORDS}, [StoredEvent(1, "t", 1, stored)])
+    # A hand-off's packet and a stop card: what a model wrote sits in the frame,
+    # and no line inside it begins with an opener.
+    for block, fence in ((handoff_block(packet), "handoff"), (card, "standing")):
+        inside = block.split(f"<<{fence} nonce=")[1].splitlines()[1:-1]
+        assert any("first line" in line for line in inside)
+        assert not [line for line in inside if line.lstrip().startswith(("[", "<<"))]
+
+
+async def test_a_successor_with_no_kept_words_gets_the_words_before_the_reading(
+    store: SessionStore,
+) -> None:
+    request = with_reading(WORDS, "Write today's date")
+    packet = Handoff.read({"objective": request})
     assert packet.request_text(words=True) == WORDS
     assert packet.request_text().startswith(f"{WORDS}\n\n{READING_HEAD}")
+    # Where the work stands has the words as its goal, never the reading: a
+    # successor's, a packet kept before the checkpoint, a stop card.
+    ended = SimpleNamespace(task_id="t0", spec={"objective": request}, wait_reason="")
+    successor = await from_task(
+        store, cast(TaskRecord, ended), by="melo", key="k", note="", ended="ended"
+    )
+    old = Handoff.read(
+        {"objective": request, "handoff": {"from": "task", "request": request}}
+    )
+    assert successor.checkpoint["goal"] == old.checkpoint["goal"] == WORDS
+    card = build_park_card({"objective": request}, [])
+    assert f"Goal: {WORDS}" in card and READING_HEAD not in card
 
 
 # ── The chat's earlier turns ──

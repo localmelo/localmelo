@@ -1526,7 +1526,9 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 
 The chat's internal turn is a turn with `"origin": "ask_owner"` (the key is
 absent on the person's turns, in the turn row and in `turn.started`), empty
-typed text and the question as its user text. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
+typed text and the question as its user text. A turn whose text is not what a person typed (where a
+stopped task goes on, the restart's check, the request of a task another agent or a channel made) has
+`"composed": true`, absent otherwise, in the turn row and in `turn.started`. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
 "owner" | "person"}` while it waits, else `null`.
 
 ## GET /api/sessions/{id}/events
