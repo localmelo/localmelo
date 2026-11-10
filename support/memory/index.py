@@ -279,11 +279,10 @@ def _kept(text: str) -> str:
             at += 1
         if sensitive(sentence):
             refused[sentence] = None
-        elif at == len(places) or places[at][0] >= end:
-            continue
-        out.append((start, end))
-    # A refused sentence's words wherever else they stand: a repeat, or inside a
-    # sentence that reads as none.
+        elif at < len(places) and places[at][0] < end:
+            out.append((start, end))
+    # A refused sentence wherever its words stand: its own place, a repeat, and
+    # inside a sentence that reads as none.
     for sentence in refused:
         found = text.find(sentence)
         while found >= 0:

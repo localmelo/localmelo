@@ -247,6 +247,11 @@ def test_a_password_that_crosses_a_sentence_end_leaves_no_part_in_the_index(
         assert "plain" not in kept and "Word7" not in kept
 
 
+def test_the_sentences_a_value_crosses_go_whole_as_one_gap() -> None:
+    kept = index.cleaned('Tea is ready. pw: "plain. Word7" ok. More tea.')
+    assert kept == "Tea is ready. [left out] More tea."
+
+
 @pytest.mark.parametrize(
     "text",
     [
