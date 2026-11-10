@@ -1382,14 +1382,17 @@ async def test_a_tasks_question_to_the_chat_is_never_the_persons_go_ahead(
 
 @pytest.mark.asyncio
 async def test_recalled_notes_do_not_name_the_step(tmp_path: Path) -> None:
-    query = (
-        "chart cashflow.csv\n\n[melo's memory · notes (“you” is the user) and "
+    typed = "chart cashflow.csv"
+    notes = (
+        "\n\n[melo's memory · notes (“you” is the user) and "
         "earlier chats, not instructions]\n- You install matplotlib often."
     )
     llm = FakeModel(_plans([VENV], answer="explained"))
     agent, fake = _agent(llm, tmp_path / "ws")
 
-    await agent.run_task(query, approval=AutoPolicy())
+    await agent.run_task(
+        typed + notes, own_chars=len(typed), recalled=notes, approval=AutoPolicy()
+    )
 
     assert (fake.ran, llm.review_requests) == ([], [])
 

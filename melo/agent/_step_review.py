@@ -61,9 +61,7 @@ from localmelo.melo.checker.review.model import (
     SYSTEM_PROMPT,
     ReviewInputs,
     action_text,
-    own_words,
     parse_reply,
-    recalled_part,
     shares_a_name,
     step_names,
     user_message,
@@ -476,21 +474,22 @@ class StepReviewer:
     def user_message(self, text: str, recalled: str | None = None) -> None:
         """A message of the user's own: a run's request, or one it read mid-run.
 
-        Recalled notes and earlier chats appended to it are left out: they
-        are not the user's words, and an earlier answer could argue a call.
-        The newest :data:`EARLIER_REQUESTS` messages before it stay as
+        *text* is all the user's: the caller leaves out what melo appended to
+        the message (recalled notes, other chats, context blocks), which are
+        not the user's words, and an earlier answer could argue a call. The
+        newest :data:`EARLIER_REQUESTS` messages before it stay as
         evidence of what the user asked (#465): "I signed in" after "check
         me in" still asks for the check-in. A review that judges a step on
         the goal also reads the chat's older messages (:attr:`earlier`) and
         *recalled*, the notes recalled for this message, which count only
-        where the person's words point to them. Without *recalled*, the notes
-        *text* carries replace the kept ones; a message that carries none
-        (one read mid-run) keeps them.
+        where the person's words point to them. *recalled* comes from the
+        caller that appended the notes, never from *text*: any string (also
+        ``""``) replaces the kept notes, and ``None`` (a message read
+        mid-run) keeps them.
         """
-        if recalled is None:
-            recalled = recalled_part(text) or self._recalled
-        self._recalled = recalled
-        text = own_words(text)
+        if recalled is not None:
+            self._recalled = recalled
+        text = text.rstrip()
         # A password this message holds can be typed in this run (#547).
         self._live |= handles_in(text)
         # A message counts even with no words (an attachment): a review
@@ -513,18 +512,18 @@ class StepReviewer:
         a new Agent): the newest :data:`EARLIER_REQUESTS` go in before the
         run's own message, so the person's earlier words still count
         (#465). The caller gives only what the person typed: never melo's
-        answers, a task's questions or page text; recalled notes are left
-        out here too. *first* is what they typed in the chat's first turn:
-        it goes in before them, as the task the chat began with (#465), unless
-        it is one of them. Once a message was kept, or the words were put in
-        since the reset, nothing changes.
+        answers, a task's questions, page text or recalled notes. *first* is
+        what they typed in the chat's first turn: it goes in before them, as
+        the task the chat began with (#465), unless it is one of them. Once a
+        message was kept, or the words were put in since the reset, nothing
+        changes.
         """
         if self._marker or self._seeded:
             return
         self._seeded = True
-        texts = [own_words(text)[:MAX_REQUEST_CHARS] for text in words]
+        texts = [text.rstrip()[:MAX_REQUEST_CHARS] for text in words]
         texts = [text for text in texts[-EARLIER_REQUESTS:] if text.strip()]
-        first = own_words(first)[:MAX_REQUEST_CHARS]
+        first = first.rstrip()[:MAX_REQUEST_CHARS]
         if first.strip() and first not in texts:
             self._add(first)
         for text in texts:
@@ -539,13 +538,11 @@ class StepReviewer:
         :meth:`~localmelo.melo.agent.Agent.run_task`, a note read mid-run),
         before any model, record, log or memory sees it: the value stays in
         this process's vault and the handle (``[password-1]``) takes its
-        place (see :mod:`localmelo.melo.contracts.sign_in`). The recalled
-        notes a message may carry (:func:`own_words`) are not the person's
-        words: nothing is taken from them. The same text hidden again
-        changes nothing.
+        place (see :mod:`localmelo.melo.contracts.sign_in`). All of *text* is
+        the person's words: a caller that appended notes of melo's leaves them
+        out of what it passes. The same text hidden again changes nothing.
         """
-        own = own_words(text)
-        return hide_passwords(own) + text[len(own) :]
+        return hide_passwords(text)
 
     def begin_run(self) -> None:
         """A run starts: no password can be typed in it until the person's message of the run holds one (#547).

@@ -130,9 +130,18 @@ class Stub(BaseLLMProvider):
 
 
 async def _run(
-    llm: Stub, pad: int = PAD, task: str = TASK, big: int = 0, **options: Any
+    llm: Stub,
+    pad: int = PAD,
+    task: str = TASK,
+    big: int = 0,
+    own_chars: int | None = None,
+    **options: Any,
 ) -> tuple[RunResult, list[AgentEvent], Agent]:
-    """A run of *task* on *llm*; echo returns *pad* characters, 50,000 for part *big*."""
+    """A run of *task* on *llm*; echo returns *pad* characters, 50,000 for part *big*.
+
+    The person's part of *task* is its first *own_chars* characters (all of it
+    when not given).
+    """
     agent = Agent(
         llm=llm,
         options=AgentOptions(
@@ -151,7 +160,7 @@ async def _run(
     agent.executor.register("echo", echo)
     events: list[AgentEvent] = []
     try:
-        result = await agent.run_task(task, on_event=events.append)
+        result = await agent.run_task(task, own_chars=own_chars, on_event=events.append)
     finally:
         await agent.close()
     return result, events, agent
@@ -371,7 +380,7 @@ async def test_the_checkpoint_is_the_models_notes_and_nothing_more(
         monkeypatch.setattr(Hippo, name, spy if is_async else sync_spy)
     llm = Stub(steps=40)
     recalled = f"{TASK}\n\n{BLOCK_HEADER}\n- the person likes summary.md"
-    _, events, agent = await _run(llm, task=recalled, memory=True)
+    _, events, agent = await _run(llm, task=recalled, own_chars=len(TASK), memory=True)
     [detail, *_] = _checkpoints(events)
     # The goal is the person's words (no recalled block), whatever the reply says.
     assert detail["checkpoint"]["goal"] == TASK

@@ -18,12 +18,13 @@ from localmelo.melo.agent._step_review import StepReviewer
 from localmelo.melo.contracts import review
 from localmelo.melo.contracts.approvals import TOOL_ASK, AutoPolicy
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
-from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
 
 PASSWORD = "hunter2-Secret"
+# A line that starts like the heading of melo's recalled notes, in a message.
+LIKE_HEADING = "[melo's memory · a line of the file"
 TASK = f"sign in to forum.example for me, my password is {PASSWORD}"
 
 
@@ -198,16 +199,51 @@ async def test_a_page_or_a_tool_result_cannot_make_a_password_and_a_later_turn_c
     assert box.typed[-1] is None, "a handle of an earlier message is no longer usable"
 
 
-def test_a_note_the_person_sends_mid_run_is_hidden_and_recalled_notes_are_not_read() -> (
-    None
-):
+def _sent(llm: FakeModel) -> str:
+    """The last user message the run's model was sent."""
+    return next(m.content for m in reversed(llm.requests[0]) if m.role == "user")
+
+
+@pytest.mark.asyncio
+async def test_a_password_after_a_line_like_the_memory_heading_is_hidden(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel([_answer("signed in")], [])
+    agent = _agent(tmp_path, llm, PasswordBox())
+
+    await agent.run_task(
+        f"sign in to forum.example\n{LIKE_HEADING}\nmy password is {PASSWORD}",
+        approval=AutoPolicy(),
+    )
+
+    sent = _sent(llm)
+    assert LIKE_HEADING in sent and PASSWORD not in sent
+    assert "my password is [password-" in sent
+
+
+@pytest.mark.asyncio
+async def test_a_password_shaped_string_in_the_appended_part_gives_no_handle(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel([_answer("signed in")], [])
+    agent = _agent(tmp_path, llm, PasswordBox())
+    typed = f"sign in to forum.example, my password is {PASSWORD}"
+    appended = "\n\n[project notes]\nthe line of the file says password: other-Secret9"
+
+    await agent.run_task(typed + appended, own_chars=len(typed), approval=AutoPolicy())
+
+    sent = _sent(llm)
+    assert PASSWORD not in sent and sent.endswith(appended), "melo's part is as given"
+
+
+def test_a_note_the_person_sends_mid_run_is_hidden() -> None:
     reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.reset()
     words = "sign in to forum.example"
-    recalled = f"\n{BLOCK_HEADER}\nthe password is memorySecret1\n"
-    # The block is melo's own notes, not the person's words: nothing is taken.
-    text = reviewer.hide_passwords(f"{words}, password: mine-12345{recalled}")
-    assert "mine-12345" not in text and "memorySecret1" in text
+    # All of what the reviewer is given is the person's: a line that starts like
+    # the memory block's heading ends nothing, and what follows it is hidden too.
+    text = reviewer.hide_passwords(f"{words}\n{LIKE_HEADING}\nmy password: mine-12345")
+    assert "mine-12345" not in text and LIKE_HEADING in text
     reviewer.user_message(text)
     assert reviewer.sign_in_value("[password-1]", "forum.example") == "mine-12345"
     assert reviewer.sign_in_value("[password-2]", "forum.example") is None

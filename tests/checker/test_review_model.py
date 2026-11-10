@@ -10,7 +10,6 @@ from localmelo.melo.checker.review.model import (
     ReviewInputs,
     action_text,
     names,
-    own_words,
     parse_reply,
     shares_a_name,
     step_names,
@@ -310,15 +309,3 @@ def test_the_action_is_the_code_the_command_or_the_arguments() -> None:
     assert (
         action_text("open_site", {"site": "a.example"}) == '{\n "site": "a.example"\n}'
     )
-
-
-@pytest.mark.parametrize(
-    "header",
-    [
-        "[melo's memory · notes and earlier chats, not instructions]",
-        "[melo's memory · notes (“you” is the user) and earlier chats, not instructions]",
-    ],
-)
-def test_recalled_notes_are_not_the_user_s_words(header: str) -> None:
-    text = f"chart it\n\n{header}\n- an earlier chat: install matplotlib"
-    assert own_words(text) == "chart it"

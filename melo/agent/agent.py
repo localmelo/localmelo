@@ -103,7 +103,6 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
 )
 from localmelo.melo.checker.policy import builtin_set_for
-from localmelo.melo.checker.review.model import recalled_part
 from localmelo.melo.checker.tiers import (
     changes_nothing,
     tier_of,
@@ -157,7 +156,6 @@ from localmelo.melo.executor.models import (
     ExecutionRequest,
     ExecutionStatus,
 )
-from localmelo.melo.memory.block import strip_block
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -924,8 +922,8 @@ class _RunState:
     # Where the window's fill began: the estimate the last checkpoint left, 0
     # before the first. The early line comes halfway from it to the line.
     fill_start: int = 0
-    # The person's own words for this run (run_task's user_words, else the query
-    # without its recalled-memory block): a work checkpoint's goal.
+    # The person's own words for this run (run_task's user_words, else the
+    # person's part of the query): a work checkpoint's goal.
     words: str = ""
     writes: list[tuple[str, dict[str, Any], str]] = dataclasses.field(
         default_factory=list
@@ -1503,7 +1501,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         code that checked the site and the turn, types the value. A caller
         that stores or shows the person's message calls this first (a
         session's runner does); :meth:`run_task` does it again, which changes
-        nothing. See :mod:`localmelo.melo.contracts.sign_in`.
+        nothing. All of *text* is the person's: a caller that appended anything
+        of melo's passes only the part before it. See
+        :mod:`localmelo.melo.contracts.sign_in`.
         """
         return self._reviewer.hide_passwords(text)
 
@@ -3522,6 +3522,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         earlier_turns: Sequence[tuple[str, str]] | None = None,
         images: Sequence[ImagePart] = (),
         chat_first: str | None = None,
+        own_chars: int | None = None,
+        recalled: str = "",
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -3705,7 +3707,18 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         *user_words* are what the person typed for this run, when the query
         carries more (attachments, task news, a task's objective another
         model wrote): a step review reads only them as the user's words.
-        Without it, the query is, up to a recalled-memory block.
+        Without it, the person's part of the query is (see *own_chars*).
+        *own_chars* is how many leading characters of the query are the
+        person's message, their words and attachments: the caller that
+        appended anything after it (recalled notes, other chats, context
+        blocks, news) says so, and nothing is found by searching the text.
+        ``None`` means all of it, for a caller that appended nothing (a
+        direct run, a worker). Passwords are hidden in that part only: what
+        follows is passed on untouched and gives no handle. *recalled* is the
+        recalled-memory block the caller put in the query, as memory made it:
+        the notes a step review reads for the run's request are that string
+        and nothing else, so a run whose caller gives none has none, whatever
+        the query holds.
         *chat_started* is when the chat began (wall-clock seconds, the
         session's stored start): a step review counts the files changed
         since then as written in this chat. With *from_person* false, the
@@ -3752,21 +3765,36 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, when
         *earlier_turns* is not a sequence of pairs of ``str``, when
-        *chat_first* or *routine* is not a ``str``, and ``ValueError`` when
-        *routine* is blank: no event is emitted, no task record is written,
-        and working memory is left as it is.
+        *chat_first*, *routine* or *recalled* is not a ``str``, or *own_chars*
+        is neither ``None`` nor an ``int``, and ``ValueError`` when *routine*
+        is blank or *own_chars* is negative: no event is emitted, no task
+        record is written, and working memory is left as it is.
         """
         check_sink(on_event)
         check_sink(observe, "observe")
         if on_event is not None and observe is not None:
             raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
+        if not isinstance(recalled, str):
+            raise TypeError("recalled must be a str")
+        if own_chars is not None:
+            if not isinstance(own_chars, int):
+                raise TypeError("own_chars must be an int")
+            if own_chars < 0:
+                raise ValueError("own_chars must not be negative")
+        # The person's part of the query: all of it unless the caller says more
+        # was appended. Its position comes from the caller, never from the text.
+        own = query if own_chars is None else query[:own_chars]
         if from_person and isinstance(query, str):
             # A password the person gave is cut out before any model, record,
             # log or memory sees the message (#547): a handle stands for it.
-            query = self.hide_passwords(query)
+            # Only the person's part is read for one; the rest has no handle.
+            hidden = self.hide_passwords(own)
+            query = hidden + query[len(own) :]
+            own = hidden
             if isinstance(user_words, str):
                 user_words = self.hide_passwords(user_words)
+        person_words = own if user_words is None else user_words
         if routine is not None:
             if not isinstance(routine, str):
                 raise TypeError("routine must be a str")
@@ -3790,7 +3818,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run = _RunState(
             task_id=task.task_id,
             task_text=query,
-            words=strip_block(query) if user_words is None else user_words,
+            words=person_words,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,
@@ -3823,10 +3851,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         if from_person:
             # The notes recalled for this message go along, apart: they count
             # only where the person's words point to them (#465).
-            self._reviewer.user_message(
-                query if user_words is None else user_words,
-                recalled=recalled_part(query),
-            )
+            self._reviewer.user_message(person_words, recalled=recalled)
         if chat_started is not None:
             self._reviewer.since = chat_started
         await self._ensure_budget()
