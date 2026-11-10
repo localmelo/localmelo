@@ -217,8 +217,9 @@ those tools can do.
   of that tool, as in the chat. Such a task's steps are reviewed with every
   file changed since that chat began, not only since the task began, so code
   an earlier task of the chat wrote is read before a grant covers a step;
-  when that start cannot be read, no grant of the chat applies and the step
-  asks. A chore, or a task another agent, a channel or melo itself started,
+  when that start cannot be read, no tool or site grant of the chat applies
+  and the step asks (a folder the chat allowed for reading still holds, as
+  it does for the chat). A chore, or a task another agent, a channel or melo itself started,
   uses no chat's grant. A task created with your gateway token (`POST
   /api/tasks`, `melo task new`) counts as yours and belongs to the main
   chat, so it uses the main chat's grants: a token holder acts as you.
