@@ -503,10 +503,40 @@ async def test_a_password_in_a_message_or_a_title_reaches_no_record(
         # The rest of what was said is kept: a lasting fact still becomes a note.
         notes = [n.text for n in await memory.records()]
         assert "You live in Pittsburgh." in notes
+        # And no note says a password was given.
+        assert not [note for note in notes if "pw" in note.lower()]
     finally:
         await close(chats, memory)
     # No file the run wrote holds a value: the chat store, the index, the notes.
     assert holding(tmp_path, "Word7") == []
+
+
+async def test_another_secret_after_a_password_word_reaches_no_index_and_no_answer(
+    tmp_path: Path,
+) -> None:
+    token = "abcdefghijklmnopqrstuvwxyz0123456789"
+    data = {
+        "sessions": [
+            chat(
+                "a",
+                "2023-05-20T13:40:00",
+                ("user", "Card pw: 4111 1111 1111 1111 ok. I like tea."),
+                ("assistant", f"Use pw: Bearer {token}"),
+                # Named, so the chat's title is not its first message.
+                title="Forum",
+            )
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data, notes="none")
+    try:
+        (turn,) = await chats.list_turns(report.ids["a"])
+        # The answer's key is redacted before the password word's value is cut out.
+        assert token not in (turn.answer or "")
+    finally:
+        await close(chats, memory)
+    assert holding(tmp_path, token) == []
+    # The chat store keeps the person's words; memory's files hold no part of the card.
+    assert holding(tmp_path / "memory", "1111 1111 1111") == []
 
 
 async def test_a_password_at_the_stores_limit_is_cut_out_before_the_cut(

@@ -218,13 +218,18 @@ def test_pin_as_a_verb_is_not_a_secret(text: str) -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["My pw is plain-Word7.", "forum pwd: abcd1", "pw = 'two words'"],
+    [
+        "My pw is plain-Word7.",
+        "forum pwd: abcd1",
+        "pw = 'two words'",
+        # Where one was cut out, the mark counts as the value it stood for.
+        "My pw is […].",
+    ],
 )
 def test_a_password_given_after_a_short_word_is_a_secret(text: str) -> None:
     assert records.sensitive(text)
     # So the index leaves the sentence out, like one with the word "password".
-    kept = index.cleaned(f"Tea is ready. {text}")
-    assert kept.startswith("Tea is ready.") and text not in kept
+    assert index.cleaned(f"Tea is ready. {text}") == "Tea is ready. [left out]"
 
 
 @pytest.mark.parametrize(
@@ -234,14 +239,44 @@ def test_a_password_given_after_a_short_word_is_a_secret(text: str) -> None:
 def test_a_password_that_crosses_a_sentence_end_leaves_no_part_in_the_index(
     text: str,
 ) -> None:
-    kept = index.cleaned(f"Tea is ready. {text}")
-    assert kept.startswith("Tea is ready.")
-    assert "plain" not in kept and "Word7" not in kept
+    for kept in (
+        index.cleaned(f"Tea is ready. {text}"),
+        index.plain_text(f"Tea is ready. {text}"),
+    ):
+        assert kept.startswith("Tea is ready.")
+        assert "plain" not in kept and "Word7" not in kept
 
 
 @pytest.mark.parametrize(
     "text",
-    ["Run pwd to print the folder.", "The pw manager is open.", "My pw is wrong."],
+    [
+        "pw: Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+        "Card pw: 4111 1111 1111 1111 ok.",
+        "pw: verification code 123456",
+        "pwd: passcode 482913",
+        # As a loaded chat stores it, the first part cut out.
+        "Card pw: […] 1111 1111 1111 ok.",
+    ],
+)
+def test_another_secret_after_a_password_word_is_left_out_whole(text: str) -> None:
+    # The sentence is judged as the text gives it: a password's value cut out
+    # first would take the start of the other secret and hide the rest.
+    assert index.cleaned(f"Tea is ready. {text}") == "Tea is ready. [left out]"
+
+
+def test_only_the_sentences_a_password_reaches_are_left_out() -> None:
+    text = "pwd\n/srv/app\nls /srv/app/src"
+    assert index.cleaned(text) == "pwd\n[left out]\nls /srv/app/src"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Run pwd to print the folder.",
+        "The pw manager is open.",
+        "My pw is wrong.",
+        "He wrote […] and left.",
+    ],
 )
 def test_the_short_words_alone_are_not_a_secret(text: str) -> None:
     assert not records.sensitive(text)

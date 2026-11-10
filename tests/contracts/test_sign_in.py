@@ -7,10 +7,11 @@ import pytest
 from localmelo.melo.contracts.sign_in import (
     HANDLE,
     MAX_KEPT,
+    SPENT,
     VAULT,
-    gives_password,
     handles_in,
     hide_passwords,
+    password_spans,
     spent,
     without_passwords,
 )
@@ -55,9 +56,11 @@ def test_a_text_that_is_not_plainly_a_password_given_is_left_alone(text: str) ->
     assert hide_passwords(text) == text and not handles_in(text)
 
 
-def test_asking_whether_a_text_gives_a_password_keeps_nothing() -> None:
-    assert all(gives_password(text) for text, _ in GIVEN)
-    assert not any(gives_password(text) for text in NOT_GIVEN)
+def test_reading_where_a_text_gives_a_password_keeps_nothing() -> None:
+    for text, masked in GIVEN:
+        ((start, end),) = password_spans(text)
+        assert text[:start] + "[password-1]" + text[end:] == masked
+    assert not any(password_spans(text) for text in NOT_GIVEN)
     # Cut out with nothing kept: what hiding leaves once its handles are spent.
     assert [without_passwords(text) for text, _ in GIVEN] == [
         spent(masked) for _, masked in GIVEN
@@ -66,6 +69,10 @@ def test_asking_whether_a_text_gives_a_password_keeps_nothing() -> None:
     # A text the door already hid passes through as it is.
     hidden = [masked for _, masked in GIVEN]
     assert [without_passwords(text) for text in hidden] == hidden
+    # Every value of a text, in order.
+    two = "pw: first-one1 and pwd = second-2"
+    assert [two[a:b] for a, b in password_spans(two)] == ["first-one1", "second-2"]
+    assert without_passwords(two) == f"pw: {SPENT} and pwd = {SPENT}"
     # Nothing was kept and no handle was made: the next one is the first.
     assert repr(VAULT) == "Vault(0 password(s))"
     assert hide_passwords("pw=first-one1") == "pw=[password-1]"

@@ -32,8 +32,9 @@ stored, indexed, kept as a note or read by a model, and ``[…]`` stands in its
 place (:func:`~localmelo.melo.contracts.sign_in.without_passwords`): the value
 reaches no record. Nothing is typed from a loaded chat, so no handle is made and
 the passwords of the person at the keyboard are not touched. An assistant
-message is cut the same way: in a file it can repeat what the person gave, and
-a stored answer is read again by search and by a model when the chat goes on. A
+message is cut the same way, after its keys are redacted as the store redacts
+an answer: in a file it can repeat what the person gave, and a stored answer is
+read again by search and by a model when the chat goes on. A
 user message is cut to the store's limit after that, so no part of a value is
 left at the cut. A title is cut to the store's limit too: a longer one would
 stop the run.
@@ -67,6 +68,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from localmelo.melo import clock
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.sign_in import without_passwords
 from localmelo.support.memory import ChatMemory, hippo_encode, hippo_judge
@@ -426,7 +428,9 @@ async def run(
             if len(typed) > MAX_QUERY_LEN:
                 typed = typed[:MAX_QUERY_LEN]
                 report.trimmed += 1
-            answer = without_passwords(exchange.answer)
+            # Keys first, as the store redacts an answer: a key after a password
+            # word would lose its first part to the cut and no longer read as one.
+            answer = without_passwords(redact_secrets(exchange.answer)[0])
             pin.at = exchange.asked_at
             info = await chats.begin_turn(
                 session_id or None,

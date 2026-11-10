@@ -38,7 +38,7 @@ import aiosqlite
 import numpy as np
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.contracts.sign_in import without_passwords
+from localmelo.melo.contracts.sign_in import password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
     create_private_file,
@@ -256,24 +256,36 @@ def _item(row: Sequence[Any]) -> MemoryItem:
 
 
 def _kept(text: str) -> str:
-    """*text* without the sentences a note would refuse (a password, a card number)."""
-    for _, sentence in reversed(split_sentences(text)):
-        if sensitive(sentence):
-            text = text.replace(sentence, "[left out]")
+    """*text* without the sentences a note would refuse (a password, a card number),
+    and without any other sentence a password's value reaches into.
+
+    A value can cross a sentence's end (a quoted one with a full stop in it, one on
+    the line after its word): neither sentence then reads as a password by itself.
+    Every sentence is judged as the text gives it, before anything is taken out: a
+    cut made first would hide the rest of another secret from the test.
+    """
+    sentences = split_sentences(text)
+    reached = password_spans(text)
+    refused = [sentence for _, sentence in sentences if sensitive(sentence)]
+    known = set(refused)
+    # By their place first: the offsets are those of the text as given.
+    for start, sentence in reversed(sentences):
+        end = start + len(sentence)
+        if sentence not in known and any(a < end and start < b for a, b in reached):
+            text = text[:start] + "[left out]" + text[end:]
+    for sentence in reversed(refused):
+        text = text.replace(sentence, "[left out]")
     return text
 
 
 def _clean(text: str) -> str:
     """*text* without its secrets: a sentence a note would refuse is left out, the
     rest redacted. A private key block is redacted whole first: left out line by
-    line, its header would go and its body stay. A password the text gives is cut
-    out first for the same reason: its value can cross a sentence's end (a quoted
-    value with a full stop in it, a value on the next line), where leaving out by
-    sentence would keep a part of it."""
+    line, its header would go and its body stay."""
     text = text.strip()
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
-    return redact_secrets(_kept(without_passwords(text)))[0]
+    return redact_secrets(_kept(text))[0]
 
 
 def cleaned(text: str) -> str:
