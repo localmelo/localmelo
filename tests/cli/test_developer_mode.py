@@ -206,7 +206,7 @@ def test_an_experimental_setting_names_its_issue() -> None:
 
 def test_every_setting_flag_is_a_parser_option_with_a_tier() -> None:
     assert {item.flag for item in SETTINGS} <= set(OPTION_TIERS)
-    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 26
+    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 25
     assert sum(not item.file for item in SETTINGS) == 8
 
 

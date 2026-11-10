@@ -145,10 +145,6 @@ with a failed check exits with code 4, so a script can stop on it:
 melo worker brief.md --url http://127.0.0.1:11434/v1 --model qwen3:8b > result.json && echo "check passed"
 ```
 
-The experimental setting `agent.brief_items` (`-X agent.brief_items=true`) also names the brief's numbered items that
-no edit has touched yet in the model's reflection requests and before its last
-steps (see the [reference](../reference/cli.md#brief-items)).
-
 On macOS, the worker's shell commands and Python code can write only in the
 workspace: a write elsewhere, even after `cd ..`, fails with `Operation not
 permitted` and a line telling the model to write in the workspace, and scratch

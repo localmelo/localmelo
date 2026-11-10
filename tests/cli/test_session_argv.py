@@ -74,7 +74,7 @@ P5_DEFAULTS = {"workspace": None}
 R6_DEFAULTS = {"keep_decision_text": False}
 # U3 PR 4 added --allow-unconfigured for --serve.
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
-CAPTURED_DEFAULTS = {"captured_history": None, "brief_items": None}
+CAPTURED_DEFAULTS = {"captured_history": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 WINDOW_MESSAGES_DEFAULTS = {"window_messages": None}
 WORKER_DEFAULTS = {

@@ -17,7 +17,6 @@ import dataclasses
 import logging
 import os
 from collections.abc import Callable, Collection, Mapping, Sequence
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
@@ -86,10 +85,9 @@ def configured_cache_options(
 CONTEXT_SETTINGS: Final = ("context_window", "output_reserve", "safety_margin")
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
-# The settings of the model's thinking: what a turn that ends with only thinking
-# becomes (AgentOptions.empty_reply_fallback), and on which steps it thinks
-# (AgentOptions.thinking_steps).
-FALLBACK_SETTINGS: Final = ("empty_reply_fallback", "thinking_steps")
+# The setting of the model's thinking: what a turn that ends with only thinking
+# becomes (AgentOptions.empty_reply_fallback).
+FALLBACK_SETTINGS: Final = ("empty_reply_fallback",)
 
 
 def _configured_keys(
@@ -111,7 +109,7 @@ def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions
 
 
 def configured_fallback_options(cfg: Config, options: AgentOptions) -> AgentOptions:
-    """*options* with ``[agent] empty_reply_fallback`` and ``thinking_steps``; ValueError for a bad value."""
+    """*options* with ``[agent] empty_reply_fallback``; ValueError for a bad value."""
     return _configured_keys(cfg, options, FALLBACK_SETTINGS)
 
 
@@ -323,22 +321,6 @@ def with_review_body(llm: BaseLLMProvider, backend: str | None) -> None:
     body = review_body(llm, backend)
     if body:
         llm.extra_body_by_kind = {**llm.extra_body_by_kind, "review": body}
-
-
-def with_quiet_steps(
-    llm: BaseLLMProvider, backend: str | None, options: AgentOptions
-) -> None:
-    """For ``thinking_steps = "first_and_failed"``: give *llm* the fields that turn thinking off on *backend* (#551).
-
-    The agent sends them with the planning steps that need no thinking. A
-    service whose provider already has a switch (the hosted ones) keeps it; a
-    local server gets :func:`~localmelo.support.providers.llm.thinking.thinking_off_fields`.
-    Under ``"all"`` nothing is touched, so the requests are as they were.
-    """
-    if options.thinking_steps == "all" or llm.thinking_off or llm.thinking_off_body:
-        return
-    if body := thinking_off_fields(llm, backend):
-        llm.thinking_off_body = MappingProxyType(body)
 
 
 async def build_session_agent(
@@ -568,10 +550,6 @@ async def build_session_agent(
                 )
             }
         with_review_body(llm, None if cfg is None else cfg.chat_backend)
-        # A server given by URL has no backend of its own to name (as in a direct run).
-        with_quiet_steps(
-            llm, None if base_url or cfg is None else cfg.chat_backend, agent_options
-        )
         if wrap_llm is not None:
             llm = wrap_llm(llm)
         if wrap_embedding is not None and embedding is not None:

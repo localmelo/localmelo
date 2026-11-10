@@ -1,4 +1,4 @@
-"""``[agent] confine_direct_runs`` (#183): a developer switch that confines plain direct runs.
+"""``[agent] confine_direct_runs``: an advanced switch that confines plain direct runs.
 
 Off by default: a direct run is then as it was. On, a task given on the command
 line and the ``melo ""`` loop start ``shell_exec`` and ``python_exec`` under the
@@ -57,10 +57,8 @@ class TestConfig:
         row = capsys.readouterr().out.splitlines()[1].split()
         assert row == [KEY, "true", "false", "-X"]
         text = cli._build_parser(developer=True).format_help()
-        assert any(
-            line.startswith(f"  {KEY} ") and line.endswith("(#183)")
-            for line in text.splitlines()
-        )
+        listed = next(line for line in text.splitlines() if line.startswith(f"  {KEY} "))
+        assert "(#" not in listed, "an advanced setting: no issue decides it"
 
 
 class TestOptions:
