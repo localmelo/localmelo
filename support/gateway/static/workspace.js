@@ -1639,7 +1639,7 @@ function assistantNode(turn, newest = false) {
     }
     article.append(...picturesOf(turn), statusNode(turn));
   } else if (turn.answer) {
-    article.append(answerNode(turn.answer), ...picturesOf(turn), actionsNode(turn, newest));
+    article.append(answerNode(turn.answer), ...picturesOf(turn), actionsNode(turn));
   }
   return article;
 }
@@ -1811,9 +1811,8 @@ const COPIED_MS = 1500;
  * Under an answer: the copy button, then the facts no other line gives. The time shows here only when the work
  * line above the answer does not give it (`summaryTimed`); the developer mode adds the steps and the tokens.
  */
-function actionsNode(turn, newest = false) {
+function actionsNode(turn) {
   const actions = el("div", "message-actions");
-  if (newest) actions.dataset.newest = "true";
   const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
   const timed = summaryTimed(turn) && shownItems(turn).length > 0;
   const facts = [
