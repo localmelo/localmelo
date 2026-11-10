@@ -586,11 +586,11 @@ _SCAN_WORDS = re.compile(r"scan|扫|掃|スキャン|스캔|読み取", re.IGNOR
 # The addresses a human check loads its box from: a host here, or under one of
 # these, is a box that checks the visitor is human. melo presses it as the person
 # would, on the check's own question (#583), whose kept answer covers such checks
-# on every site; only where the browser itself says a frame from such a host sits
-# at the point pressed. A host with a label that starts with "captcha"
-# (:func:`names_a_check`) asks the check's question only where the browser itself
-# gives that frame's address, and a kept answer covers that one box on that one
-# page; a page's own word for an address never asks it.
+# on every site. Only a row of this table makes that question (instead of the
+# card for a box melo cannot check), and only where the browser itself says a
+# frame from such a host sits at the point pressed. A host with a label that
+# starts with "captcha" is only named a check in words (see
+# :func:`names_a_check`); it never changes a question.
 CHECK_HOSTS: Final = (
     "recaptcha.net",
     "hcaptcha.com",
@@ -677,10 +677,8 @@ def is_human_check(address: str) -> bool:
 def names_a_check(address: str) -> bool:
     """Whether *address* may be named a human check in words: a table host, or a host with a label that starts with ``captcha``.
 
-    In words (where a box is, what a line says), and for a frame whose address
-    the browser itself gives: a press there asks the check's question for that
-    box on that page (#583). An address only the page gives is asked about like
-    any other box melo cannot check.
+    Words only (where a box is, what a line says): a press there is asked about
+    like a press in any other box melo cannot check.
     """
     host = _host(address)
     return is_human_check(address) or any(

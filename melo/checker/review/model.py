@@ -48,7 +48,8 @@ MAX_RECALLED_CHARS: Final = 1_500
 # quick login, the choice, the line, the send). A step that runs and succeeds
 # gives back the reviews it used (#583), so the count limits the steps that
 # were stopped or failed, not a long task's length. A high-impact step the rules
-# did judge, whose review only reads the user's words, has a count of its own.
+# did judge, whose review only reads the user's words, has a count of its own,
+# which never comes back.
 REVIEWS_PER_TURN: Final = 12
 REVIEW_TIMEOUT_S: Final = 20.0
 # Requests one review makes before it counts as failed: a request that times

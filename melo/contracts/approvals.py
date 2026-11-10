@@ -418,52 +418,70 @@ WINDOW_READ: Final = "window-read:"
 # a code, a QR code, a human check): only the person answers it, never a review.
 TAKEOVER: Final = "takeover:"
 # The question the browser provider asks before it presses inside a human check
-# (#583), only where code proves the press is in one: in Ask and in Auto, only
-# the person answers it, and "Always in this chat" keeps it. Its name holds what
-# a kept answer covers (:func:`check_scope`): ``browser-check:<page origin>`` for
-# a frame the browser itself proves is a known check provider's (a kept answer
-# covers such checks on every site), and ``browser-check:<page origin>#<frame
-# origin>`` for a box whose address the browser gives and which names a check
-# without being a known provider's (a kept answer covers that box on that page).
+# (#583), only where code proves the press is in one: a frame the browser itself
+# names a known check provider's. In Ask and in Auto only the person answers it,
+# and "Always in this chat" keeps it. Its name is ``browser-check:<page origin>``
+# (:func:`check_scope`), and a kept answer covers such checks on every site.
 HUMAN_CHECK: Final = "browser-check:"
-# An origin as a check question's name holds it: an http(s) scheme and a host
-# with no path, query, user name or space (``sites.origin_of`` writes them so).
-_ORIGIN: Final = re.compile(r"https?://[a-z0-9.\-\[\]:]+")
+# An origin in the one spelling ``sites.origin_of`` gives it: an http(s) scheme, a
+# host in lower-case ASCII with no dot at its end (an IPv6 address in brackets),
+# and a port only when it is not the scheme's own.
+_ORIGIN: Final = re.compile(
+    r"(https?)://"
+    r"([a-z0-9](?:[a-z0-9\-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?)*"
+    r"|\[[0-9a-f:.]+\])"
+    r"(?::([1-9][0-9]{0,4}))?"
+)
 # The questions only the person answers whose answer a chat may keep: another app's
 # window, and a human check.
 PERSON_KEPT: Final = (WINDOW_READ, HUMAN_CHECK)
 
 
-def check_question(page: str, box: str = "") -> str:
-    """The name of the human-check question on the page of origin *page*: for a known provider's frame, or for the box of origin *box*."""
-    return f"{HUMAN_CHECK}{page}#{box}" if box else f"{HUMAN_CHECK}{page}"
+def check_question(page: str) -> str:
+    """The name of the human-check question on the page of origin *page*."""
+    return f"{HUMAN_CHECK}{page}"
 
 
-def check_scope(name: str) -> tuple[str, str] | None:
-    """What the human-check question *name* is about: (page origin, box origin), ``""`` as the box of a known provider's frame.
+def check_scope(name: str) -> str | None:
+    """The page origin the human-check question *name* is asked on, spelt once.
 
-    ``None`` for any other name, and for one whose parts are not plain origins:
-    such a name is no check question and nothing it keeps covers anything.
+    ``None`` for any other name, and for one whose origin is not spelt the one
+    way the browser provider writes it (upper case, a dot at the end of the
+    host, the scheme's own port written out, another host form): such a name is
+    no check question, and nothing it keeps covers anything.
     """
     if not name.startswith(HUMAN_CHECK):
         return None
-    page, mark, box = name[len(HUMAN_CHECK) :].partition("#")
-    if not _ORIGIN.fullmatch(page) or (mark and not _ORIGIN.fullmatch(box)):
+    page = name[len(HUMAN_CHECK) :]
+    found = _ORIGIN.fullmatch(page)
+    if found is None:
         return None
-    return page, box
+    scheme, host, port = found.groups()
+    bare = host[1:-1] if host.startswith("[") else host
+    if site_host(bare) != bare or (bare != host) != (":" in bare):
+        return None
+    if port is not None and (int(port) > 65535 or int(port) == WEB_PORTS[scheme]):
+        return None
+    return page
 
 
 def check_covers(kept: str, name: str) -> bool:
     """Whether a kept answer to the human-check question *kept* covers the question *name* (#583).
 
-    A known provider's frame (no box) is covered by a kept answer to any such
-    question, on every site; a box no known provider's is covered only by a
-    kept answer to that very box on that very page. Nothing else.
+    Both are human checks of a known provider, on any two sites: a kept
+    answer covers every such check. Nothing else.
     """
-    held, asked = check_scope(kept), check_scope(name)
-    if held is None or asked is None:
-        return False
-    return held == asked or not (held[1] or asked[1])
+    return check_scope(kept) is not None and check_scope(name) is not None
+
+
+def kept_check(request: ApprovalRequest) -> bool:
+    """Whether *request* is a human check a kept answer may cover (:func:`person_grant` of :data:`HUMAN_CHECK`).
+
+    The one question an answer the chat kept settles in Auto with nobody
+    watching, and the one a task or a scheduled task takes from its chat
+    without the person's review (#583).
+    """
+    return request.tool_name.startswith(HUMAN_CHECK) and person_grant(request)
 
 
 def window_question(request: ApprovalRequest) -> bool:
@@ -868,8 +886,9 @@ class AutoPolicy:
     (origin ``auto``). A stopped call that a person may allow
     (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
     (the chat's card, #465), and the answer comes back as :class:`Chosen`.
-    First, *asking*'s optional ``kept(request)`` says what the chat kept: an
-    allow there runs the call whether or not anybody watches (#583).
+    First, for a human check (:func:`kept_check`), *asking*'s optional
+    ``kept(request)`` says what the chat kept: an allow there runs the press
+    whether or not anybody watches (#583). Every other question goes on below.
     With a *watch*, it asks only while a person sees the chat, and a card
     nobody answers did not run its step and is not a no (:data:`AUTO_ASK_WAIT_S`). Without
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
@@ -979,11 +998,12 @@ class AutoPolicy:
                     keep(request.tool_name)
             return ApprovalDecision(True, origin="auto")
         asking, watch = self.asking, self.watch
-        kept = getattr(asking, "kept", None) if asks_in_auto(review) else None
+        kept = getattr(asking, "kept", None) if kept_check(request) else None
         found = kept(request) if callable(kept) else None
         if isinstance(found, ApprovalDecision) and found.allow:
-            # What the chat kept decides alike whether anybody watches (#583): the
-            # person's answer holds while they are away too.
+            # A human check the chat kept is pressed alike whether anybody watches
+            # (#583): the person's answer holds while they are away too. Every
+            # other kept answer waits for somebody watching, as before.
             return found
         if (
             asking is not None

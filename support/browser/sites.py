@@ -16,9 +16,9 @@ cannot be read that way (an address by number, a local name, a public suffix,
 an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
 Every other answer stays on the exact origin it was asked about: an Allow once,
 typing, a form, a file, a click at a point, a page's box and a take-over. A press
-inside a human check asks a question of its own (``browser-check:``, #583): what
-the person keeps for it covers the checks its name says (every site for a known
-provider's frame, one box on one page for any other). A page
+inside a known provider's human check asks a question of its own
+(``browser-check:``, #583): what the person keeps for it covers such checks on
+every site. A page
 approved earlier is read again unasked until its site is refused: the refusal
 takes the tabs' approval back (:class:`SiteRefusedError`), and only the person's
 newer answer stands over it (:func:`require_not_refused`).
@@ -116,6 +116,12 @@ def origin_of(url: str) -> str | None:
     return f"{scheme}://{shown}" + (
         f":{port}" if port not in (None, WEB_PORTS[scheme]) else ""
     )
+
+
+def same_origin(one: str, other: str) -> bool:
+    """Whether the addresses *one* and *other* are of one origin: the same scheme, host and port (:func:`origin_of`); never when *one* has none."""
+    first = origin_of(one)
+    return first is not None and first == origin_of(other)
 
 
 def require_origin(url: str) -> str:
@@ -440,18 +446,17 @@ async def require_point(
         )
 
 
-async def require_check(origin: str, box: str, *, known: bool) -> None:
+async def require_check(origin: str, box: str) -> None:
     """Ask about a press inside the human check *box* on *origin*'s page; :class:`BrowserError` if refused (#583).
 
-    Asked only where code proves the press is in a check: *box* is the address
-    of the check's frame as the browser itself gives it, *known* says the
-    browser proved it a known check provider's. The question names the page and
-    the box and says it is a human check; only the person answers it, in Ask and
-    in Auto, and "Always in this chat" keeps it: for every site when *known*,
-    else for this box on this page (its name, ``browser-check:<origin>#<box>``).
-    It has no ``origin`` argument, as a click's question: a Don't allow leaves
-    the check to the person and does not refuse the site. Don't allow is said to
-    the model as :data:`CHECK_LEFT`.
+    Asked only where the browser itself proves the press is in a known check
+    provider's frame: *box* is that frame's address as the browser gives it.
+    The question names the page and the box and says it is a human check; only
+    the person answers it, in Ask and in Auto, and "Always in this chat" keeps
+    it for every such check on every site (its name,
+    ``browser-check:<origin>``). It has no ``origin`` argument, as a click's
+    question: a Don't allow leaves the check to the person and does not refuse
+    the site. Don't allow is said to the model as :data:`CHECK_LEFT`.
     """
     ask = TOOL_ASK.get()
     if ask is None:
@@ -462,12 +467,9 @@ async def require_check(origin: str, box: str, *, known: bool) -> None:
             "melo cannot tell whose check this is, so it did not press it."
         )
     host, from_ = host_of(origin), host_of(frame)
-    arguments: dict[str, object] = {"site": host, "access": "check", "box": from_}
-    if known:
-        arguments["known"] = True
     decision = await ask(
-        check_question(origin, "" if known else frame),
-        _browser(arguments),
+        check_question(origin),
+        _browser({"site": host, "access": "check", "box": from_}),
         f"press the human check from {from_} on {host} {_in()}",
     )
     if decision.allow:

@@ -23,7 +23,7 @@ import pytest
 from localmelo.melo.agent._pause import Hold
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.pause import PAUSE, Resumed
-from localmelo.support.browser import sites, takeover
+from localmelo.support.browser import chrome, sites, takeover
 from localmelo.support.browser.driver import (
     Act,
     ActResult,
@@ -1355,13 +1355,11 @@ def check_page() -> RawPage:
 async def test_melo_presses_a_human_check_on_its_own_question_and_says_what_it_did() -> (
     None
 ):
-    """By point and by ref: the check's own question (#583), no take-over card; the step says passed or still there."""
+    """By point the check's own question (#583), by ref the click's; no take-over card; the step says passed or still there."""
     inside = Element("button", "", at=-1, fp="bare")
     driver = Solving(check_page(), passes=2)
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=CHECK, check=True, there=CHECK
-    )
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, live = await started(driver)
     asks = Asks()
     with asking(asks):
@@ -1378,24 +1376,21 @@ async def test_melo_presses_a_human_check_on_its_own_question_and_says_what_it_d
     )
     assert "The check is still there." in point.text
     assert "Clicked e2" in ref.text and "The check passed." in ref.text
-    # The check's own question, never the click's: no take-over card, no "box melo cannot
-    # check" card. A known provider's frame by point and by ref asks the same question.
+    # By point, where the browser itself names the frame, the check's own question;
+    # by ref (Safari's own reading, not a proof) the click's question as before. No
+    # take-over card, no "box melo cannot check" card.
     assert [n for n in asks.names if n.startswith("browser-check:")] == [
         "browser-check:https://example.com"
-    ] * 2
-    [arguments, _] = [a for n, a, _ in asks.asked if n.startswith("browser-check:")]
+    ]
+    [arguments] = [a for n, a, _ in asks.asked if n.startswith("browser-check:")]
     assert arguments == {
         "site": "example.com",
         "access": "check",
         "box": "newassets.hcaptcha.com",
-        "known": True,
         "browser": "chrome",
     }
-    assert not [
-        n
-        for n in asks.names
-        if n.startswith(("takeover:", "browser-point:", "browser-act:"))
-    ]
+    assert [n for n in asks.names if n.startswith("browser-act:")]
+    assert not [n for n in asks.names if n.startswith(("takeover:", "browser-point:"))]
     assert "melo never passes" not in point.text + ref.text
     await provider.close()
 
@@ -1403,43 +1398,56 @@ async def test_melo_presses_a_human_check_on_its_own_question_and_says_what_it_d
 BOX = "https://captcha.boxes.example/widget"
 
 
-async def test_a_box_the_browser_names_a_check_asks_for_that_box_on_that_page() -> None:
-    """#583: no known provider, but the browser gives a frame address that names a check."""
+async def test_each_press_is_proved_again_and_a_frame_no_longer_the_check_s_asks() -> (
+    None
+):
+    """#583: a later press (one a kept answer would cover) runs its own proof: the check
+    question and its proof only while the browser still names the provider's frame there."""
     inside = Element("button", "", at=-1, fp="bare")
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit("frame", inside, site=BOX, there=BOX)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, _ = await started(driver)
     asks = Asks()
     with asking(asks):
         await run(tools, "browser_open", url=HOME)
         await run(tools, "browser_screenshot")
-        out = await run(tools, "browser_click_point", x=500, y=300)
-    assert not out.is_error
-    [(name, arguments, _)] = [
-        q
-        for q in asks.asked
-        if q[0].startswith(("browser-check:", "browser-point:", "browser-act:"))
+        await run(tools, "browser_click_point", x=500, y=300)
+        # The page put another site's frame at the point: not a check any more.
+        driver.hits[(500, 150)] = PointHit("frame", inside, site=BOX)
+        await run(tools, "browser_click_point", x=500, y=300)
+    asked = [
+        n for n in asks.names if n.startswith(("browser-check:", "browser-point:"))
     ]
-    assert name == "browser-check:https://example.com#https://captcha.boxes.example"
-    assert "known" not in arguments and arguments["box"] == "captcha.boxes.example"
-    # The browser proves that very frame is there again right before it presses.
-    [act] = driver.acts
-    assert act.proof == BOX
+    assert asked == ["browser-check:https://example.com", "browser-point:https://example.com"]
+    assert [act.proof for act in driver.acts] == [CHECK, ""]
     await provider.close()
 
 
-@pytest.mark.parametrize("known", [True, False])
-async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing(
-    known: bool,
+@pytest.mark.parametrize(
+    ("there", "same"),
+    [
+        ("https://newassets.hcaptcha.com/captcha/v1/other", True),
+        ("https://newassets.hcaptcha.com:443/x", True),
+        ("http://newassets.hcaptcha.com/x", False),  # the same host and port, another scheme
+        ("https://newassets.hcaptcha.com:8443/x", False),
+        ("https://other.hcaptcha.com/x", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_the_proof_right_before_the_press_compares_the_whole_origin(
+    there: str | None, same: bool
 ) -> None:
+    """#583: scheme, host and port, as the first proof (one function, ``sites.same_origin``)."""
+    assert chrome._same_frame(there, "https://newassets.hcaptcha.com/captcha/v1/checkbox") is same
+
+
+async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing() -> None:
     inside = Element("button", "", at=-1, fp="bare")
-    box = CHECK if known else BOX
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=box, check=known, there=box
-    )
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, _ = await started(driver)
     with asking(Asks(deny=("browser-check:",))):
         await run(tools, "browser_open", url=HOME)
@@ -1450,15 +1458,17 @@ async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing(
     await provider.close()
 
 
-async def test_a_consent_press_inside_a_check_still_asks_its_own_question_every_time() -> (
-    None
-):
-    """A kept check answer never covers what the point question asks (never kept)."""
-    inside = Element("button", "", at=-1, fp="bare")
+@pytest.mark.parametrize("sensitive", ["", "password", "code", "card"])
+async def test_a_consent_press_inside_a_check_still_asks_its_own_question_every_time(
+    sensitive: str,
+) -> None:
+    """A kept check answer never covers what the point question asks (never kept):
+    consent, and a password, code or card field at the point."""
+    inside = Element("button", "", at=-1, fp="bare", sensitive=sensitive)  # type: ignore[arg-type]
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
     driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=CHECK, check=True, there=CHECK, consent=True
+        "frame", inside, site=CHECK, check=True, consent=not sensitive
     )
     provider, tools, _ = await started(driver)
     asks = Asks()
@@ -1480,9 +1490,7 @@ async def test_a_check_still_there_after_the_presses_is_offered_to_the_person() 
     inside = Element("button", "", at=-1, fp="bare")
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=CHECK, check=True, there=CHECK
-    )
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, live = await started(driver)
     asks = Asks()
     with asking(asks):
@@ -1509,9 +1517,7 @@ async def test_a_check_still_there_after_the_presses_is_offered_to_the_person() 
     # With nobody to ask, the step still says it, and carries on.
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=CHECK, check=True, there=CHECK
-    )
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, _ = await started(driver)
     with asking(Asks(deny=("takeover:",))):
         await run(tools, "browser_open", url=HOME)
@@ -1524,23 +1530,20 @@ async def test_a_check_still_there_after_the_presses_is_offered_to_the_person() 
 
 
 @pytest.mark.parametrize(
-    ("site", "there"),
+    "site",
     [
-        # Named a check by its label, or a table host, in the page's own word only.
-        ("https://captcha.example.com/x", ""),
-        (CHECK, ""),
-        # The browser's own word: another site's frame that names no check sits there.
-        ("https://ads.example.net/x", "https://ads.example.net/x"),
-        # The browser's own word: a frame of the page's own origin, or of its own site
-        # under a host that names a check.
-        ("https://example.com/captcha", "https://example.com/captcha"),
-        ("https://captcha.example.com/x", "https://captcha.example.com/x"),
+        "https://captcha.example.com/x",  # named a check by its label only
+        BOX,  # the browser's own word for a host that only names a check (#583)
+        # A table host, but nothing proved a frame of it sits there: what Safari, which
+        # cannot say which frame is at a point, reports of a check's box (#583).
+        CHECK,
+        "https://ads.example.net/x",  # the browser's own word: another site's frame sits there
     ],
 )
 async def test_no_page_can_lower_the_card_for_a_box_melo_cannot_check(
-    site: str, there: str
+    site: str,
 ) -> None:
-    """A box is a check only where the browser itself gives a check's frame address; else the card, every time."""
+    """A box is a check only where the browser proved a table host's frame is there; else the card, every time."""
     inside = Element("button", "", at=-1, fp="bare")
     # The page also loaded a check's frame, and the read names where that is.
     shown = dataclasses.replace(
@@ -1548,7 +1551,7 @@ async def test_no_page_can_lower_the_card_for_a_box_melo_cannot_check(
     )
     driver = Solving(shown)
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit("frame", inside, site=site, there=there)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=site)
     provider, tools, live = await started(driver)
     asks = Asks()
     with asking(asks):
@@ -1559,6 +1562,7 @@ async def test_no_page_can_lower_the_card_for_a_box_melo_cannot_check(
     assert "a human check box from newassets.hcaptcha.com at (190, 423)" in opened.text
     cards = [a for a in asks.asked if a[0].startswith("browser-point:")]
     assert len(cards) == 2 and len(driver.acts) == 2
+    assert not [n for n in asks.names if n.startswith("browser-check:")]
     for _, arguments, preview in cards:
         assert arguments["target"] == "unknown"
         assert "human check" not in f"{arguments['on']} {preview}"
@@ -1603,9 +1607,7 @@ async def test_a_check_still_there_is_not_pressed_again_once_the_card_cannot_com
     def stuck() -> Solving:
         driver = Solving(check_page())
         driver.shot_view = View("", "d1", 1000.0, 500.0)
-        driver.hits[(500, 150)] = PointHit(
-            "frame", inside, site=CHECK, check=True, there=CHECK
-        )
+        driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
         return driver
 
     async def press_all(tools: dict[str, Any]) -> Any:
@@ -1664,9 +1666,7 @@ async def stuck_check(
     """A tab with a proved check and the person's panel on it; a press by point, ``confirm`` or not."""
     inside = Element("button", "", at=-1, fp="bare")
     driver.shot_view = View("", "d1", 1000.0, 500.0)
-    driver.hits[(500, 150)] = PointHit(
-        "frame", inside, site=CHECK, check=True, there=CHECK
-    )
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
     provider, tools, live = await started(driver)
     with asking(asks):
         await run(tools, "browser_open", url=HOME)

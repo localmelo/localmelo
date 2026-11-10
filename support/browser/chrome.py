@@ -115,10 +115,9 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, Final, cast
-from urllib.parse import urlsplit
 
 from localmelo.support import config
-from localmelo.support.browser import apps, local_apps
+from localmelo.support.browser import apps, local_apps, sites
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -1214,11 +1213,8 @@ def _holds(tree: object, frame: str) -> bool:
 
 
 def _same_frame(there: str | None, proof: str) -> bool:
-    """Whether the frame now at a point (*there*, its address) is loaded from the same host as the one that was proved a check there (*proof*)."""
-    return (
-        bool(there)
-        and urlsplit(there or "").netloc.lower() == urlsplit(proof).netloc.lower()
-    )
+    """Whether the frame now at a point (*there*, its address) is loaded from the same origin as the one that was proved a check there (*proof*): scheme, host and port (#583)."""
+    return bool(there) and sites.same_origin(there or "", proof)
 
 
 def _picture(params: dict[str, Any]) -> Frame | None:

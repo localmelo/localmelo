@@ -2189,8 +2189,8 @@ class Agent(_RecallLoop, _NotesLoop):
                     lambda: self._images_on is True,
                 )
             )
-        # The reviews used before the call: a call that runs and succeeds gives
-        # back what its reviews used (#583).
+        # The goal reviews used before the call: a call that runs and succeeds
+        # gives them back (#583); a consent review stays spent.
         reviewed = run.reviews.spent()
         try:
             exec_request = ExecutionRequest(

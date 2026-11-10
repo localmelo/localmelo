@@ -263,17 +263,15 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     why = t(args.browser === "chrome" ? "approval.pointContentChrome" : "approval.pointContent", { site });
     content = `${String(args.how || "click")} ${String(args.on || "a point of the page")}`;
   } else if (tool.startsWith("browser-check:")) {
-    // A press inside a human check (#583), asked only where code proves the press is in one: only the person answers
-    // it, in Ask and in Auto. A kept answer covers human checks on every site when the browser proved the box a known
-    // check provider's (`known`), else this box on this page only.
+    // A press inside a known provider's human check (#583), asked only where melo's browser itself proves the press
+    // is in one: only the person answers it, in Ask and in Auto, and a kept answer covers human checks on every site.
     const site = String(args.site || "");
     const box = String(args.box || "");
-    const kind = args.known === true ? "check" : "checkBox";
     what = t("approval.willDo");
     title = t("approval.checkTitle", { site });
     caption = t("approval.checkCaption");
-    keptRule = t(`approval.rule.${kind}${everywhere ? "Main" : ""}`, { site, box, scope });
-    why = t(args.browser === "chrome" ? "approval.checkContentChrome" : "approval.checkContent", { site, box });
+    keptRule = t(everywhere ? "approval.rule.checkMain" : "approval.rule.check", { scope });
+    why = t("approval.checkContent", { site, box });
     content = "";
     noBox = true;
   } else if (tool.startsWith("desktop-act:")) {

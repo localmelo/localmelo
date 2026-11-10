@@ -17,9 +17,8 @@ The scope rule:
 
 The person's grant of a site question (opening, clicking and choosing) covers
 the other hosts of its site where it holds (#577), and their grant of a human
-check covers the checks its name says (#583, every site for a known provider's
-frame, one box on one page for any other): a row keeps the name it was given
-and :meth:`GrantBook.person_covers` matches at lookup. Auto's read stays its
+check covers every known provider's check on every site (#583): a row keeps the
+name it was given and :meth:`GrantBook.person_covers` matches at lookup. Auto's read stays its
 exact origin.
 
 Nothing that must ask every time is ever written: the questions of
@@ -160,14 +159,11 @@ class Grant:
 
     @property
     def action(self) -> str:
-        """What it lets melo do, in one word: ``tool``, ``open``, ``act``, ``read``, ``folder``, ``window``, ``check`` or ``checkBox``."""
+        """What it lets melo do, in one word: ``tool``, ``open``, ``act``, ``read``, ``folder``, ``window`` or ``check``."""
         if self.kind == "site":
             if self.key.startswith("browser-act:"):
                 return "act"
             return "read" if self.decided_by == "auto" else "open"
-        if self.kind == "check":
-            scope = check_scope(self.key)
-            return "checkBox" if scope is not None and scope[1] else "check"
         return self.kind
 
     def to_json(self) -> dict[str, Any]:
@@ -243,11 +239,6 @@ def describe(
             return f"Click and choose on {site}", site
         return (f"Read {site}" if by == "auto" else f"Open {site}"), site
     if kind == "check":
-        page, box = check_scope(key) or ("", "")
-        if box:
-            # One box on one page: what the person allowed, by both addresses.
-            site, frame = page.split("://", 1)[-1], box.split("://", 1)[-1]
-            return f"Press the human check from {frame} on {site}", site
         return "Press human checks on every site", ""
     if kind == "window":
         app = ""

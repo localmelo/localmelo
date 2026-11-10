@@ -973,7 +973,8 @@ commands and file changes.
   runs only when it is routine and part of what you asked; a tool you allowed
   for the chat runs its routine calls without that review, as in Ask. A
   turn's reviews count only the steps that were stopped or failed, so a long
-  task that goes well keeps being reviewed. A write outside
+  task that goes well keeps being reviewed; a review that let a high-impact
+  step run on your words still counts. A write outside
   the folder fails in Auto even when no rule caught it: its output says
   `writing outside the workspace is not allowed in auto mode`. A step in
   Auto can neither read melo's sign-in token nor reach melo's own API.
@@ -1010,7 +1011,7 @@ commands and file changes.
   message. melo asks you itself: it never asks you to type a permission.
 - **Only while you watch.** The card waits only while the chat is open in the
   console, the app or the terminal. With nobody watching, the step is blocked,
-  as before, unless an answer you kept for the chat covers it. A card nobody answers within 1 minute, or that you close the chat
+  as before, unless it is a human check whose **Always in this chat** you kept. A card nobody answers within 1 minute, or that you close the chat
   on, counts as **Deny**: the step reads "No answer in time", with one line
   under it ("Not run: no answer within 1 minute").
 - **Not allowed is not failed.** A step you denied, or that nobody answered,

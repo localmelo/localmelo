@@ -45,6 +45,7 @@ from localmelo.melo.contracts.approvals import (
     find_folder_asker,
     grant_offered,
     holds_grant,
+    kept_check,
     never_kept,
     person_grant,
     review_mode,
@@ -660,16 +661,15 @@ class OwnedTaskPolicy:
     task now, and *started* when a chat began. Of the tasks the person did
     not start, only a chore (a task on a schedule the person set) is
     wrapped, without *started*: it uses none of its chat's grants but its
-    answers to the questions only the person answers (#583).
+    answer to a human check (#583).
 
     The chat's grants are used only after :meth:`review_window` read the
     owner chat's start, and only while that chat still owns the task: the
     task's steps are then reviewed with every file changed since that chat
     began, so code an earlier task of the chat planted is read before the
     chat's grant covers a step. Without that start, the person is asked. A
-    question only the person answers that the chat may keep (another app's
-    window, a human check) runs no code: the chat's answer to it holds in
-    either mode, from the first step.
+    human check runs no code: the chat's answer to it holds in either mode,
+    from the first step.
 
     A path outside the workspace (#405) is asked about through *folders*
     (the task's asking policy, also in Auto, which asks nobody), or the
@@ -754,14 +754,13 @@ class OwnedTaskPolicy:
         """The grants of the chat that owns the task, read as that chat reads them.
 
         ``None`` in Auto, and unless the steps were reviewed from that chat's
-        start. A question only the person answers whose answer the chat may
-        keep (:func:`~localmelo.melo.contracts.approvals.person_grant`: another
-        app's window, a human check) runs no code and no review decides it, so
-        the chat's answer to it holds in either mode and from the first step
-        (#583).
+        start. A human check
+        (:func:`~localmelo.melo.contracts.approvals.kept_check`) runs no code
+        and no review decides it, so the chat's answer to it holds in either
+        mode and from the first step (#583); nothing else does.
         """
         chat = self._chat or ""
-        if chat and request is not None and person_grant(request):
+        if chat and request is not None and kept_check(request):
             return self._book.view(chat, "side")
         if self._auto() or not self._reviewed_since(chat):
             return None
@@ -793,7 +792,7 @@ class OwnedTaskPolicy:
         return all(await asyncio.gather(*taken))
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        if self._started is not None or person_grant(request):
+        if self._started is not None or kept_check(request):
             # A chore reads its chat only for what it may use of it (#583).
             self._chat = await self._owner()
         grants = self._chat_grants(request)

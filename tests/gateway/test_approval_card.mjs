@@ -315,7 +315,7 @@ test('a human check asks the person: Allow once, Always in this chat, Don\'t all
     .map((node) => node.textContent);
   const rule = (card) => findNode(card, (node) => node.className === 'approval-warning').textContent;
   const opaque = {verdict: 'high', categories: ['opaque'], reasons: ['A human check on this page: only you decide whether melo presses it.']};
-  const known = {site: 'shop.example', access: 'check', box: 'newassets.hcaptcha.com', known: true, browser: 'chrome'};
+  const known = {site: 'shop.example', access: 'check', box: 'newassets.hcaptcha.com', browser: 'chrome'};
   // In Ask and in Auto alike: the card names the site and says it is a human check; no review's words.
   for (const review of [undefined, opaque]) {
     const id = `check-${review ? 'auto' : 'ask'}`;
@@ -331,10 +331,11 @@ test('a human check asks the person: Allow once, Always in this chat, Don\'t all
     quietDeny(card).click();
     assert.deepEqual(c.answers.at(-1), [id, 'deny']);
   }
-  // A box no known provider's: Always covers that box on that page only.
-  const box = c.draw({request_id: 'check-box', tool_name: 'browser-check:https://shop.example#https://captcha.boxes.example',
-    arguments: {site: 'shop.example', access: 'check', box: 'captcha.boxes.example'}, workspace_label: '~/w', offers_chat: true});
-  assert.match(rule(box), /this check box from captcha\.boxes\.example on shop\.example/);
+  // In the main chat, Always counts in every chat, and the card says so.
+  const main = cards({main: true}).draw({request_id: 'check-main', tool_name: 'browser-check:https://shop.example',
+    arguments: known, workspace_label: '~/w', offers_chat: true});
+  assert.deepEqual(labels(main), ['Allow once', 'Always, in every chat', "Don't allow"]);
+  assert.match(rule(main), /human checks on every site, in every chat/);
   // The answers are the server's word: without offers_chat, no Always.
   const plain = c.draw({request_id: 'check-none', tool_name: 'browser-check:https://shop.example', arguments: known, workspace_label: '~/w'});
   assert.deepEqual(labels(plain), ['Allow once', "Don't allow"]);

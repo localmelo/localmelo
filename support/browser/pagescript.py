@@ -1709,11 +1709,7 @@ class PageScriptActs:
                 there = await self._frame_at(x, y)
                 if there:
                     return PointHit(
-                        "frame",
-                        held,
-                        site=there,
-                        check=is_human_check(there),
-                        there=there,
+                        "frame", held, site=there, check=is_human_check(there)
                     )
                 if (
                     there is None
@@ -1743,7 +1739,6 @@ class PageScriptActs:
             consent=fields.consent(str(data.get("words") or "")),
             at=(as_number(mx), as_number(my)) if moved else None,
             check=bool(there) and is_human_check(there or ""),
-            there=there or "",
         )
 
     async def wait(

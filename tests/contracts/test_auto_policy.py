@@ -469,6 +469,12 @@ async def test_what_the_chat_kept_holds_in_auto_whether_or_not_anybody_watches()
         _request(review=ActionReview("high", ("system",), ("Changes settings.",)))
     )
     assert (blocked.allow, blocked.origin) == (False, "auto")
+    # Any other kept kind waits for somebody watching, as before: an app's window
+    # and a site Auto stopped only as not asked for.
+    for other in (_window(ActionReview("high", ("opaque",), ("x",))), _site()):
+        away = await AutoPolicy(asking=keeps, watch=_Watch(seen=False)).decide(other)
+        assert (away.allow, away.origin) == (False, "auto")
+        assert keeps.asked == []
 
 
 async def test_with_someone_watching_auto_asks_through_the_watch() -> None:
@@ -653,8 +659,8 @@ def _site(
         # it; never with a card-only kind, nor under a name that is no plain check.
         (_check(), False, True),
         (_check(review=ActionReview("high", ("opaque",), ("A check.",))), False, True),
-        (_check(check_question(PAGE, BOX)), False, True),
         (_check(review=ActionReview("high", ("money",), ("Pays.",))), False, False),
+        (_check(f"browser-check:{PAGE}#{BOX}"), False, False),
         (_check(f"browser-check:{PAGE}/pay"), False, False),
         # Ask's own questions keep their rule: unreviewed and routine may be kept.
         (_site(review=None), False, True),
@@ -727,20 +733,39 @@ def _window(
         (_window(ActionReview("high", ("send_out",), ("Sends.",))), False),
         (_window(ActionReview("high", ("opaque", "send_out"), ("x",))), False),
         (_window(name="desktop-act:Chat"), False),
-        # A human check (#583): a known provider's frame, and a box of its own.
+        # A human check (#583), a known provider's frame on a page of any origin
+        # spelt the one way the browser provider writes it.
         (_check(), True),
-        (_check(check_question(PAGE, BOX)), True),
         (_check(review=ActionReview("high", ("opaque",), ("A human check.",))), True),
+        (_check("browser-check:http://shop.example:8443"), True),
+        (_check("browser-check:https://[::1]:8443"), True),
+        (_check("browser-check:http://127.0.0.1"), True),
         # Never with any other review, nor a name that is no plain check question.
         (_check(review=ActionReview("high", ("money",), ("Pays.",))), False),
         (_check(review=ActionReview("high", ("opaque", "send_out"), ("x",))), False),
         (_check("browser-check:"), False),
         (_check("browser-check:shop.example"), False),
         (_check(f"browser-check:{PAGE}#"), False),
+        (_check(f"browser-check:{PAGE}#{BOX}"), False),
         (_check(f"browser-check:{PAGE}/pay"), False),
-        (_check(f"browser-check:{PAGE}#{BOX}/x"), False),
         (_check(f"browser-check:{PAGE} {BOX}"), False),
         (_check(f"browser-point:{PAGE}"), False),
+        # Another spelling of an origin is no check question (one name per page).
+        (_check("browser-check:https://Shop.example"), False),
+        (_check("browser-check:https://shop.example."), False),
+        (_check("browser-check:https://shop.example:443"), False),
+        (_check("browser-check:http://shop.example:80"), False),
+        (_check("browser-check:https://shop.example:99999"), False),
+        (_check("browser-check:https://shop.example:08443"), False),
+        (_check("browser-check:https://shop::example"), False),
+        (_check("browser-check:https://[::1"), False),
+        (_check("browser-check:https://[0:0::1]"), False),
+        (_check("browser-check:https://[127.0.0.1]"), False),
+        (_check("browser-check:https://0x7f.0.0.1"), False),
+        (_check("browser-check:https://shöp.example"), False),
+        (_check("browser-check:https://xn--shp-sna.example."), False),
+        (_check("browser-check:https://-shop.example"), False),
+        (_check("browser-check:ftp://shop.example"), False),
     ],
 )
 def test_a_chat_may_keep_a_question_only_the_person_answers(
@@ -757,20 +782,11 @@ def test_a_chat_may_keep_a_question_only_the_person_answers(
         # A known provider's frame: a kept answer covers such checks on every site.
         (check_question(PAGE), check_question("https://other.example"), True),
         (check_question(PAGE), check_question("http://shop.example:8443"), True),
-        # A box no known provider's: only that box on that page.
-        (check_question(PAGE, BOX), check_question(PAGE, BOX), True),
-        (
-            check_question(PAGE, BOX),
-            check_question("https://other.example", BOX),
-            False,
-        ),
-        (
-            check_question(PAGE, BOX),
-            check_question(PAGE, "https://captcha.x.example"),
-            False,
-        ),
-        (check_question(PAGE, BOX), check_question(PAGE), False),
-        (check_question(PAGE), check_question(PAGE, BOX), False),
+        # A box of its own (a name no offer makes) covers nothing and is covered by nothing.
+        (f"browser-check:{PAGE}#{BOX}", f"browser-check:{PAGE}#{BOX}", False),
+        (check_question(PAGE), f"browser-check:{PAGE}#{BOX}", False),
+        (f"browser-check:{PAGE}#{BOX}", check_question(PAGE), False),
+        ("browser-check:https://Shop.example", check_question(PAGE), False),
         # Never another kind of question, nor a name that is no plain check question.
         (check_question(PAGE), f"browser-point:{PAGE}", False),
         (check_question(PAGE), f"browser-act:{PAGE}", False),

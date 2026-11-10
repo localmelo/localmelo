@@ -212,21 +212,24 @@ those tools can do.
   and the server refuses a kept answer sent for any other call: the card
   still asks.
 - **A human check asks once per chat.** A press inside a human check asks
-  its own question (`browser-check:<site>`), in Ask and in Auto; only the
-  person answers it, never a model. It is raised only where code proves the
-  press is in a check, by the frame's address as the browser itself gives it
-  and never by words on the page: a frame from a known check provider's
-  address (checked again at the pressed pixel right before the press), or a
-  frame of another site whose address the browser gives and whose host names
-  a check (checked again the same way). "Always in this chat" is a grant like the others (kept, listed,
-  revocable). For a known provider's frame it covers such checks on every
-  site of the chat; for any other box, that box on that page only. It holds
-  in the chat in Ask and in Auto (also while nobody watches), in the chat's
-  tasks and in its chores, and nowhere else. It never covers a press outside
-  a check, a press melo cannot check, a password, code or card field, a
-  consent control, a payment or any other step the rules call high impact,
-  and it does not lift the limit on presses and tries in one check. Don't
-  allow leaves the check to the person.
+  its own question (`browser-check:<page origin>`), in Ask and in Auto; only
+  the person answers it, never a model. It is raised only where Chrome itself
+  says a frame from a known check provider's address sits at the pressed
+  point, of another origin than the page, never by words on the page; the
+  frame's whole origin (scheme, host and port) is checked again at the pressed
+  pixel right before the press. "Always in this chat" is a grant like the
+  others (kept, listed, revocable): it covers such checks on every site in
+  that chat and its tasks, in Ask and in Auto (also while nobody watches), and
+  in its chores; kept in the main chat, it covers every chat, as every answer
+  kept there does, and the card says so. It never covers a press outside a
+  check, a press melo cannot check, a password, code or card field, a consent
+  control, a payment or any other step the rules call high impact, and it
+  does not lift the limit on presses and tries in one check. Don't allow
+  leaves the check to the person. Its limits: a box whose address only names
+  a check, and any box in Safari (which cannot say which frame is at a
+  point), ask at every press as before and are never kept; a chore in Auto
+  with nothing kept does not run the press; the reviews that let a
+  high-impact step run on your words keep their own cap per run.
 - **A task uses its chat's grants, and nothing else kept.** In the web
   console, a task's approval goes through the chat that started it. A tool
   allowed for that chat (or in the main chat) covers the task's routine calls

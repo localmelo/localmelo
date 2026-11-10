@@ -407,10 +407,6 @@ def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:
     )
     assert grant_words("handoff:chat") == "opening chat: addresses in their app"
     assert grant_words("browser-check:https://shop.example") == "pressing human checks"
-    assert (
-        grant_words("browser-check:https://shop.example#https://captcha.boxes.example")
-        == "pressing the check box on shop.example"
-    )
 
 
 def test_a_question_the_page_asks_shows_its_words_and_asks_every_time() -> None:
@@ -485,22 +481,14 @@ def test_a_window_another_app_opened_is_asked_with_its_title_and_an_allow_for_th
     assert grant_offered(in_auto)
 
 
-@pytest.mark.parametrize("known", [True, False])
-def test_a_human_check_panel_names_the_site_and_what_a_kept_answer_covers(
-    known: bool,
-) -> None:
+def test_a_human_check_panel_names_the_site_and_what_a_kept_answer_covers() -> None:
     """#583: the same panel in Ask and in Auto, and the kept answer says its reach."""
-    name = "browser-check:https://shop.example" + (
-        "" if known else "#https://captcha.boxes.example"
-    )
-    extra: dict[str, Any] = {"known": True} if known else {}
     asked = _request(
-        name,
+        "browser-check:https://shop.example",
         site="shop.example",
         access="check",
-        box="hcaptcha.com" if known else "captcha.boxes.example",
+        box="newassets.hcaptcha.com",
         browser="chrome",
-        **extra,
     )
     in_auto = dataclasses.replace(
         asked, review=ActionReview("high", ("opaque",), ("A human check.",))
@@ -511,11 +499,13 @@ def test_a_human_check_panel_names_the_site_and_what_a_kept_answer_covers(
         assert panel.header == "shop.example · a human check on a web page"
         words = " ".join(" ".join(line for _, line in panel.body).split())
         assert "shop.example shows a human check" in words
+        assert "covers human checks on every site" in words
         assert grant_offered(request)
     assert session_option(asked) == (
         "Yes, and press human checks on every site for the rest of this chat"
-        if known
-        else "Yes, and press this check box on shop.example for the rest of this chat"
+    )
+    assert session_option(asked, everywhere=True) == (
+        "Yes, and press human checks on every site in every chat"
     )
 
 

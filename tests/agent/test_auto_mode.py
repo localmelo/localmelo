@@ -602,7 +602,11 @@ class FailingPython(FakePython):
 async def test_reviews_of_steps_that_succeed_come_back_and_the_rest_are_capped(
     tmp_path: Path, fails: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#583: a long task whose reviewed steps succeed keeps being reviewed; failures use the cap up."""
+    """#583: a long task whose reviewed steps succeed keeps being reviewed; failures use the cap up.
+
+    Only the goal reviews come back: a consent review (a high-impact step let run on
+    the person's words) stays spent, so its own cap holds per run.
+    """
     assert (
         REVIEWS_PER_TURN == 12
     )  # a check-in that signs in first reviews about ten steps
@@ -618,10 +622,10 @@ async def test_reviews_of_steps_that_succeed_come_back_and_the_rest_are_capped(
         fake = FailingPython()
         agent.executor.register("python_exec", fake.python_exec, requires_approval=True)
     person = Person()
-    refills: list[tuple[int, int]] = []
+    refills: list[int] = []
     refill = RunReviews.refill
 
-    def counted(self: RunReviews, before: tuple[int, int]) -> None:
+    def counted(self: RunReviews, before: int) -> None:
         refills.append(before)
         refill(self, before)
 
@@ -638,6 +642,12 @@ async def test_reviews_of_steps_that_succeed_come_back_and_the_rest_are_capped(
     assert len(llm.review_requests) == cap + 2
     assert [r.call_id for r in person.asked] == ["call_1"]
     assert len(fake.ran) == len(refills) == cap + 4
+    # What a step that succeeded gives back: its goal reviews, never a consent review.
+    reviews = RunReviews()
+    before = reviews.spent()
+    reviews.used, reviews.consent_used, reviews.runner_used = 2, 2, 2
+    reviews.refill(before)
+    assert (reviews.used, reviews.consent_used, reviews.runner_used) == (0, 2, 2)
 
 
 # ── A site the browser would open ──

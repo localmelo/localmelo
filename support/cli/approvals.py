@@ -367,8 +367,8 @@ def _tool_panel(
         else "in Safari's automation window"
     )
     if tool.startswith(HUMAN_CHECK):
-        # A press inside a human check (#583): the page, the box, and what a kept
-        # answer covers, by what the browser proved of the box.
+        # A press inside a known provider's human check (#583): the page, the box,
+        # and what a kept answer covers.
         site = shown(str(arguments.get("site") or "a page"))
         box = shown(str(arguments.get("box") or "another site"))
         said = (
@@ -376,10 +376,9 @@ def _tool_panel(
             f"are human). melo wants to press it {window}, as you would."
         )
         note = (
-            "Kept for the chat, the answer covers human checks on every site."
-            if arguments.get("known") is True
-            else f"Kept for the chat, the answer covers this check box on {site} only."
-        ) + " Sign-ins, payments and a check's pictures keep their own rules."
+            "Kept for the chat, the answer covers human checks on every site. "
+            "Sign-ins, payments and a check's pictures keep their own rules."
+        )
         body = [("", row) for row in _wrapped([said], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
@@ -728,10 +727,7 @@ def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str
         app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
         return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
     if request.tool_name.startswith(HUMAN_CHECK):
-        if request.arguments.get("known") is True:
-            return f"Yes, and press human checks on every site {rest}"
-        page, _ = escape_arguments(site)
-        return f"Yes, and press this check box on {page} {rest}"
+        return f"Yes, and press human checks on every site {rest}"
     where = "in every chat" if everywhere else "for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call {where}"
 
@@ -1005,13 +1001,8 @@ def grant_words(name: str) -> str:
         return _GRANT_WORDS[name]
     if name.startswith("handoff:"):
         return f"opening {name[len('handoff:') :]}: addresses in their app"
-    if (scope := check_scope(name)) is not None:
-        page, box = scope
-        return (
-            f"pressing the check box on {url_site(page) or page}"
-            if box
-            else ("pressing human checks")
-        )
+    if check_scope(name) is not None:
+        return "pressing human checks"
     for prefix, words in _SITE_GRANT_WORDS:
         if name.startswith(prefix):
             return words.format(site=grant_site(name))

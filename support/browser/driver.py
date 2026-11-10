@@ -208,9 +208,6 @@ class PointHit:
     address of a human check provider sits at the point (``site`` is then that
     frame's address, as the browser gives it); a driver that cannot say leaves
     it unset, so a point in a box is asked about as a box melo cannot check.
-    ``there`` is the address of the frame at the point as the browser itself
-    gives it (``""`` when it cannot say, or there is none): never the page's
-    own word for it.
     """
 
     surface: Literal["control", "canvas", "frame", "none"]
@@ -221,7 +218,6 @@ class PointHit:
     tag: str = ""
     words: bool = False
     check: bool = False
-    there: str = ""
 
 
 @dataclass(frozen=True)
@@ -339,10 +335,9 @@ class Act:
     pixels), with the browser's own click, on the control ``element`` that was
     found there; the driver does nothing unless the point still resolves to it
     and the view has not scrolled. ``proof`` is the address of the frame of a
-    human check that the browser said sits at ``point`` (:attr:`PointHit.there`
-    of a known provider's frame or of a box that names a check, #583): a driver
-    that can say again right before it clicks does nothing unless that frame is
-    still there.
+    human check that the browser said sits at ``point`` (:attr:`PointHit.check`):
+    a driver that can say again right before it clicks does nothing unless that
+    frame is still there.
     """
 
     kind: ActionKind
