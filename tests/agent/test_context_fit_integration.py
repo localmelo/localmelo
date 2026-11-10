@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,11 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.providers._http import post_json
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.agent.test_stream_display import Display
 
 
 class Scripted(BaseLLMProvider):
@@ -213,3 +217,70 @@ async def test_only_explicit_context_errors_are_classified(
         with pytest.raises(ProviderError) as caught:
             await post_json(client, "/chat", {})
     assert caught.value.context_overflow is expected
+
+
+def _sse(*frames: object) -> bytes:
+    body = b"".join(b"data: " + json.dumps(f).encode() + b"\n\n" for f in frames)
+    return body + b"data: [DONE]\n\n"
+
+
+async def test_a_streamed_overflow_reaches_the_refit_with_one_request(
+    tmp_path: Path,
+) -> None:
+    """A stream refused as too long is not sent again whole: the refit runs at once."""
+    (tmp_path / "input.txt").write_text("evidence " * 1000)
+    call = {
+        "index": 0,
+        "id": "c1",
+        "type": "function",
+        "function": {"name": "file_read", "arguments": '{"path": "input.txt"}'},
+    }
+    replies = [
+        httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"index": 0, "delta": {"tool_calls": [call]}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ),
+        ),
+        httpx.Response(400, json={"error": {"code": "context_length_exceeded"}}),
+        httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"index": 0, "delta": {"content": "done\n"}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ),
+        ),
+    ]
+    bodies: list[dict[str, Any]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return replies[len(bodies) - 1]
+
+    llm = OpenAICompatLLM(
+        "http://fixture/v1", "fixture", transport=httpx.MockTransport(serve)
+    )
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_read"}),
+            memory=False,
+            context_window=20000,
+            output_reserve=100,
+            safety_margin=100,
+        ),
+    )
+    token = STREAM_DISPLAY.set(Display())
+    try:
+        result = await agent.run_task("Read input.txt")
+    finally:
+        STREAM_DISPLAY.reset(token)
+        await agent.close()
+    assert result.status == "completed" and result.n_tool == 1
+    assert [body.get("stream") for body in bodies] == [True, True, True]
+    before = next(m["content"] for m in bodies[1]["messages"] if m["role"] == "tool")
+    after = next(m["content"] for m in bodies[2]["messages"] if m["role"] == "tool")
+    assert len(after) < len(before) and "characters omitted" in after
+    assert not llm.sends_whole_replies

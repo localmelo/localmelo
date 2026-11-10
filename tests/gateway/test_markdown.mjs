@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderMarkdown } from '../../support/gateway/static/markdown.mjs';
+import { renderMarkdown, renderPartialMarkdown } from '../../support/gateway/static/markdown.mjs';
 
 test('fenced code preserves Markdown, blank lines, and source indentation', () => {
   const source = '```python\n# **literal**\n- not a list\n\n  x = "<tag>"\n```';
@@ -188,4 +188,11 @@ test('an escaped pipe in code inside a table cell loses its backslash', () => {
 
 test('tables protect code pipes, escaped pipes, and HTML', () => {
   assert.equal(renderMarkdown('| Name | Value |\n| :--- | ---: |\n| `a|b` | <tag> |\n| a\\|b | **two** |'), '<div class="table-scroll"><table><thead><tr><th class="align-left">Name</th><th class="align-right">Value</th></tr></thead><tbody><tr><td class="align-left"><code>a|b</code></td><td class="align-right">&lt;tag&gt;</td></tr><tr><td class="align-left">a|b</td><td class="align-right"><strong>two</strong></td></tr></tbody></table></div>');
+});
+
+test('a reply being written: complete lines are Markdown, the line being written is plain', () => {
+  assert.equal(renderPartialMarkdown('- one\n- **tw'), '<ul><li><p>one</p></li></ul><p>- **tw</p>');
+  assert.equal(renderPartialMarkdown('# Title'), '<p># Title</p>', 'a mark waits for its line to end');
+  assert.equal(renderPartialMarkdown('```py\nx = "**"'), renderMarkdown('```py\nx = "**"'), 'an open fence is code already');
+  assert.equal(renderPartialMarkdown('Hello **world**\n'), renderMarkdown('Hello **world**\n'));
 });

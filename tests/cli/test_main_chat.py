@@ -41,6 +41,7 @@ from localmelo.tests.fixtures.http_stub import HttpStub
 
 from .test_session import Setup, _until
 from .test_session import setup as setup
+from .test_stream_render import _rows
 
 MAIN = "main00000001"
 
@@ -312,6 +313,10 @@ class FakeGateway:
                 if e["session_id"] == session_id and e["id"] > after
             ]:
                 after = event["id"]
+                if event["type"] == "reply.live":  # live text: not stored, no id
+                    shown = {k: v for k, v in event.items() if k != "id"}
+                    yield f"data: {json.dumps(shown)}\n\n".encode()
+                    continue
                 yield f"id: {after}\ndata: {json.dumps(event)}\n\n".encode()
             if self.lose_stream:
                 return
@@ -1350,10 +1355,52 @@ async def test_a_gateway_that_stays_gone_ends_the_turn_with_a_line(
     gateway.lose_stream = True
     await setup.idle()
     text = " ".join(setup.out.text().split())
-    assert text.count("The gateway is not answering") == 1
+    # One plain sentence: what broke is in the debug log.
+    assert text.count("The gateway is not answering; trying again.") == 1
     assert "The gateway stopped answering during this turn" in text
     assert "back in the input box" in text
     assert setup.app.buffer.text == "long work"
+
+
+async def test_a_reply_shows_as_it_is_written_from_the_gateway_frames(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    session.stream = True
+    assert session.enter("long work") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and session.remote._turn.number is not None)  # fmt: skip
+    number = session.remote._turn.number  # type: ignore[union-attr]
+    assert number is not None
+
+    def live(at: int, text: str) -> None:
+        gateway.emit(MAIN, "reply.live", {"turn": number, "turn_id": f"{MAIN}-t{number}",
+                     "step": 1, "attempt": 1, "at": at, "text": text}, number)  # fmt: skip
+
+    def shown() -> str:
+        live_state = session.renderer.live
+        return "" if live_state is None else live_state.stream_text
+
+    live(0, "Hello\n")
+    live(6, "world\n")
+    await _until(lambda: shown() == "Hello\nworld\n")
+    live(0, "Hello\nworld\n")  # the text so far again, as after a reconnect
+    live(12, "again\n")
+    await _until(lambda: shown().endswith("again\n"))
+    assert shown() == "Hello\nworld\nagain\n"
+    # A control sequence in the gateway's text is cleaned before the screen.
+    live(18, "\x1b[2J\x1b]0;title\x07red\n")
+    await _until(lambda: shown().endswith("red\n"))
+    assert session.renderer.live is not None
+    assert "\x1b" not in _rows(session.renderer.live) and "red" in _rows(
+        session.renderer.live
+    )
+    gateway.emit(MAIN, "assistant.message", {"step": 1, "content": "Hello\nworld\nagain",
+                 "tool_calls": []}, number)  # fmt: skip
+    gateway.finish(MAIN, number, "completed", "Hello\nworld\nagain")
+    await setup.idle()
+    assert setup.out.text().count("again") == 1, "the answer prints once"
 
 
 def test_lines_cut_to_the_width_and_keep_how_to_open() -> None:

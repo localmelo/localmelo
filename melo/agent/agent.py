@@ -35,6 +35,7 @@ from localmelo.melo.agent._brief_aids import (
     REFLECTION_ADDENDUM,
     STEP_PUSH,
     STEP_PUSH_STEPS,
+    Dropped,
     FileStamp,
     dropped_notes,
     edited_files,
@@ -73,6 +74,7 @@ from localmelo.melo.agent._chat import (
     Chat,
     RequestStats,
 )
+from localmelo.melo.agent._checkpoint import _CheckpointLoop
 from localmelo.melo.agent._context_fit import ContextFitError, PromptCapError
 from localmelo.melo.agent._earlier import check_earlier_turns, earlier_block
 from localmelo.melo.agent._events import _Emitter, check_sink
@@ -99,6 +101,7 @@ from localmelo.melo.agent._tool_images import (
     withheld_note,
 )
 from localmelo.melo.agent.options import (
+    NOTE_MODES,
     REPLAY_TURN_CAP,
     AgentOptions,
     reasoning_refusal,
@@ -131,6 +134,7 @@ from localmelo.melo.contracts.approvals import (
     is_cancellation,
 )
 from localmelo.melo.contracts.events import EventSink
+from localmelo.melo.contracts.folders import WRITE_TOOLS
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
@@ -163,6 +167,7 @@ from localmelo.melo.executor.models import (
     ExecutionRequest,
     ExecutionStatus,
 )
+from localmelo.melo.memory.block import strip_block
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -229,6 +234,7 @@ from localmelo.melo.schema import (
     ToolInfo,
     ToolResult,
     ToolTier,
+    WorkCheckpoint,
     answer_text,
     broken_tool_call,
     clip_session_text,
@@ -910,6 +916,30 @@ class _RunState:
     step_digest: str | None = None
     read_streak: int = 0
     dropped: list[str] = dataclasses.field(default_factory=list)
+    # The work checkpoint (melo.agent._checkpoint): the cues of the tool results
+    # that left the context (by call id, once each) and whether the block has
+    # yet to show the newest of them; the latest checkpoint and the message
+    # that carries it in the window; how many the run wrote; and the run's
+    # calls of the file tools that write, as (tool, arguments, status).
+    cues: list[Dropped] = dataclasses.field(default_factory=list)
+    cue_ids: set[str] = dataclasses.field(default_factory=set)
+    cues_pending: bool = False
+    checkpoint: WorkCheckpoint | None = None
+    checkpoint_msg: Message | None = None
+    checkpoints: int = 0
+    # The early line (EARLY_LINE): the trailing line the next planning request
+    # carries, and whether this fill has had it.
+    early_note: str = ""
+    early_sent: bool = False
+    # Where the window's fill began: the estimate the last checkpoint left, 0
+    # before the first. The early line comes halfway from it to the line.
+    fill_start: int = 0
+    # The person's own words for this run (run_task's user_words, else the query
+    # without its recalled-memory block): a work checkpoint's goal.
+    words: str = ""
+    writes: list[tuple[str, dict[str, Any], str]] = dataclasses.field(
+        default_factory=list
+    )
     # Its check gate (AgentOptions.brief_check): the brief's check commands,
     # the gate's runs so far and the retries it has used.
     check_commands: list[str] = dataclasses.field(default_factory=list)
@@ -1053,7 +1083,7 @@ class _ToolSetupError(Exception):
     """The tool providers could not be set up; the message is the run's error."""
 
 
-class Agent(_RecallLoop, _NotesLoop):
+class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     """Task-solving agent with tool use and memory.
 
     It is built from providers::
@@ -1286,7 +1316,7 @@ class Agent(_RecallLoop, _NotesLoop):
         if self._plan.enabled() and self.options.reasoning != "legacy":
             notes.append(RECALL_DATA_NOTE)
         instruction = ""
-        if self.options.reasoning in ("compress", "compress+replay"):
+        if self.options.reasoning in NOTE_MODES:
             instruction = NOTE_INSTRUCTION
             if self.options.reasoning == "compress+replay":
                 kept = self.options.replay_turns
@@ -1988,16 +2018,10 @@ class Agent(_RecallLoop, _NotesLoop):
 
         Returns (response, fail_reason).
         """
-        sent, skipped = _replay_plan(
-            short_window,
-            self.options,
-            task_query=task_query,
-            requires_replay=self._requires_replay,
-        )
+        sent, skipped = self._sent_window(short_window, task_query)
         ready = on_ready
         if run is not None:
-            ready = self._count_sent(run, [sent[i] for i in skipped], on_ready)
-        sent = self._tool_images.hydrate(sent)
+            ready = self._count_sent(run, skipped, on_ready)
         recalls = []
         recall_records: list[RecallRecord] = []
         query_block = ""
@@ -2012,9 +2036,24 @@ class Agent(_RecallLoop, _NotesLoop):
             plan_args["coalesce_users"] = True
         if ready is not None:
             plan_args["on_ready"] = ready
-        if on_ready is None and run is not None and run.brief and run.dropped:
+        if on_ready is None and run is not None:
             # Not at a step that carries inbox lines: they must end the request.
-            plan_args["tail_note"] = render_dropped(run.dropped, sent)
+            # A brief run's drops are named once: in the work checkpoint's cue
+            # list while the window holds one, else in its tail line.
+            named = run.checkpoint_msg is not None and self.hippo.working.holds(
+                run.checkpoint_msg
+            )
+            tail = [
+                (
+                    render_dropped(run.dropped, sent)
+                    if run.brief and run.dropped and not named
+                    else ""
+                ),
+                run.early_note,
+            ]
+            run.early_note = ""
+            if any(tail):
+                plan_args["tail_note"] = "\n\n".join(line for line in tail if line)
         response = await self.chat.plan_step(
             short=sent,
             tools=tools,
@@ -2026,6 +2065,9 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         if run is not None:
             run.plan_call = getattr(self.chat, "last_call", None)
+            if run.plan_call is not None:
+                # What the fit left out of this request is no longer in context.
+                self._note_cues(run, run.plan_call.dropped)
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
         response = self._normalize_reply(response)
@@ -2035,6 +2077,23 @@ class Agent(_RecallLoop, _NotesLoop):
             return response, f"Response check failed: {check.reason}"
 
         return response, None
+
+    def _sent_window(
+        self, window: list[Message], task_query: Message | None
+    ) -> tuple[list[Message], list[Message]]:
+        """*window* as a planning request carries it, and the turns it skips.
+
+        The window of :func:`_replay_plan` with the live images' payloads; the
+        second list holds the assistant turns left without their thinking for
+        the per-turn cap (see :meth:`_count_sent`).
+        """
+        sent, skipped = _replay_plan(
+            window,
+            self.options,
+            task_query=task_query,
+            requires_replay=self._requires_replay,
+        )
+        return self._tool_images.hydrate(sent), [sent[i] for i in skipped]
 
     async def _do_execute(
         self, call: ToolCall, *, allowed: Collection[str] | None, run: _RunState
@@ -2131,6 +2190,9 @@ class Agent(_RecallLoop, _NotesLoop):
                     lambda: self._images_on is True,
                 )
             )
+        # The goal reviews used before the call: a call that runs and succeeds
+        # gives them back (#583); a consent review stays spent.
+        reviewed = run.reviews.spent()
         try:
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,
@@ -2140,6 +2202,8 @@ class Agent(_RecallLoop, _NotesLoop):
             outcome = await self.executor.execute_structured(
                 exec_request, allowed=allowed, approve=gate
             )
+            if outcome.status is ExecutionStatus.SUCCESS:
+                run.reviews.refill(reviewed)
 
             exec_result_check = self.checker.check_executor_result(
                 ExecutorResultPayload(
@@ -2221,6 +2285,10 @@ class Agent(_RecallLoop, _NotesLoop):
                 call.tool_name, call.arguments, outcome.status.value, exported.output
             )
         )
+        if call.tool_name in WRITE_TOOLS:
+            run.writes.append(
+                (call.tool_name, dict(call.arguments), outcome.status.value)
+            )
         if not result.error.strip() and call.tool_name in (
             "file_read",
             "file_write",
@@ -2889,7 +2957,10 @@ class Agent(_RecallLoop, _NotesLoop):
             if replies is not None:
                 replies.append(reply)
             if run is not None:
-                run.events.reflection_call(getattr(self.chat, "last_call", None))
+                call = getattr(self.chat, "last_call", None)
+                run.events.reflection_call(call)
+                if call is not None:
+                    self._note_cues(run, call.dropped)
             return reply
 
         response = await ask()
@@ -3046,6 +3117,8 @@ class Agent(_RecallLoop, _NotesLoop):
             if (stream_display := STREAM_DISPLAY.get()) is not None:
                 stream_display.step(run.steps)
             run.note(lambda trace: trace.step(run.steps, run.attempts))
+            if await self._checkpoint_step(run, query, tools):
+                short_window = self.hippo.working.get_window()
             # The retry of a reply that was only thinking (#469) goes out with
             # the provider's thinking switched off, for this call only.
             retry_body = self._thinking_retry_body() if run.thinking_retry_armed else {}
@@ -3762,6 +3835,7 @@ class Agent(_RecallLoop, _NotesLoop):
         run = _RunState(
             task_id=task.task_id,
             task_text=query,
+            words=strip_block(query) if user_words is None else user_words,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,
@@ -3814,6 +3888,8 @@ class Agent(_RecallLoop, _NotesLoop):
                     workspace_root=self.executor.workspace_root,
                     approval=approval is not None,
                 )
+                # What leaves the window is kept as a cue (and a brief run's note).
+                self.hippo.working.on_drop = lambda gone: self._note_dropped(run, gone)
                 try:
                     if run.inbox is not None:
                         run.inbox.validate(self.executor.workspace_root or os.getcwd())
@@ -3824,9 +3900,6 @@ class Agent(_RecallLoop, _NotesLoop):
                         )
                         run.step_digest = run.workspace_digest
                         run.check_digest = run.workspace_digest
-                        self.hippo.working.on_drop = lambda gone: self._note_dropped(
-                            run, gone
-                        )
                         if self.options.brief_items:
                             run.items = parse_items(query)
                             if run.items:
@@ -3997,8 +4070,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 await self._learn(run, query, outcome)
                 return outcome
             finally:
-                if run.brief:
-                    self.hippo.working.on_drop = None
+                self.hippo.working.on_drop = None
                 if run.finalizer is None:
                     # Else the finalizer counts the run out when it ends.
                     self._active_runs -= 1
@@ -4639,6 +4711,7 @@ class Agent(_RecallLoop, _NotesLoop):
             answered_on_stop=run.answered_on_stop,
             format_fixed=run.format_fixed,
             handed_off=run.handed_off,
+            checkpoints=run.checkpoints,
             empty_reply=(
                 {
                     "thinking_off_retry": run.fallback_retried,
@@ -5168,10 +5241,11 @@ class Agent(_RecallLoop, _NotesLoop):
         run.events.no_change(scope="step")
         self.hippo.working.append(Message(role="user", content=STEP_PUSH))
 
-    @staticmethod
-    def _note_dropped(run: _RunState, gone: list[Message]) -> None:
-        """Keep a line for each tool result that left the window of a brief run."""
-        run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
+    def _note_dropped(self, run: _RunState, gone: list[Message]) -> None:
+        """Keep a cue for each tool result that left the window, and a brief run's line."""
+        self._note_cues(run, gone)
+        if run.brief:
+            run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
     async def _items_block(self, run: _RunState, scope: str) -> str:
         """The block that names the brief's items no edit has touched, or "".

@@ -118,6 +118,8 @@ export function setupPanel({
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
   tasks = null, home = () => '#/new', navigate = (hash) => { globalThis.location.hash = hash; }, hasTasks = () => false,
   moves = startMoves,
+  // Whether the chat *id* shows a reply's words as they are written (the page's live frames): its row says so too.
+  replying = () => false,
   // The header's own timer (the end of the sitting, a long rest turning still): it never keeps a process alive.
   wait = (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id; }, cancelWait = (id) => clearTimeout(id),
 }) {
@@ -360,7 +362,8 @@ export function setupPanel({
     } else headButton.setAttribute('aria-expanded', String(open));
     headButton.dataset.focusKey = key(row);
     const text = node('span', 'activity-text');
-    const said = ending && ending.state !== 'ready' ? endingLine(ending) : row.activity || row.result || '';
+    const writing = row.state === 'running' && replying(row.id) ? t('turns.activity.replying') : '';
+    const said = ending && ending.state !== 'ready' ? endingLine(ending) : writing || row.activity || row.result || '';
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : said));
     // A task names the folder it works in (its chat's, unless it was given one).
     if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
@@ -742,5 +745,5 @@ export function setupPanel({
     drawHeader();
   }
 
-  return {update, refresh, follow, select, state, offline, stopping, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  return {update, refresh, redraw: () => drawBody(), follow, select, state, offline, stopping, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

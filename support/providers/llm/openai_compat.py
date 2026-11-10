@@ -15,7 +15,7 @@ from collections.abc import (
 )
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Final
 
 import httpx
 
@@ -30,6 +30,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support import melo_serve
 from localmelo.support.providers._http import (
+    CHAT_TIMEOUT_S,
     RETRYABLE_STATUS_CODES,
     _body_preview,
     _context_overflow,
@@ -110,6 +111,14 @@ def rate_limits(
         if best is None or used > best[0]:
             best = (used, _reset_at(fields.get("reset", ""), now))
     return best
+
+
+# The answers of a server that cannot take a streamed request as it is sent.
+_REFUSED_STREAM: Final = frozenset({400, 422})
+
+
+class _StreamRefusedError(Exception):
+    """The server refused the streamed request before it sent anything."""
 
 
 def _reject_nonfinite(value: str) -> None:
@@ -418,7 +427,9 @@ class OpenAICompatLLM(BaseLLMProvider):
     :meth:`stream_chat` copes with a server that does not stream: it reads a
     response that is one JSON body as the completion :meth:`chat` would
     return, and asks again, once and without streaming, when a stream ends
-    before it delivered anything. Either way the reply is marked
+    before it delivered anything or the server refuses the streamed request
+    (HTTP 400 or 422, which asks for its usage with
+    ``stream_options.include_usage``). Either way the reply is marked
     ``whole=True`` and ``sends_whole_replies`` becomes true: this provider
     asks that server for whole replies from then on.
 
@@ -432,7 +443,7 @@ class OpenAICompatLLM(BaseLLMProvider):
     api_key : str | None
         Bearer token for authenticated endpoints.
     timeout : float
-        HTTP timeout in seconds (default 120).
+        HTTP timeout in seconds (default :data:`CHAT_TIMEOUT_S`, 300).
     extra_body : Mapping[str, Any] | None
         Extra top-level fields merged into every request body, e.g.
         ``{"chat_template_kwargs": {"enable_thinking": False}}``. Fields
@@ -474,7 +485,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         base_url: str,
         model: str,
         api_key: str | None = None,
-        timeout: float = 120.0,
+        timeout: float = CHAT_TIMEOUT_S,
         *,
         extra_body: Mapping[str, Any] | None = None,
         extra_body_by_kind: Mapping[str, Mapping[str, Any]] | None = None,
@@ -552,6 +563,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         }
         if stream:
             payload["stream"] = True
+            # The server's own token counts: the context budget and the gate
+            # read them, and many servers send them in a stream only when asked.
+            payload.setdefault("stream_options", {"include_usage": True})
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
             payload["tool_choice"] = "auto"
@@ -739,14 +753,16 @@ class OpenAICompatLLM(BaseLLMProvider):
     async def _stream(
         self, messages: list[Message], tools: list[ToolDef] | None
     ) -> AsyncGenerator[StreamFragment, None]:
-        """Stream one OpenAI-compatible response; never retry after a delta.
+        """Stream one OpenAI-compatible response.
 
         A server that does not stream still answers. A response that is one
         JSON body is read as the completion :meth:`chat` would return. A
-        stream that ends before it delivered anything is asked for again,
-        once, without streaming. Either way the reply comes marked
-        ``whole=True``, and the server is not asked to stream again. A stream
-        that breaks after part of a reply reached the caller keeps its error.
+        stream that ends before it delivered anything, or that the server
+        refuses (400 or 422, not a context overflow), is asked for again, once,
+        without streaming. Either way the reply comes marked ``whole=True``,
+        and the server is not asked to stream again. A stream cut after part
+        of a reply reached the caller raises a retryable error, as a cut whole
+        reply does; the caller's displays start the reply again.
         """
         if self.sends_whole_replies:
             reply, finish = await self._complete(messages, tools)
@@ -781,7 +797,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                     error_response = httpx.Response(
                         response.status_code, content=bytes(error_body[:65_536])
                     )
-                    raise ProviderError(
+                    error = ProviderError(
                         f"POST /chat/completions failed with HTTP {response.status_code}",
                         status_code=response.status_code,
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
@@ -790,6 +806,13 @@ class OpenAICompatLLM(BaseLLMProvider):
                         served=switched_to(error_response),
                         switching_s=switching_for(error_response),
                     )
+                    if response.status_code in _REFUSED_STREAM and not (
+                        error.context_overflow or error.served
+                    ):
+                        # A server that refuses the streamed request (its
+                        # options) is asked for the whole reply, from now on.
+                        raise _StreamRefusedError from error
+                    raise error
                 opened = True
                 self.last_limits = rate_limits(response.headers)
                 chunks = response.aiter_bytes()
@@ -900,62 +923,69 @@ class OpenAICompatLLM(BaseLLMProvider):
                             if not isinstance(final, str) or finish:
                                 raise ProviderError("Malformed SSE finish reason")
                             finish = final
+        except _StreamRefusedError:
+            pass  # nothing reached the caller: the whole reply, below
+        # A transport error, before or after part of the reply, is retried as
+        # the whole-reply call's is: the caller's displays start the reply again.
         except httpx.ConnectError as exc:
-            raise unreachable(self._http, exc, retryable=not emitted) from exc
+            raise unreachable(self._http, exc, retryable=True) from exc
         except httpx.RemoteProtocolError as exc:
             if emitted or not opened:
                 raise ProviderError(
                     f"Streaming request failed: {type(exc).__name__}",
-                    retryable=not emitted,
+                    retryable=True,
                 ) from exc
             # The server cut the body before anything reached the caller: a
             # stream that ended, handled below.
         except httpx.TransportError as exc:
             raise ProviderError(
-                f"Streaming request failed: {type(exc).__name__}", retryable=not emitted
+                f"Streaming request failed: {type(exc).__name__}", retryable=True
             ) from exc
         except (httpx.RequestError, httpx.StreamError) as exc:
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}"
             ) from exc
-        if whole is None and (not done or not finish):
+        # A stream that ended cleanly is complete with either signal, as servers
+        # differ: the end marker without a finish reason, or a finish reason and
+        # a clean close without the marker. Only a close with neither is a cut.
+        complete = (done and bool(finish)) or (emitted and (done or bool(finish)))
+        if whole is None and not complete:
             if emitted:
-                raise ProviderError("Streaming response ended before completion")
+                # Cut in the middle: asked again, as a cut whole reply is.
+                raise ProviderError(
+                    "Streaming response ended before completion", retryable=True
+                )
             # Nothing reached the caller, so the request can be sent again: ask
-            # for the whole reply. This raises its own error if it fails.
+            # for the whole reply. Its own error, classified as the whole call
+            # classifies it, is what the caller sees if it fails too (a refusal
+            # that is a context overflow was raised above, without a second
+            # request, so the caller's refit sees it).
             whole = await self._complete(messages, tools)
+        if whole is None and not finish:
+            finish = "tool_calls" if calls else "stop"  # as a whole reply's is
         if whole is not None:
             self.sends_whole_replies = True
             yield StreamFragment(
                 kind="reply", reply=whole[0], finish_reason=whole[1], whole=True
             )
             return
-        if bool(calls) != (finish == "tool_calls"):
-            raise ProviderError("Tool calls were not completed")
-        raw_calls = []
-        for index in sorted(calls):
-            call = calls[index]
-            try:
-                args = (
-                    json.loads(call["arguments"], parse_constant=_reject_nonfinite)
-                    if call["arguments"].strip()
-                    else {}
-                )
-            except ValueError as exc:
-                raise ProviderError("Malformed completed tool arguments") from exc
-            if not isinstance(args, dict) or not call["name"]:
-                raise ProviderError("Malformed completed tool call")
-            raw_calls.append(
+        # The calls are read as a whole reply's are (parse_tool_calls): arguments
+        # that are not a JSON object are kept as text for the model to hear
+        # about, and a call without a name is left for the plan check.
+        tool_calls = parse_tool_calls(
+            [
                 {
                     "id": call["id"],
-                    "function": {"name": call["name"], "arguments": args},
+                    "function": {"name": call["name"], "arguments": call["arguments"]},
                 }
-            )
+                for _, call in sorted(calls.items())
+            ]
+        )
         reply = Message(
             role="assistant",
             content="".join(content),
             thinking="".join(thinking),
-            tool_calls=parse_tool_calls(raw_calls),
+            tool_calls=tool_calls,
             usage=usage,
         )
         self.last_reasoning_key = reason_key

@@ -466,6 +466,7 @@ ignores it.
 | `thinking_off_retry` | A model that did think ended a turn with no answer and no tool call, and `empty_reply_fallback` asks it once more with thinking off (the service has a switch for it). It follows the `empty_reply` or `unfinished_answer` notice of the same reply, and the next planning request is the retry. At most once in a row of empty replies. | `The model ended its turn with only thinking; asking again with thinking off.` | `{}` |
 | `answer_from_thinking` | The turn is still empty (or the service has no such switch, or no step is left), so the answer is the last lines of the model's thinking, ending with `(from melo's thinking)`, and the run completes. It comes right after the reply's `assistant.message`, before `run.finished`. | `The model gave no answer after thinking; the answer is the end of its thinking.` | `{}` |
 | `no_change` | Only in a `--brief` run: an attempt boundary where another attempt starts finds the workspace unchanged since the run started (the digest of `git status`, `git diff HEAD` and untracked files is equal; never outside a git tree). A user line, "Nothing has changed in the workspace yet. Start this attempt by writing the part of the task you can already write, then continue.", is added for the next attempt, and ends with "Start with: <first next_promising_directions of the reflection>" when it has one. The same kind comes with `scope: "step"` after 6 steps of an attempt in a row in which the digest has not changed since the last change seen (or the start): the line added is "You have read for 6 steps without changing anything. Write the part of the task you can already write now (the smallest item first), then continue." | `Nothing has changed in the workspace yet.` | `{}` (boundary) or `{"scope": "step"}` |
+| `checkpoint` | Only in a run with a token budget: before a planning request that would pass 85% of the input limit, the run wrote a work checkpoint and the oldest units of its window left for good (see [Context accounting](configuration.md#context-accounting)). The step is the planning step it came before. | `Noted where the work stands; older results left the context.` | `{"units", "before", "after", "text", "checkpoint"}`: `units` is how many units left; `before` and `after` are the next planning request's estimate in tokens; `text` is the block the window holds now; `checkpoint` its fields (`goal`, `state`, `results`, `failed`, `works`, `next`, `files`, `covered`, `step`, `written`, false when the block holds no notes of the model's (new or the last checkpoint's), and `cut`, true when they were cut to their size). Strings are redacted. |
 | `brief_check` | Only in a `--brief` run (`AgentOptions.brief_check`): the gate ran one of the brief's `Check:` commands before the run would end `completed`. | `The task's check passed.`, `The task's check failed.` or `The task's check was refused and did not run.` | `{"round", "command", "exit_code", "duration_s", "refused", "output_tail"}`: `round` counts the gate's runs from 1 (a check run two steps before the end of the last attempt counts too); `command` is redacted; `output_tail` is the last 20 lines of the check's output, redacted, at most 4,000 characters; `exit_code` is `null` for a refused check or one with no status (a timeout); `refused` is the reason a refused check did not run, else `""`. |
 | `brief_check_failed` | The gate gives up: a check failed with no retry left (two are allowed per run), with no step or attempt left to retry in, or was refused. The run ends `completed`. | `The task's check still fails; the run ends completed with failing tests.` | `{"retries": <retries used>}` |
 | `retry` | A model request failed and is sent again after a delay; see [Provider errors and retries](run-results.md#provider-errors-and-retries). | `Model request failed; retrying in <delay> s: <the first 200 characters of the error>` | `{"request_attempt", "delay_s", "status_code"}` |
@@ -860,6 +861,33 @@ The store guarantees:
   processes and restarts, so a client that reconnects with its last id
   (`Last-Event-ID`) receives what it missed, the events that recovery wrote
   included.
+
+## Live replies
+
+A chat's turn in the gateway streams its replies. What the run releases for
+the screen (complete lines, already redacted, never the model's thinking or a
+tool call's arguments) reaches a stream that shows the chat to a person
+(`watch=true`) as `reply.live` frames: at once for a request's first line,
+then at most one frame every 40 ms. They are not stored, have no `id`, and
+never move a reconnect's cursor; the stored events stay the turn's record,
+and its `assistant.message` and `run.finished` carry the finished reply as
+without a stream.
+
+| Type | When | `data` keys |
+|---|---|---|
+| `reply.live` | A planning request of the turn released text. | `turn`, `turn_id`, `step`, `attempt`, `at`, `text` |
+
+- `step` is the planning step, and `attempt` counts its requests from 1: a
+  retry's text starts over.
+- `at` is where `text` starts in that request's text so far. A stream gets
+  each request's text in one run from `at` 0, with no repeat; one that
+  connects or reconnects while a reply is written gets the text so far from
+  `at` 0, once, then the rest.
+- A step's text is done when its stored `assistant.message` comes, and a
+  turn's when `turn.finished` comes; a stopped turn's partial text is not
+  stored.
+- The turn's `result` records `first_word_s` (see
+  [`GET /api/sessions/{id}/turns`](api-v2.md#get-apisessionsidturns)).
 
 ## Stability
 

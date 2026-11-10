@@ -208,8 +208,10 @@ class CliConfig:
 
     ``reasoning_tags`` maps a model id to its trusted framing declaration
     (``explicit``, ``closing_only`` or ``none``). An undeclared model keeps the
-    conservative rule: streamed content is held until the reply ends. Only the
-    interactive UI reads ``stream``: direct runs and the gateway never stream.
+    conservative rule: streamed content is held until the reply ends. The
+    gateway reads the same declarations for a chat's live replies. Only the
+    interactive UI reads ``stream`` (in the main chat: whether it draws the
+    gateway's live text); direct runs never stream.
     """
 
     stream: bool = True
@@ -698,8 +700,8 @@ class Config:
     mcp_config: str = ""
 
     # HTTP timeout of each chat request, in seconds, for every chat backend.
-    # None keeps each chat provider's own default (120 s; 300 s for the
-    # ollama backend). Embedding requests keep their own timeout.
+    # None keeps the chat providers' default (300 s). Embedding requests keep
+    # their own timeout.
     request_timeout_s: float | None = None
 
     # Local backends

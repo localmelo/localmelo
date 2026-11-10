@@ -67,7 +67,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 ```
 
 - A server that answers `GET /api/version` is saved as `ollama`, one whose model list names oMLX as `omlx`, any other as `vllm`; `omlx` is another name for `vllm`, so its settings stay in `[vllm]`.
-- `ollama` chats on Ollama's native API with a 300 s request timeout, `vllm` and `omlx` with 120 s; Ollama's `chat_url` works with or without `/v1`.
+- `ollama` chats on Ollama's native API; Ollama's `chat_url` works with or without `/v1`. Every backend's chat request waits up to 300 s for the server.
 - The file's other settings are kept.
 
 When no server is ready:

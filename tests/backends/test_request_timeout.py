@@ -1,7 +1,7 @@
 """request_timeout_s: every chat backend passes it to its chat provider.
 
-Unset, each provider keeps its own default: 120 s for the OpenAI-compatible
-chat provider, 300 s for Ollama's native chat. Embedding providers keep
+Unset, every chat provider keeps the one default, CHAT_TIMEOUT_S (300 s), the
+OpenAI-compatible one and Ollama's native chat alike. Embedding providers keep
 theirs (120 s) either way.
 """
 
@@ -18,6 +18,7 @@ from localmelo.support.config import (
     Config,
     LocalBackendConfig,
 )
+from localmelo.support.providers._http import CHAT_TIMEOUT_S
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
@@ -60,7 +61,7 @@ def test_every_registered_chat_backend_passes_request_timeout_s() -> None:
     for backend in backends:
         key = backend.key
         provider_type = OllamaNativeChat if key == "ollama" else OpenAICompatLLM
-        default = 300.0 if key == "ollama" else 120.0
+        default = CHAT_TIMEOUT_S
 
         unset = backend.build_chat_provider(_cfg(key))
         assert isinstance(unset, provider_type), key

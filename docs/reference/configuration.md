@@ -111,12 +111,12 @@ before the run with a plain message (see
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
 | `extra_folders` | `[workspace]` | `[]` | The folders outside the workspace melo may read in, and below, without asking, in a chat or task you started: each is added by **Always allow this folder** on an approval card and removed in Settings, under **Chats and folders**. Kept as real paths (`~/` for the home folder). Writing there still asks every time. An entry that is not absolute or `~/`, that is `/`, the home folder or a folder above it, or a place melo never opens (keys, its own data, system folders) is a setting error and is never used; at most 100 entries. Written only when the list holds a folder. See [Folders outside the workspace](../guides/tools-mcp.md#folders-outside-the-workspace). |
-| `stream` | `[cli]` | `true` | Live streaming in the interactive UI only, on unless turned off (`/stream off`, `-X cli.stream=false`, `melo config set cli.stream false`); runs without that UI never stream. `/new` puts `/stream` back to this value. An invalid value warns and falls back in the UI; direct runs and the gateway never fail on it. See [Streamed replies](../guides/terminal.md#streamed-replies). |
+| `stream` | `[cli]` | `true` | Live streaming in the interactive UI, on unless turned off (`/stream off`, `-X cli.stream=false`, `melo config set cli.stream false`); in the main chat it only says whether the terminal draws the gateway's live text. Direct runs never stream; the gateway streams a chat's replies whatever this says. `/new` puts `/stream` back to this value. An invalid value warns and falls back in the UI; direct runs and the gateway never fail on it. See [Streamed replies](../guides/terminal.md#streamed-replies). |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`: the interactive status bar shows the usage zone (tokens or cost, `ctx`, the cache and idle time or the rate limit) from events already received, and the gateway's tasks when it has some. `"off"`: only the run zone (the title, or a running turn's steps) and `ctx` of the last request. Advanced: no command-line flag. Any other value warns and falls back in the UI; direct runs and the gateway never fail on it. See [The status bar](../guides/terminal.md#the-status-bar). |
 | `chat` | `[cli]` | `"main"` | What bare `melo` opens. `"main"`: the main chat through the gateway, started in the background when none runs. `"local"`: the terminal's own chat, without the gateway (`-X cli.chat=local` for one run; `-u`, `-c`, `-r` and `--yolo` open it too). Developer setting; any other value warns and falls back. See [The main chat](../guides/terminal.md#the-main-chat). |
 | `colors` | `[cli]` | `"auto"` | The interactive UI's colour depth: `"auto"` (from `COLORTERM` and `TERM`), `"16"`, `"256"` or `"truecolor"`. `NO_COLOR` still turns colour off. Developer setting: `-X cli.colors=256` for one run. Any other value warns and falls back. See [Terminal colours](../guides/terminal.md#terminal-colours). |
 | `background` | `[cli]` | `"auto"` | The terminal's background for the interactive UI: `"auto"` (asks the terminal, then `COLORFGBG`), `"dark"` or `"light"` for a terminal that answers nothing (tmux, screen, ssh). Developer setting: `-X cli.background=light`. See [Terminal colours](../guides/terminal.md#terminal-colours). |
-| `reasoning_tags` | `[cli]` | not set | A `MODEL = "explicit" \| "closing_only" \| "none"` table: the trusted framing declaration for a model's replies, which also splits the completed reply when `stream = false`. A model with no entry keeps the conservative rule (content is held until the reply ends). Set by hand: no onboarding prompt asks for it yet. |
+| `reasoning_tags` | `[cli]` | not set | A `MODEL = "explicit" \| "closing_only" \| "none"` table: the trusted framing declaration for a model's replies, which also splits the completed reply when `stream = false`. A model with no entry keeps the conservative rule (content is held until the reply ends, unless the server sends reasoning in a field of its own). The gateway reads it too, for a chat's live replies. Set by hand: no onboarding prompt asks for it yet. |
 | `mode` | `[ui]` | `"default"` | `"default"`: `melo --help` shows the user options. `"developer"`: it shows every option, grouped as user, advanced and experimental; `melo --developer --help` does the same for one run. The mode changes only what is shown (the help text, and the web console's developer views, which its settings toggle saves here), never what an option does. Any other value warns on stderr and shows the default help; runs and the gateway never fail on it. See [Default and developer mode](cli.md#default-and-developer-mode). |
 | `language` | `[console]` | `"auto"` | The language of the web console and the macOS app. `"auto"` follows the browser's or the Mac's preferred languages: the first that is English or Simplified Chinese (`zh`, `zh-CN`, `zh-Hans`; Traditional Chinese tags are skipped), else English. `"en"` or `"zh-Hans"` chooses one. The terminal stays English, and so does any other client of the API. Any other value is refused by `melo config set` and reads as `"auto"`. See [Web console: language](../guides/web-console.md#language). |
 | `mode` | `[approvals]` | `"ask"` | How a new chat starts (#339): `"ask"`, melo asks before it runs commands or changes files; `"auto"`, routine steps run; a step you did not ask for asks on the chat's card while a page or the terminal shows the chat (unanswered for 1 minute, it is declined), and with nobody watching, or for the riskiest steps, it is blocked and explained; its calls run in the write sandbox. Each chat keeps its own mode (the console's Ask/Auto chip); the main chat follows this until it is set, and the terminal's own chat starts in it (`-X approvals.mode=auto` for one run). Any other value is refused by `melo config set` and reads as `"ask"`. See [Web console: Auto mode](../guides/web-console.md#auto-mode). |
@@ -340,9 +340,36 @@ calibration. The proxy is an estimate, not a bound: templates and vision models 
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
-down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs and the latest
-reflection; images, failed checks and older reflections go only when nothing else is left. It leaves
-history and the retained conversation unchanged.
+down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs, the latest
+reflection and the latest work checkpoint; images, failed checks and older reflections go only
+when nothing else is left. It leaves history and the retained conversation unchanged.
+
+With a token budget, long work does not wait for the fit. Before a planning request that would pass
+85% of the input limit, the run writes a work checkpoint: one extra request (of kind `reflect`, on
+the same prefix as the planning request, with the same tools) asks the model for short notes, each
+with its size in words (about 650 words in all): where its results are, the next steps, what failed,
+what works, and where the work stands, with only the findings the next steps need. Notes over their
+size keep where the results are and the next steps whole; the state is cut first. Then the oldest
+units leave the working window for good, oldest first, down to 50% of the limit, keeping the fit's
+pins, and the checkpoint stands right after the task's message in their place: `[Work checkpoint:
+...]` with the task's words, the model's notes, the files the run wrote, and the results that left
+the context (one line per source, such as a page and the parts read; every other result is still in
+the context). The next request extends that one until the window fills again; a later checkpoint
+replaces the block. Notes that cannot be read are asked for once more. When none come (a reply still
+unreadable, a request that failed or timed out after its retries, or no request left, `max_calls`),
+the block keeps the last checkpoint's notes, or, with none, the units stay while the request fits
+and go with the computed lines alone once it does not. The request's output limit (4,096 tokens)
+keeps it well inside a client's read timeout on a slow local model. A checkpoint comes only when
+what can leave, less the most the block puts back, frees at least half the room between 85% and 50%;
+otherwise (a single step too large) the fit acts as before, and the units it drops, like those the
+window's message cap drops, are added to the block's list at the next request, so no drop goes
+unsaid. In a chat, earlier turns that leave the context are listed there too. Each checkpoint is a
+`checkpoint` notice (see [Events](events.md)) and counts in the result's `checkpoints`. Earlier,
+once in each fill, the first planning request past 60% of the limit (after a checkpoint: halfway
+from where the window was left to 85%) in work whose result goes into a file (your words ask for a
+file, or a file was written) ends with one line that asks the model to write what it has to that
+file now, while the results are still in context; the line is on that request only, not in the
+window. Without a token budget nothing of this happens.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
@@ -598,9 +625,9 @@ one run. Direct mode never reads it.
 
 ## Chat request timeout
 
-A chat request waits up to 120 seconds for the server (300 seconds with the
-`ollama` backend). To change this for every run, set `request_timeout_s` at
-the top of the config file, before the first table:
+A chat request waits up to 300 seconds for the server. To change this for
+every run, set `request_timeout_s` at the top of the config file, before the
+first table:
 
 ```toml
 chat_backend = "vllm"
@@ -621,7 +648,7 @@ chat_model = "Qwen/Qwen3-8B"
 - `--request-timeout SECONDS` overrides it for one direct run and does not
   change the file.
 - A server that loads a model when the first request for it arrives, as
-  oMLX does, can need more than 120 seconds for that request; `600` above
+  oMLX does, can need more than 300 seconds for that request; `600` above
   gives it room.
 - It applies to chat requests only. Embedding requests always wait up to
   120 seconds.

@@ -1223,6 +1223,10 @@ The session's turns, oldest first within the page.
   still listed.
 - `answer` and `result.result` are the stored copies: secrets are redacted
   and, after retention, an inline `<think>` block is gone.
+- `result.first_word_s` is the seconds from the turn's start to the first
+  line of its reply that showed as it was written (see
+  [Live replies](events.md#live-replies)); absent when nothing showed so, as
+  for a server that sends replies whole.
 - `cause` is `""` while a turn runs.
 - The main chat's pages add `cards`, its cards beside the page's turns, oldest
   first: from the page's oldest turn (from the start, on the oldest page) up to
@@ -1475,7 +1479,10 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   1 minute, or whose last viewer is gone for 5 seconds, is declined:
   `approval.resolved` with `outcome` `denied` and `origin` `timeout`. The
   console keeps its stream open while its page is hidden, so a hidden page
-  still counts as a viewer.
+  still counts as a viewer. Such a stream also carries a chat's reply as it
+  is written: `reply.live` frames, with no `id:` line and no `id`, which are
+  never stored (see [Live replies](events.md#live-replies)). A stream without
+  `watch` carries only stored events.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it
@@ -2316,16 +2323,20 @@ list: the data of **Settings › Permissions** and of `/grants`.
   it holds in every chat, task and terminal) or `session` (it holds in
   `session_id` only). `session_kind` is `main`, `side`, `task` or `terminal`;
   `chat_title` is that chat's title (`Main chat` for the main chat).
-- `kind` is `tool`, `site`, `folder` or `window`. `key` is the name as it was
+- `kind` is `tool`, `site`, `folder`, `window` or `check`. `key` is the name as it was
   kept: `shell_exec`, `browser:https://example.com`,
-  `browser-act:https://example.com`, a folder path, `window-read:<app>`. A
-  check matches it exactly, except that the person's site grant also covers
-  the other hosts of its site.
+  `browser-act:https://example.com`, a folder path, `window-read:<app>`,
+  `browser-check:https://example.com` (a human check from a known provider,
+  with the page's origin spelt once: lower case, no default port). A check
+  matches it exactly, except that the person's site grant also covers the
+  other hosts of its site, and a kept human check covers such checks on every
+  site.
 - `label` is the words the page shows, in English. `action` is `tool`, `open`,
-  `act` (click and choose), `read` (a site Auto let the chat read), `folder`
-  or `window`. `target` is the tool name, the site the grant covers (the host
-  for a read Auto kept, and for a row kept before a grant covered the whole
-  site), the folder as `~/…` or the app.
+  `act` (click and choose), `read` (a site Auto let the chat read), `folder`,
+  `window` or `check` (human checks on every site). `target` is the tool name,
+  the site the grant covers (the host for a read Auto kept, and for a row kept
+  before a grant covered the whole site), the folder as `~/…`, the app, or
+  empty for `check`.
 - `by` is `person` or `auto`; `granted_at` is Unix seconds. Auto's grants are
   site reads and hold in their chat only, the main chat included.
 - The order is the one the page and `/grants` number: `global` grants first,

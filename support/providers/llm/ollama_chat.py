@@ -14,6 +14,7 @@ from localmelo.melo.contracts.providers import (
 )
 from localmelo.melo.schema import Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
+    CHAT_TIMEOUT_S,
     attempt_headers,
     malformed_body,
     post_json,
@@ -186,7 +187,7 @@ class OllamaNativeChat(BaseLLMProvider):
     model : str
         Model identifier, e.g. ``"qwen3:8b"``.
     timeout : float
-        HTTP timeout in seconds (default 300).
+        HTTP timeout in seconds (default :data:`CHAT_TIMEOUT_S`, 300).
     extra_body : Mapping[str, Any] | None
         Extra top-level fields merged into every ``/api/chat`` body, e.g.
         ``{"think": False}`` or ``{"options": {"temperature": 0}}``.
@@ -204,7 +205,7 @@ class OllamaNativeChat(BaseLLMProvider):
         self,
         base_url: str,
         model: str,
-        timeout: float = 300.0,
+        timeout: float = CHAT_TIMEOUT_S,
         *,
         extra_body: Mapping[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,

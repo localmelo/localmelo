@@ -62,6 +62,7 @@ DATACLASS_FIELDS = [
     "format_fixed",
     "empty_reply",
     "handed_off",
+    "checkpoints",
 ]
 
 

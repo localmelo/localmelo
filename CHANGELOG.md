@@ -14,6 +14,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A finished task's answer comes back to the chat that started it.
 - Auto mode: choose Ask or Auto for each chat. In Auto, the steps the goal plainly needs run, risky ones ask with the reason, and Allow once lets one through.
 - In Auto, a card waits only while someone can see it, and your earlier words in the chat still count.
+- In Auto, a long task that goes well no longer runs out of reviews (a review that lets a high-impact step run on your words still counts), and a tool you allowed for the chat runs its routine calls without one.
 - Approval cards say in one plain sentence what the step will do and why melo asks, and follow your chat's mode.
 - A chat keeps whom a request is about, and a new chat sees a short digest of your other recent chats.
 - A short follow-up such as "go look it up" or "continue" works from what you said just before.
@@ -26,6 +27,9 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A question that asks for a short answer gets one in at most two steps.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
 - Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
+- Long work that outgrows the model's context keeps what it learned: when the context is nearly full, melo writes down where the work stands and what it already read, and the oldest results make room.
+- A chat's reply appears line by line as it is written, in the console, the app and the terminal; Stop ends it at once and keeps what was shown.
+- A slow reply from a local model is no longer cut at two minutes: a chat request waits up to five minutes for the server.
 
 ### Tasks
 
@@ -54,6 +58,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `/browser on` and the Settings switch use Chrome in the background when it is installed, and Safari's automation windows (one tab per chat) otherwise; a browser you chose before is kept.
 - When a click changes nothing on a page, melo is told so and tries another way; after it acts on a page it reads only what changed.
 - The hosts of one site count as one site, so one allow covers them.
+- A human check from a known provider asks you once per chat, in Chrome, in Ask and in Auto: Always in this chat covers such checks in that chat, its tasks and its chores (in the main chat, every chat). Other boxes and Safari ask as before.
 - The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
 
 ### Memory

@@ -188,6 +188,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `format_fixed` | Only `true`, and only in a run whose `result` got the closing line the task asks for, from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
 | `empty_reply` | Only in a run where a model that did think ended a turn with no answer and `empty_reply_fallback` stepped in: `{"thinking_off_retry": true or false, "from_thinking": true or false}`. `thinking_off_retry` is `true` when the turn was asked again with thinking off, `from_thinking` when the `result` is the last lines of the thinking, ending with `(from melo's thinking)`. Absent otherwise, and always with `-X agent.empty_reply_fallback=off`. |
 | `handed_off` | Only `true`, and only in a run whose last step handed the rest of its work to a task (a chat's `task_create` with `continue_current`): the status is `completed`, `result` is the receipt that names the task, and no step ran after it. Absent otherwise. |
+| `checkpoints` | Only in a run with a token budget that wrote a work checkpoint: how many. Each is one extra request of kind `reflect` (unless no request was left for it), counted in `n_llm` and `n_aux`, after which the oldest tool results left the window (see [context accounting](configuration.md#context-accounting)). Absent when 0. |
 
 `config` holds:
 
@@ -277,8 +278,8 @@ second try may succeed:
   `POST /chat/completions failed with HTTP 500: <html> …`.
 - Each attempt waits the full [chat request timeout](configuration.md#chat-request-timeout).
   A server that sends nothing therefore ends the run after about
-  3 × the timeout + 5 seconds: about 365 seconds with the default of
-  120 seconds.
+  3 × the timeout + 5 seconds: about 905 seconds with the default of
+  300 seconds.
 - Every chat request carries its attempt number (1, 2 or 3) in the
   `X-Localmelo-Attempt` HTTP header, so a proxy's request log can be matched
   with `n_llm` and `llm_errors`. `X-Localmelo-Call-Kind` says `plan` for a

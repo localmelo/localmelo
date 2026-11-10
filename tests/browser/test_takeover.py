@@ -23,7 +23,7 @@ import pytest
 from localmelo.melo.agent._pause import Hold
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.pause import PAUSE, Resumed
-from localmelo.support.browser import takeover
+from localmelo.support.browser import chrome, sites, takeover
 from localmelo.support.browser.driver import (
     Act,
     ActResult,
@@ -1352,10 +1352,10 @@ def check_page() -> RawPage:
     return page(HOME, "Check in.", button("I am human", site=CHECK, fp="iframe|1"))
 
 
-async def test_melo_presses_a_human_check_like_any_control_and_says_what_it_did() -> (
+async def test_melo_presses_a_human_check_on_its_own_question_and_says_what_it_did() -> (
     None
 ):
-    """By point and by ref: the click's own question, no card; the step says passed or still there."""
+    """By point the check's own question (#583), by ref the click's; no take-over card; the step says passed or still there."""
     inside = Element("button", "", at=-1, fp="bare")
     driver = Solving(check_page(), passes=2)
     driver.shot_view = View("", "d1", 1000.0, 500.0)
@@ -1376,10 +1376,128 @@ async def test_melo_presses_a_human_check_like_any_control_and_says_what_it_did(
     )
     assert "The check is still there." in point.text
     assert "Clicked e2" in ref.text and "The check passed." in ref.text
-    # The ordinary click question, named: no take-over card, no "box melo cannot check" card.
+    # By point, where the browser itself names the frame, the check's own question;
+    # by ref (Safari's own reading, not a proof) the click's question as before. No
+    # take-over card, no "box melo cannot check" card.
+    assert [n for n in asks.names if n.startswith("browser-check:")] == [
+        "browser-check:https://example.com"
+    ]
+    [arguments] = [a for n, a, _ in asks.asked if n.startswith("browser-check:")]
+    assert arguments == {
+        "site": "example.com",
+        "access": "check",
+        "box": "newassets.hcaptcha.com",
+        "browser": "chrome",
+    }
     assert [n for n in asks.names if n.startswith("browser-act:")]
     assert not [n for n in asks.names if n.startswith(("takeover:", "browser-point:"))]
     assert "melo never passes" not in point.text + ref.text
+    await provider.close()
+
+
+BOX = "https://captcha.boxes.example/widget"
+
+
+async def test_each_press_is_proved_again_and_a_frame_no_longer_the_check_s_asks() -> (
+    None
+):
+    """#583: a later press (one a kept answer would cover) runs its own proof: the check
+    question and its proof only while the browser still names the provider's frame there.
+    """
+    inside = Element("button", "", at=-1, fp="bare")
+    driver = Solving(check_page())
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
+    provider, tools, _ = await started(driver)
+    asks = Asks()
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_screenshot")
+        await run(tools, "browser_click_point", x=500, y=300)
+        # The page put another site's frame at the point: not a check any more.
+        driver.hits[(500, 150)] = PointHit("frame", inside, site=BOX)
+        await run(tools, "browser_click_point", x=500, y=300)
+    asked = [
+        n for n in asks.names if n.startswith(("browser-check:", "browser-point:"))
+    ]
+    assert asked == [
+        "browser-check:https://example.com",
+        "browser-point:https://example.com",
+    ]
+    assert [act.proof for act in driver.acts] == [CHECK, ""]
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    ("there", "same"),
+    [
+        ("https://newassets.hcaptcha.com/captcha/v1/other", True),
+        ("https://newassets.hcaptcha.com:443/x", True),
+        (
+            "http://newassets.hcaptcha.com/x",
+            False,
+        ),  # the same host and port, another scheme
+        ("https://newassets.hcaptcha.com:8443/x", False),
+        ("https://other.hcaptcha.com/x", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_the_proof_right_before_the_press_compares_the_whole_origin(
+    there: str | None, same: bool
+) -> None:
+    """#583: scheme, host and port, as the first proof (one function, ``sites.same_origin``)."""
+    assert (
+        chrome._same_frame(there, "https://newassets.hcaptcha.com/captcha/v1/checkbox")
+        is same
+    )
+
+
+async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing() -> None:
+    inside = Element("button", "", at=-1, fp="bare")
+    driver = Solving(check_page())
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK, check=True)
+    provider, tools, _ = await started(driver)
+    with asking(Asks(deny=("browser-check:",))):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_screenshot")
+        out = await run(tools, "browser_click_point", x=500, y=300)
+    assert out.is_error and sites.CHECK_LEFT in out.text
+    assert driver.acts == []
+    await provider.close()
+
+
+@pytest.mark.parametrize("sensitive", ["", "password", "code", "card"])
+async def test_the_point_question_comes_before_the_check_s_for_a_hit_marked_sensitive(
+    sensitive: str,
+) -> None:
+    """The order in the provider, if a hit in a check's frame ever came marked consent or a
+    password, code or card field: the point question (never kept) is asked first.
+
+    The real page script never marks one so (it reads nothing inside a frame from
+    another site), so this pins the order only; what keeps such fields out of reach
+    is that only a known provider's frame, which serves checks only, is a check.
+    """
+    inside = Element("button", "", at=-1, fp="bare", sensitive=sensitive)  # type: ignore[arg-type]
+    driver = Solving(check_page())
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit(
+        "frame", inside, site=CHECK, check=True, consent=not sensitive
+    )
+    provider, tools, _ = await started(driver)
+    asks = Asks()
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_screenshot")
+        await run(tools, "browser_click_point", x=500, y=300)
+    asked = [
+        n for n in asks.names if n.startswith(("browser-point:", "browser-check:"))
+    ]
+    assert asked == [
+        "browser-point:https://example.com",
+        "browser-check:https://example.com",
+    ]
     await provider.close()
 
 
@@ -1430,7 +1548,10 @@ async def test_a_check_still_there_after_the_presses_is_offered_to_the_person() 
     "site",
     [
         "https://captcha.example.com/x",  # named a check by its label only
-        CHECK,  # a table host, but nothing proved a frame of it sits there
+        BOX,  # the browser's own word for a host that only names a check (#583)
+        # A table host, but nothing proved a frame of it sits there: what Safari, which
+        # cannot say which frame is at a point, reports of a check's box (#583).
+        CHECK,
         "https://ads.example.net/x",  # the browser's own word: another site's frame sits there
     ],
 )
@@ -1456,6 +1577,7 @@ async def test_no_page_can_lower_the_card_for_a_box_melo_cannot_check(
     assert "a human check box from newassets.hcaptcha.com at (190, 423)" in opened.text
     cards = [a for a in asks.asked if a[0].startswith("browser-point:")]
     assert len(cards) == 2 and len(driver.acts) == 2
+    assert not [n for n in asks.names if n.startswith("browser-check:")]
     for _, arguments, preview in cards:
         assert arguments["target"] == "unknown"
         assert "human check" not in f"{arguments['on']} {preview}"

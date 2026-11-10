@@ -94,12 +94,12 @@ Three limits apply at different levels:
 
 | Limit | Value |
 |---|---|
-| Chat request timeout | 120 seconds (300 with the `ollama` backend): how long localmelo waits for data from the model server, restarting whenever data arrives; a request that times out is retried twice. See [Chat request timeout](../reference/configuration.md#chat-request-timeout). |
+| Chat request timeout | 300 seconds: how long localmelo waits for data from the model server, restarting whenever data arrives; a request that times out is retried twice. See [Chat request timeout](../reference/configuration.md#chat-request-timeout). |
 | Tool time limits | `shell_exec` 30 seconds, `python_exec` 60 seconds, `file_read`, `file_write` and `list_files` 60 seconds, MCP tools their server's `timeout`; the interactive UI gives the first two 10 minutes. See [Work in a directory](../guides/python.md#work-in-a-directory) for `tool_timeout_s`. |
 | Run time limit (`--timeout`) | The only limit on a whole run; when it expires, the run ends as `timeout`. |
 
 - `shell_exec` and `python_exec` run in a child process with a process group, which a timeout or a cancellation kills.
-- Direct runs, workers and the gateway do not stream replies, so a server that sends nothing until the whole reply is written must finish within the timeout; a slow thinking model may need more.
+- Direct runs and workers do not stream replies, so a server that sends nothing until the whole reply is written must finish within the timeout; a slow thinking model may need more. A chat's turns in the gateway ask the server to stream.
 
 ## The main chat and tasks
 
