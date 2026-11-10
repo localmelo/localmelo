@@ -93,6 +93,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 - The app at rest no longer uses a full CPU core: the menu-bar item stops redrawing itself without pause.
 - A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
+- Calmer task pages, Settings and details: short times, a task's facts on one line, plain words for each tool, and a failed task's card saying why in your language.
 
 ### Terminal
 

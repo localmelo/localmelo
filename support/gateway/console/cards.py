@@ -370,7 +370,13 @@ class MainChatCards:
             # A continued run that never began: its last turn is an older one.
             ended = {"line": note}
         elif last is not None and last.status != "completed":
-            ended = {"line": _reason(last.status, last.cause, last.result)}
+            # The page words the failure's kind in its own language; the line, with the
+            # error's first line, is for readers without a catalog (the terminal).
+            failure = {"status": last.status, "cause": last.cause}
+            ended = {
+                "line": _reason(last.status, last.cause, last.result),
+                "failure": failure,
+            }
         elif note == "invalid_workspace":
             problem = await self._console.workers.folder_problem(info.id)
             ended = _words("cards.folderRefused", problem=problem)
