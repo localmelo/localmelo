@@ -43,6 +43,7 @@ from localmelo.melo.contracts.events import (
     json_safe_payload,
 )
 from localmelo.melo.contracts.inbox import InboxSource
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import (
     ImagePart,
     Message,
@@ -55,6 +56,7 @@ from localmelo.melo.schema import (
 from localmelo.support.sessions import pictures as turn_pictures
 from localmelo.support.sessions.approvals import AskFunction
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.live import LiveReply
 from localmelo.support.sessions.store import (
     APPROVAL_EVENT_TYPES,
     CAUSES,
@@ -98,6 +100,8 @@ EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
 ResumeLoader = Callable[[], Awaitable[int]]
 BeforeTurn = Callable[[ResumeLoader], Awaitable[None]]
+# Makes the stream display of one turn: its reply's live text (.live).
+LiveFactory = Callable[[TurnInfo], LiveReply]
 
 # Seconds an awaitable on_event result may take; a slower one is cut off.
 SINK_TIMEOUT_S: Final = 5.0
@@ -187,6 +191,8 @@ class _Turn:
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     # The checked text of the last digest note event of this turn (R4).
     last_note: str = ""
+    # Seconds from the turn's start to its first live words; None when none showed.
+    first_word_s: float | None = None
     # How memory's recall went for this turn (``turn.memory``'s ``recall``).
     recall: dict[str, Any] | None = None
     # The turns (session id, turn) the recall block showed, or whose notes it
@@ -340,7 +346,11 @@ class SessionRunner:
     several, highest first: they end the text each turn sends the model, after
     any recalled block, and are in neither the stored turn nor the person's
     words. When they would pass the query limit, the lowest blocks are left
-    out, whole, and a warning says how many.
+    out, whole, and a warning says how many. With *live*, each turn's run
+    streams its replies to the display *live* makes for the turn
+    (:class:`~.live.LiveReply`), and the turn's ``result`` has
+    ``first_word_s`` once a word showed; the caller that sets its own
+    display (the terminal) passes none.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -367,6 +377,7 @@ class SessionRunner:
         index_only: bool = False,
         context: str | Sequence[str] = "",
         review_since: Callable[[], Awaitable[float | None]] | None = None,
+        live: LiveFactory | None = None,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -395,6 +406,7 @@ class SessionRunner:
         self._context: tuple[str, ...] = tuple(block for block in blocks if block)
         # An earlier start for a turn's review window (a task that uses its chat's approvals).
         self._review_since = review_since
+        self._live = live
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -901,7 +913,7 @@ class SessionRunner:
                     text = await self._with_digest(turn, text)
             text = self._with_context(text)
             before = await self._scan_folder(turn)
-            returned = await turn.agent.run_task(text, **kwargs)
+            returned = await self._run(turn, text, kwargs)
         except BaseException as exc:
             run_exc = exc
         if before is not None:
@@ -921,6 +933,19 @@ class SessionRunner:
                 if task.cancelling() > turn.runner_cancels:
                     break  # cancelled from outside again: step 7 goes on alone
         return self._outcome(turn, task, run_exc, returned)
+
+    async def _run(self, turn: _Turn, text: str, kwargs: dict[str, Any]) -> RunResult:
+        """The turn's run, with its live display when the runner has one."""
+        if self._live is None:
+            return await turn.agent.run_task(text, **kwargs)
+        display = self._live(turn.turn)
+        token = STREAM_DISPLAY.set(display)
+        try:
+            return await turn.agent.run_task(text, **kwargs)
+        finally:
+            STREAM_DISPLAY.reset(token)
+            display.close()
+            turn.first_word_s = display.first_word_s
 
     def _with_context(self, text: str) -> str:
         """*text* with the context blocks after it that fit the query limit.
@@ -1259,6 +1284,8 @@ class SessionRunner:
             result = turn.fallback.to_dict()
         if turn.recall is not None and result is not None:
             result["memory_recall"] = turn.recall  # per-turn timings, beside duration_s
+        if turn.first_word_s is not None and result is not None:
+            result["first_word_s"] = turn.first_word_s
         end: dict[str, Any] = {
             "session_id": info.session_id,
             "turn": info.turn,

@@ -689,6 +689,10 @@ export function newTurn(row) {
     // The person has the run (`run.paused`: a page they took over), until `run.resumed`: where, or null.
     control: null,
     error: "",
+    // The reply being written (`reply.live`): `{step, attempt, text}`, or null; never stored, it goes when
+    // its step's stored reply comes. `replied` is the newest step whose stored reply came.
+    live: null,
+    replied: 0,
   };
 }
 
@@ -819,8 +823,9 @@ function newestTool(turn, callId, name = "") {
  * `view.lastEventId` is skipped unless *ignoreCursor* (a turn loaded for
  * `Show earlier turns`). Returns what the page has to mirror outside the
  * view: `{clientRequestId}` for a `turn.started`, `{title}` for
- * `session.title`, and `{model, workspace, workspaceLabel}` for
- * `session.updated`.
+ * `session.title`, `{model, workspace, workspaceLabel}` for
+ * `session.updated`, and `{live: true}` for a reply's live text
+ * (`reply.live`, which has no `id`).
  */
 export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
   if (!isObject(frame)) return {};
@@ -886,7 +891,25 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       turn.retryUntil = 0;
       break;
     }
+    case "reply.live": {
+      // The text of a reply as it is written: each request's text comes in one run from `at` 0, and the
+      // text so far comes again from 0 after a reconnect. A step whose stored reply came is done.
+      const step = int(data.step);
+      const at = int(data.at);
+      if (step === null || at === null || step <= turn.replied || turn.finishedAt) break;
+      const attempt = int(data.attempt) ?? 1;
+      const text = String(data.text ?? "");
+      const live = turn.live;
+      if (at === 0) turn.live = {step, attempt, text};
+      else if (live && live.step === step && live.attempt === attempt) live.text += text;
+      return {live: true};
+    }
     case "assistant.message": {
+      const step = int(data.step);
+      if (step !== null) {
+        turn.replied = Math.max(turn.replied, step);
+        if (turn.live && turn.live.step <= step) turn.live = null;
+      }
       const [splitThinkingText, splitText] = splitThinking(data.content ?? "");
       const thinking = String(data.thinking ?? "").trim()
         ? String(data.thinking).trim()
@@ -1128,6 +1151,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     case "run.finished": {
       turn.result = isObject(data.result) ? data.result : null;
       flushUnstarted(turn);
+      keepLive(turn);
       const [, answer] = splitThinking(turn.result?.result ?? "");
       if (turn.heldText && turn.heldText.trim() !== answer.trim()) {
         turn.items.push({kind: "assistant_text", text: turn.heldText});
@@ -1137,6 +1161,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       break;
     }
     case "turn.finished": {
+      keepLive(turn);
       turn.status = String(data.status ?? "");
       turn.cause = String(data.cause ?? "run");
       turn.runningHere = false;
@@ -1170,6 +1195,12 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       break;
   }
   return {};
+}
+
+/** A reply stopped while it was written keeps the words it showed, as the turn's partial reply. */
+function keepLive(turn) {
+  if (turn.live?.text.trim()) turn.items.push({kind: "assistant_text", text: turn.live.text});
+  turn.live = null;
 }
 
 // ── Following a session's events ──

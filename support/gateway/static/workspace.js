@@ -15,7 +15,7 @@
 import { approvalCard as drawApprovalCard, guardLeft } from "./approval-card.mjs";
 import { maker } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
-import { renderMarkdown } from "./markdown.mjs";
+import { renderMarkdown, renderPartialMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
 import { workerHistory } from "./worker-history.mjs";
@@ -90,6 +90,8 @@ const $ = (id) => document.getElementById(id);
 const { node: el, button } = maker(document);
 const KEY = "localmelo-console";
 const PRESENCE_MS = 2500;
+// A reply's live text redraws at most this often (the gateway sends a frame every 40 ms at most).
+const LIVE_DRAW_MS = 40;
 const LIST_POLL_MS = 4000;
 const BROWSER_HIDDEN_MS = 20000;
 
@@ -130,6 +132,9 @@ let noticeTimer = null;
 let sessionListSnapshot = "";
 let messageSnapshot = "";
 const liveNodes = new Map();
+// The bubble of each reply being written, by turn, and the text it shows: redrawn in place as the text grows.
+const liveAnswers = new Map();
+let liveDraw = null;
 // A tool call's card, so /expand can bring it into view.
 const callCards = new WeakMap();
 // The tool cards still running, so `tick` can move their clocks.
@@ -945,6 +950,8 @@ function startStream(id) {
     // This page shows the chat to the person, so a step Auto stops asks on the card while it is open (#465).
     watch: true,
     onFrame: (frame, outcome) => {
+      // A reply's live text is no event of the chat: it redraws its bubble, and nothing else.
+      if (outcome.live) return liveFrame();
       applyOutcome(outcome);
       // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
       if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
@@ -1089,6 +1096,8 @@ function viewSnapshot() {
     turn.digestOpen,
     // Who has the page changes the turn box's heading and its live row together.
     turn.control,
+    // A reply being written has a bubble of its own; its text is redrawn in place (`drawLive`).
+    turn.live ? [turn.live.step, turn.live.attempt] : null,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1150,6 +1159,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   const oldTop = scroller.scrollTop;
   const snapshot = viewSnapshot();
   if (snapshot === messageSnapshot) {
+    drawLive();
     if (forceScroll) scroller.scrollTop = scroller.scrollHeight;
     return;
   }
@@ -1170,6 +1180,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   const caret = replyFor ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
   messageSnapshot = snapshot;
   liveNodes.clear();
+  liveAnswers.clear();
   runningCards.clear();
   syncBrowser();
   const placed = new Set();
@@ -1613,6 +1624,8 @@ function assistantNode(turn, newest = false) {
   // The pictures melo took (a page it looked at, another app's window) show under the steps, also when they are folded.
   article.append(...shotsOf(turn));
   article.append(...blockedCards(turn));
+  // The reply as it is written, where the answer will be (/stream off: the answer when it ends).
+  if (!turn.finishedAt && turn.live && prefs.stream) article.append(liveAnswerNode(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
       article.append(el("p", "turn-caption", t("chat.bestEffort")));
@@ -1734,6 +1747,42 @@ function answerNode(answer) {
   const node = el("div", "answer");
   node.innerHTML = renderMarkdown(answer);
   return node;
+}
+
+/**
+ * The bubble of a reply being written: the answer's own look, so the finished answer takes its place without
+ * a jump. A screen reader skips it and reads the finished answer once.
+ */
+function liveAnswerNode(turn) {
+  const node = el("div", "answer");
+  node.dataset.live = "true";
+  node.setAttribute("aria-hidden", "true");
+  node.innerHTML = renderPartialMarkdown(turn.live.text);
+  liveAnswers.set(turn, { node, text: turn.live.text });
+  return node;
+}
+
+/** Redraw each reply being written with its text now; the view follows only a reader at its bottom. */
+function drawLive() {
+  const scroller = $("scroll");
+  const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 100;
+  let grew = false;
+  for (const [turn, entry] of liveAnswers) {
+    const text = turn.live?.text;
+    if (typeof text !== "string" || text === entry.text) continue;
+    entry.node.innerHTML = renderPartialMarkdown(text);
+    entry.text = text;
+    grew = true;
+  }
+  if (grew && atBottom) scroller.scrollTop = scroller.scrollHeight;
+}
+
+/** A reply's live text came: one redraw for the frames of the next moment. */
+function liveFrame() {
+  liveDraw ??= setTimeout(() => {
+    liveDraw = null;
+    renderMessages(false);
+  }, LIVE_DRAW_MS);
 }
 
 function actionsNode(turn) {

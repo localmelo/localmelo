@@ -66,6 +66,7 @@ from localmelo.support.sessions.grants import (
     GrantBook,
     SessionGrants,
 )
+from localmelo.support.sessions.live import LiveReply, Publish, declared_framing
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
     BeforeTurn,
@@ -308,6 +309,7 @@ class ConsoleSessions:
         viewers: Callable[[str], int] | None = None,
         inbox_for: Callable[[str], InboxSource] | None = None,
         grants: GrantBook | None = None,
+        live: Publish | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
@@ -316,6 +318,9 @@ class ConsoleSessions:
         # How many surfaces show a chat to a person now (the hub's viewers,
         # #465); None: nobody ever does, so Auto blocks as before.
         self._viewers = viewers
+        # Where a chat's reply goes as it is written (the hub's live); None:
+        # every reply arrives whole.
+        self._publish_live = live
         # The run inbox of a chat: the words the person adds while it works.
         self.inbox_for = inbox_for
         # Every chat's grants, in the store's table: what the person allows
@@ -558,6 +563,7 @@ class ConsoleSessions:
                 memory=self._memory,
                 inbox=self._inbox(session_id),
                 before_turn=self._before_turn(session_id),
+                live=self._live(session_id),
             )
             policy = ChatPolicy(
                 runner.observe(self._timed_ask(session_id)),
@@ -939,6 +945,27 @@ class ConsoleSessions:
             await entry.runner.wait()
         entry.policy.auto.withdraw(key)
 
+    def _live(self, session_id: str) -> Callable[[TurnInfo], LiveReply] | None:
+        """The live display of each turn of chat *session_id*, or None.
+
+        The framing is the one ``[cli] reasoning_tags`` declares for the
+        chat's model, read at each turn.
+        """
+        publish = self._publish_live
+        if publish is None:
+            return None
+
+        def display(info: TurnInfo) -> LiveReply:
+            entry = self._sessions.get(session_id)
+            model = entry.model if entry is not None else self._settings_model()
+            cli = getattr(self._settings(), "cli", None)
+            tags = getattr(cli, "reasoning_tags", None) or {}
+            return LiveReply(
+                info, publish, reasoning_tags=declared_framing(tags, model)
+            )
+
+        return display
+
     def _settings_model(self, settings: Config | None = None) -> str:
         """The chat model the settings name, as ``session.model`` records it."""
         settings = settings or self._settings()
@@ -1187,6 +1214,7 @@ class ConsoleSessions:
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
             before_turn=self._before_turn(info.id),
+            live=self._live(info.id),
         )
         policy = ChatPolicy(
             runner.observe(self._timed_ask(info.id)),

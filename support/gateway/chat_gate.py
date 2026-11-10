@@ -25,7 +25,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +36,7 @@ from localmelo.melo.contracts.providers import (
     LLM_REQUEST_KIND,
     BaseEmbeddingProvider,
     BaseLLMProvider,
+    StreamFragment,
 )
 from localmelo.melo.memory._sqlite import thinking_retention_days
 from localmelo.melo.schema import Message, ToolDef
@@ -1631,7 +1632,7 @@ class GatedLLM(BaseLLMProvider):
     class defaults: replay capabilities, request-kind overrides,
     ``thinking_off`` and ``thinking_off_body`` are copied at construction; ``model``,
     ``last_reasoning_key`` and ``last_usage`` are copied again after each
-    successful ``chat()``.
+    successful ``chat()`` and each reply a ``stream_chat()`` gives.
     """
 
     def __init__(self, inner: BaseLLMProvider, client: SessionClient) -> None:
@@ -1653,11 +1654,8 @@ class GatedLLM(BaseLLMProvider):
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
 
-    async def chat(
-        self,
-        messages: list[Message],
-        tools: list[ToolDef] | None = None,
-    ) -> Message:
+    async def _admitted(self) -> GateCall:
+        """Submit this request to the gate and wait for its slot."""
         gate = self.client.gate
         raw = LLM_REQUEST_KIND.get()
         kind = raw if raw in _KINDS else "plan"
@@ -1671,6 +1669,15 @@ class GatedLLM(BaseLLMProvider):
         except BaseException:
             gate.finish(call, "refused")
             raise
+        return call
+
+    async def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+    ) -> Message:
+        gate = self.client.gate
+        call = await self._admitted()
         try:
             message = await self.inner.chat(messages, tools=tools)
         except BaseException:
@@ -1679,6 +1686,34 @@ class GatedLLM(BaseLLMProvider):
         self._copy()
         gate.finish(call, "ok", self.last_usage)
         return message
+
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """The inner provider's stream, in one slot of the gate, as :meth:`chat`.
+
+        The call is booked ``ok`` once the reply came; a stream closed or
+        cancelled before it is ``failed``, and closing it closes the inner one.
+        """
+        gate = self.client.gate
+        call = await self._admitted()
+        replied = False
+        try:
+            async with contextlib.aclosing(
+                self.inner.stream_chat(messages, tools=tools)
+            ) as stream:
+                async for fragment in stream:
+                    if fragment.kind == "reply":
+                        self._copy()
+                        replied = True
+                    yield fragment
+        finally:
+            if replied:
+                gate.finish(call, "ok", self.last_usage)
+            else:
+                gate.finish(call, "failed")
 
     def _copy(self) -> None:
         """Copy the three documented attributes from the inner provider (R18)."""

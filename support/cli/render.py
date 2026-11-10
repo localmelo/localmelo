@@ -17,7 +17,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, NamedTuple, cast
+from typing import Any, Final, NamedTuple
 
 from markdown_it.token import Token as MarkdownToken
 from pygments.token import (  # type: ignore[import-untyped]
@@ -87,6 +87,7 @@ from localmelo.support.sessions.display import (
     status_text,
     step_said,
 )
+from localmelo.support.sessions.live import declared_framing
 from localmelo.support.sessions.store import (
     SessionBusyError,
     StoredEvent,
@@ -812,10 +813,7 @@ class TurnRenderer:
 
     def stream_hint(self) -> ReasoningTags | None:
         """The model's declared framing, or ``None`` for the conservative rule."""
-        hint = self.reasoning_tags.get(self._backend().model)
-        if hint in ("explicit", "closing_only", "none"):
-            return cast(ReasoningTags, hint)
-        return None
+        return declared_framing(self.reasoning_tags, self._backend().model)
 
     def stream_feed(self) -> StreamFeed:
         """A display for one turn's planning streams (set around the run)."""

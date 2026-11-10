@@ -9,7 +9,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 import * as turns from '../../support/gateway/static/turns.mjs';
-import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
+import {renderMarkdown, renderPartialMarkdown} from '../../support/gateway/static/markdown.mjs';
 import * as approvals from '../../support/gateway/static/approval-card.mjs';
 import {maker} from '../../support/gateway/static/dom.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
@@ -149,6 +149,31 @@ test('a held reply is flushed before the next step, or by the run end', () => {
   push('run.finished', {result: {status: 'completed', result: 'The same words.', duration_s: 9, n_tool: 0, steps: 2}});
   assert.equal(turn.items.filter((item) => item.kind === 'assistant_text').length, 1, 'The answer is not printed twice');
   assert.equal(turn.answer, 'The same words.');
+});
+
+// A reply's live text (`reply.live`): frames without an id, one run per request from `at` 0.
+test('a reply being written grows in place, starts over from 0, and its stored reply ends it', () => {
+  const {view, turn, push} = fullTurn();
+  const live = (data) => applyEvent(view, {turn: 1, type: 'reply.live', data: {turn: 1, step: 1, attempt: 1, ...data}});
+  assert.deepEqual(live({at: 0, text: 'Hello\n'}), {live: true});
+  live({at: 6, text: 'world\n'});
+  assert.deepEqual(turn.live, {step: 1, attempt: 1, text: 'Hello\nworld\n'});
+  const cursor = view.lastEventId;
+  live({at: 0, text: 'Hello\nworld\n'}); // a reconnect: the text so far, once
+  assert.equal(turn.live.text, 'Hello\nworld\n');
+  assert.equal(view.lastEventId, cursor, 'a live frame never moves the cursor');
+  push('assistant.message', {step: 1, content: 'Hello\nworld', tool_calls: []});
+  assert.equal(turn.live, null);
+  live({at: 0, text: 'Hello\n'});
+  assert.equal(turn.live, null, 'a step whose stored reply came takes no more live text');
+});
+
+test('a reply stopped while it was written keeps the words it showed', () => {
+  const {view, turn, push} = fullTurn();
+  applyEvent(view, {turn: 1, type: 'reply.live', data: {turn: 1, step: 1, attempt: 1, at: 0, text: 'Half a rep'}});
+  push('run.finished', {result: {status: 'cancelled', result: '', error: 'Cancelled by the user'}});
+  assert.equal(turn.live, null);
+  assert.deepEqual(turn.items.filter((item) => item.kind === 'assistant_text').map((item) => item.text), ['Half a rep']);
 });
 
 // #278: the agent stores a reply that is only unfinished thinking with its text as thinking and no content.
@@ -706,7 +731,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/dom\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/i18n\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/turns\.mjs";\n/m, '')
-  .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
+  .replace(/^import \{ renderMarkdown, renderPartialMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
@@ -943,6 +968,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     t,
     formatTime,
     renderMarkdown,
+    renderPartialMarkdown,
     workerHistory,
     setupTasks,
     plainSegments,
@@ -1451,6 +1477,33 @@ test('Escape with a picture open leaves the stop to the picture', async () => {
   h.element('picture-box').open = true;
   h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27});
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+});
+
+test('a reply shows in its bubble as it is written, and the answer takes its place', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const stream = h.stream();
+  stream.emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Say hello'}});
+  const frame = (at, text) => stream.emit({session_id: 'a', turn: 2, type: 'reply.live', data: {turn: 2, turn_id: 'turn-2', step: 1, attempt: 1, at, text}});
+  const draw = () => h.timers.filter((timer) => timer.ms === 40 && !timer.cleared && !timer.ran).forEach((timer) => { timer.ran = true; timer.handler(); });
+  const bubble = () => findNode(h.element('messages'), (node) => node.dataset?.live === 'true');
+  frame(0, 'Hello, **wor');
+  draw();
+  const first = bubble();
+  assert.ok(first, 'the words show in a bubble of their own');
+  assert.equal(first.className, 'answer', 'with the answer’s own look');
+  assert.equal(first.getAttribute('aria-hidden'), 'true', 'a screen reader waits for the finished answer');
+  assert.equal(first.innerHTML, '<p>Hello, **wor</p>', 'the line being written stays plain');
+  frame(12, 'ld**\nBye.');
+  draw();
+  assert.equal(bubble(), first, 'more words redraw the same bubble');
+  assert.equal(first.innerHTML, '<p>Hello, <strong>world</strong><br>\nBye.</p>');
+  stream.emit({id: 21, turn: 2, ts: 51, type: 'assistant.message', data: {step: 1, content: 'Hello, **world**\nBye.', tool_calls: []}});
+  stream.emit({id: 22, turn: 2, ts: 52, type: 'run.finished', data: {result: {status: 'completed', result: 'Hello, **world**\nBye.', steps: 1}}});
+  stream.emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed'}});
+  assert.equal(bubble(), null);
+  const answers = findNodes(h.element('messages'), (node) => node.className === 'answer');
+  assert.equal(answers.at(-1).innerHTML, first.innerHTML, 'the finished answer reads as the last live words did');
 });
 
 test('approval bar navigates to the card only on request', async () => {

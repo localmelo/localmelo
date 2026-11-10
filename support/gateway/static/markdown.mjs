@@ -505,3 +505,17 @@ export function renderMarkdown(text) {
       .split("\n"),
   );
 }
+
+/**
+ * A reply still being written: its complete lines as Markdown, the line being written as plain text in the
+ * same flow (its marks escaped, so a `**` or a `#` waits for its line to end). Inside an open code fence
+ * the line is code already. When the reply is whole, `renderMarkdown` draws it the same way, line for line.
+ */
+export function renderPartialMarkdown(text) {
+  const value = String(text ?? "");
+  const cut = value.lastIndexOf("\n") + 1;
+  const done = value.slice(0, cut);
+  const tail = value.slice(cut);
+  const fenced = (done.match(/^ {0,3}(```|~~~)/gm) ?? []).length % 2 === 1;
+  return renderMarkdown(done + (fenced ? tail : tail.replace(/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g, "\\$&")));
+}

@@ -42,6 +42,8 @@ runs against every scenario.
 ``slice`` writes the encoded body in pieces of that many bytes, so a test
 can split UTF-8 or a tag across transport chunks. ``drop`` closes the
 connection after the deltas, before the finish frame and ``[DONE]``.
+A stream the client closes before its end sets :attr:`StubServer.cut`, as a
+server that stops generating sees it.
 
 Two options model a server that cannot stream, and answer every request that
 does not ask for a stream as usual: ``"stream_ignored": true`` answers a
@@ -101,6 +103,8 @@ class StubServer:
         self.default = default
         self.requests: list[dict[str, Any]] = []
         self.released = threading.Event()
+        # Set when a client closed a stream before its last piece was written.
+        self.cut = threading.Event()
         self._counts: dict[str, int] = {}
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
@@ -275,7 +279,7 @@ class StubServer:
                         if delay:
                             time.sleep(delay)
                 except OSError:
-                    pass  # the client went away, as after a stop
+                    server.cut.set()  # the client went away, as after a stop
 
             def _hold(self, then: dict[str, Any]) -> None:
                 self.send_response(200)

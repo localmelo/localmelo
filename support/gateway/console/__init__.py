@@ -209,6 +209,7 @@ class Console:
             ledger=self.approvals,
             viewers=self.hub.viewers,
             grants=self.grants,
+            live=self.hub.live,
         )
         # What each chat's browser says in the conversation (its card), from the browser tools' own changes.
         self.browser_cards = BrowserCards(self)
