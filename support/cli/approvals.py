@@ -720,12 +720,6 @@ def session_warning(tool: str, workspace: str) -> list[str]:
     ]
 
 
-# Under the options of a high-impact call, which has no session choice.
-NO_GRANT_RULE: Final = (
-    "Session grants never cover installs, downloads or changes outside the folder."
-)
-
-
 class TerminalApprover:
     """Asks the person at the terminal about one request at a time."""
 

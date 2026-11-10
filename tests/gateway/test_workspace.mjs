@@ -4260,7 +4260,7 @@ test('a task card shows its status row under the facts and bumps it on each poll
 test('a task waiting for approval shows the chat approval card and answers it', async () => {
   const request = {
     request_id: 'req-t', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true,
-    workspace_label: '~/w', target: null,
+    workspace_label: '~/w', target: null, offers_chat: true,
   };
   let reads = 0;
   const h = await openTask({
@@ -5681,7 +5681,7 @@ test('a live turn that answered a task\'s question keeps its origin and offers n
 /** A task's pending approval as `GET /approvals/{id}` returns it, with melo's explanation. */
 const taskApproval = (explanation, extra = {}) => ({approval: {
   request_id: 'r1', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true,
-  workspace_label: '~/w', session_id: 't', explanation, ...extra,
+  workspace_label: '~/w', session_id: 't', explanation, offers_chat: true, ...extra,
 }});
 const waitingCard = cardRow(5, {at: NOW - 60, state: 'waiting', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Wants to run a command', request_id: 'r1'});
 

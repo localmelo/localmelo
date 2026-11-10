@@ -124,7 +124,10 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let rule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
+  // `keptRule` says what "Allow for this chat" covers, shown only where that answer is offered; `rule` is a
+  // step's own line about this one answer (typing, a form, a file for a page...), shown always.
+  let keptRule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
+  let rule = "";
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
@@ -133,18 +136,20 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.command");
     title = t("approval.runCommand", { folder });
     caption = `${tool} · ${workspace}`;
+    keptRule = everywhere ? t("approval.rule.shellMain", { workspace }) : t("approval.rule.shell", { scope, workspace });
     content = typeof args.command === "string" ? args.command : JSON.stringify(args.command ?? "");
   } else if (tool === "python_exec") {
     what = t("approval.pythonCode");
     title = t("approval.runPython", { folder });
     caption = `${tool} · ${workspace}`;
+    keptRule = everywhere ? t("approval.rule.pythonMain", { workspace }) : t("approval.rule.python", { scope, workspace });
     content = String(args.code ?? "");
   } else if (tool === "file_write") {
     const target = request.target;
     const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
     what = t("approval.fileContent");
-    rule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
+    keptRule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
     if (diff) what = t("approval.changesTo", { path });
@@ -159,7 +164,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = t(siteRule(reading ? "read" : "open", request, everywhere), { site: request.kept_site || site, scope });
+    keptRule = t(siteRule(reading ? "read" : "open", request, everywhere), { site: request.kept_site || site, scope });
     // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front. The
     // sentence is plain text; a read of an address shows the whole address in the box below it.
     why = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
@@ -188,8 +193,8 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     else if (control && choosing) title = control.label ? t("approval.actChoose", { label: control.label, site }) : t("approval.actChooseKind", { site });
     else if (control) title = actionTitle("actClick", control, site);
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
-    rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
-      : t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
+    if (sending || typing) rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce");
+    else keptRule = t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
     const chrome = args.browser === "chrome";
     content = t(sending ? "approval.submitContent"
       : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
@@ -234,7 +239,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.handoffAddress");
     title = t("approval.handoffTitle", { app });
     caption = t("approval.handoffCaption");
-    rule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
+    keptRule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
     why = t("approval.handoffContent", { app, site });
     content = String(args.url || "");
   } else if (tool.startsWith("browser-dialog:")) {
@@ -291,7 +296,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.seeWindow");
     title = t("approval.seeTitle", { app });
     caption = t("approval.seeCaption");
-    rule = everywhere ? t("approval.rule.seeMain", { app })
+    keptRule = everywhere ? t("approval.rule.seeMain", { app })
       : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
     content = String(args.window || "");
   }
@@ -434,20 +439,11 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     : outside ? [once, session, always, deny] : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
-  const command = tool === "shell_exec" || tool === "python_exec";
   if (outside) {
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
       : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
         : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
-  } else if (high) {
-    // A high-impact card offers no kept answer (`high` leaves out the site question the server offers one for), so
-    // it has no line about what one covers: its caption says it asks every time.
-    rule = "";
-  } else if (command) {
-    const shell = tool === "shell_exec";
-    rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
-      : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
-  }
+  } else if (keeps && !rule) rule = keptRule; // only a card that offers a kept answer says what it covers
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);

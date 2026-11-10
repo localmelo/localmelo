@@ -133,7 +133,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
   // A page that asks for another app shows the address melo would open, and what comes to the front.
   request = {request_id: 'hand-off', tool_name: 'handoff:chat',
-    arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}, workspace_label: '~/w'};
+    arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}, workspace_label: '~/w', offers_chat: true};
   const handing = c.draw(request);
   assert.equal(findNode(handing, (node) => node.className === 'approval-content').textContent, 'chat://login?x=1');
   assert.match(findNode(handing, (node) => node.className === 'approval-note').textContent, /Chat comes to the front/);
@@ -433,7 +433,8 @@ test('the card has a filled answer, an outlined grant and a quiet deny, and says
   assert.equal(actions.children[1].attributes['aria-describedby'], 'approval-scope-roles', 'the grant is read with what it covers');
   assert.match(warning.textContent, /“Allow for this chat” lets routine shell commands run without asking/);
   assert.match(warning.textContent, /Installs, downloads and changes outside ~\/w still ask/);
-  request = {request_id: 'roles-file', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0}};
+  request = {request_id: 'roles-file', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0},
+    offers_chat: true};
   assert.match(flatten(c.draw(request)), /will not ask again before writing files in this chat/);
 });
 
@@ -508,7 +509,7 @@ const siteStop = (extra = {}) => ({
 
 test('the kept answer names the whole site it covers, and the question keeps the exact host', () => {
   const site = (tool, extra = {}) => ({request_id: 'w', tool_name: `${tool}https://login.example.com`, kept_site: 'example.com',
-    arguments: {site: 'login.example.com'}, arguments_complete: true, workspace_label: '~/w', ...extra});
+    arguments: {site: 'login.example.com'}, arguments_complete: true, workspace_label: '~/w', offers_chat: true, ...extra});
   const fetched = {arguments: {site: 'login.example.com', via: 'web_fetch', url: 'https://login.example.com/a'}};
   const c = cards();
   const open = c.draw(site('browser:'));
@@ -553,7 +554,9 @@ test('Auto\'s card for a site stopped as not asked for offers the chat, and says
 
 test('Deny opens a box for what melo should do instead and keeps what is typed in it', () => {
   const c = cards();
-  const request = {request_id: 'note', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true};
+  const request = {request_id: 'note', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true, offers_chat: true};
+  // A card that offers no kept answer has no line about one.
+  assert.equal(findNode(c.draw({...request, request_id: 'bare', offers_chat: false}), (node) => node.id === 'approval-scope-bare'), null);
   const card = c.draw(request);
   c.settle('note');
   const view = findNode(card, (node) => node.className === 'deny-view');
