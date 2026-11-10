@@ -242,9 +242,7 @@ class TestExitingRun:
         await asyncio.sleep(0)
 
     @pytest.mark.asyncio
-    async def test_the_reflections_are_cleared_without_being_promoted(
-        self,
-    ) -> None:
+    async def test_the_reflections_are_cleared(self) -> None:
         reflection = {
             "recommended_action": "continue",
             "rationale": "test",
@@ -290,8 +288,8 @@ class TestExitingRun:
         assert agent.hippo.working.get_reflections()
 
         await _exit_run(agent, running, 5.0, "Cancelled by SIGTERM")
-        # Promotion would call the embedding server, which the exit has no
-        # time for.
+        # A write to long-term memory would call the embedding server, which
+        # the exit has no time for.
         assert agent.hippo.working.get_reflections() == []
         assert [
             entry.text

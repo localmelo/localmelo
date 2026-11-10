@@ -3674,7 +3674,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         call, and the task record is saved, both within
         :data:`FINALIZE_TIMEOUT_S`, and then, within what is left, the
         rows written are listed on their response's ``llm_calls`` row; the
-        reflections are cleared without being promoted, so no network call
+        reflections are cleared, and no network call
         follows the cancellation. After :meth:`begin_exit`, the finalizer
         closes the tool providers first and keeps to the exit's deadline,
         as :meth:`begin_exit` describes for other runs.
@@ -4276,9 +4276,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         left and kills a provider still closing then (see
         :meth:`_close_providers`), so that a close() that hangs cannot
         prevent the save. The save is bounded by the exit's deadline. The
-        reflections are cleared without being promoted: promotion calls
-        the embedding server and may take longer than the exit allows. A
-        failure is logged, not raised, and a cancellation during the
+        reflections are cleared and nothing is flushed to long-term memory: a
+        flush calls the embedding server and may take longer than the exit
+        allows. A failure is logged, not raised, and a cancellation during the
         closing is raised once the task is saved.
         """
         task.status = run.status
@@ -4472,8 +4472,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
            the link is skipped. It comes after the save, so a held write
            lock cannot cost the task record its status: an unlinked row is
            the lesser loss. A failed link is logged by the recorder.
-        4. The reflections are cleared without being promoted: no
-           long-term write, and no embedding or other network call.
+        4. The reflections are cleared: no long-term write, and no
+           embedding or other network call.
         5. The RunResult is built, kept as ``run.outcome`` and reported
            with ``run.finished``.
 
@@ -5386,7 +5386,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         saves its task record, it closes the tool providers, killing any
         that has not closed when only :data:`EXIT_SAVE_RESERVE_S` of the
         time is left (:meth:`BaseToolProvider.kill`); its reflections are
-        cleared without being promoted. A provider that the cancellation
+        cleared. A provider that the cancellation
         finds still starting is waited for to the same limit, then killed
         (see :meth:`_start_provider`). A run that had already ended, and
         whose final save the cancellation cuts short, saves its record

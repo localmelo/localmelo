@@ -385,7 +385,7 @@ def _window(agent: Agent) -> list[tuple[str, str]]:
     return [(msg.role, msg.content) for msg in agent.hippo.working.get_window()]
 
 
-def _promoted(agent: Agent) -> list[str]:
+def _reflection_entries(agent: Agent) -> list[str]:
     return [
         entry.text
         for entry in agent.hippo.long._entries
@@ -723,7 +723,7 @@ class TestStop:
         assert llm.requests == []
 
     @pytest.mark.asyncio
-    async def test_cancel_skips_promotion(self) -> None:
+    async def test_cancel_clears_reflections_without_a_network_call(self) -> None:
         embedding = CountingEmbedding()
         llm, recorder = ScriptedLLM([_calls(("echo", {"text": "a"}, "c1"))]), Recorder()
         llm.replies.append(_reflection("continue"))
@@ -735,9 +735,9 @@ class TestStop:
         await _stop(running)
 
         assert check_events(recorder).status == "cancelled"
-        # Cleared, not promoted: no network call follows the cancellation.
+        # Cleared: no network call follows the cancellation.
         assert agent.hippo.working.get_reflections() == []
-        assert _promoted(agent) == []
+        assert _reflection_entries(agent) == []
         assert (embedding.calls, len(llm.requests)) == (embeds, requests)
 
     @pytest.mark.asyncio
@@ -822,9 +822,9 @@ class TestOtherCancellations:
             if exit_reason is None:
                 assert history.saves[-1] == ("crashed", "CancelledError")
             else:
-                # B6: the exit's reason, and no promotion.
+                # B6: the exit's reason, and no reflection in long-term memory.
                 assert history.saves[-1] == ("crashed", exit_reason)
-                assert _promoted(agent) == []
+                assert _reflection_entries(agent) == []
             assert agent.hippo.working.get_reflections() == []
             # No partial turn for the interrupted step, and no row for it. The
             # window also holds the reflection request, its reply and the
@@ -864,9 +864,9 @@ class TestOtherCancellations:
         await _stop(running)
 
         assert history.saves[-1] == ("cancelled", CANCELLED_ERROR)
-        # Cleared, not promoted, and no network call.
+        # Cleared, and no network call.
         assert agent.hippo.working.get_reflections() == []
-        assert _promoted(agent) == []
+        assert _reflection_entries(agent) == []
         assert embedding.calls == embeds
         # The interrupted step is closed and recorded.
         window = agent.hippo.working.get_window()
@@ -1145,7 +1145,7 @@ class TestExit:
         assert (provider.closes, provider.kills) == (1, 1)
         assert "timed out; its records may be incomplete" in caplog.text
         assert history.saves[-1] == ("cancelled", "Cancelled by SIGTERM")
-        # No network call: no embedding request, no promotion.
+        # No network call: no embedding request.
         assert embedding.calls == embeds
         hang.set()
         await asyncio.sleep(0)
