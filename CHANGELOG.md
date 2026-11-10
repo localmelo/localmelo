@@ -122,4 +122,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every direct run is recorded, so the console's Workers view lists it.
 - `melo-retrieve` and `melo-procedures` compare memory retrievers and replay recorded runs offline.
 - The Python API (experimental) has events, stopping, approvals and sessions.
+- `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
 - The MIT license.

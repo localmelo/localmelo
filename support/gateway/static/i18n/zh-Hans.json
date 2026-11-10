@@ -756,6 +756,8 @@
   "errors.blockAllowedAlready": "这一步已经允许过了。",
   "errors.blockNotAllowable": "这一步不能被允许。",
   "errors.blockNotFound": "这里没有这个被拦下的步骤。",
+  "errors.browserNoPage": "melo 在那里没有打开的页面。",
+  "errors.browserNoPicture": "melo 无法为该页面截图。",
   "errors.choreLimit": "最多 {n} 个定时事项。请先删除一个。",
   "errors.choreNotFound": "找不到 id 为 {id} 的定时事项。",
   "errors.choreRunning": "这个定时事项上一次运行还没有结束。请等它结束，或先停止它。",

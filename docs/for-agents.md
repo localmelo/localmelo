@@ -301,6 +301,7 @@ Every route the gateway serves:
 | `GET /api/sessions/{session_id}/browser` | [api-v2](reference/api-v2.md#get-apisessionsidbrowser) |
 | `POST /api/sessions/{session_id}/browser/done` | [api-v2](reference/api-v2.md#post-apisessionsidbrowserdone) |
 | `WS /api/sessions/{session_id}/browser/live` | [api-v2](reference/api-v2.md#ws-apisessionsidbrowserlive) |
+| `GET /api/sessions/{session_id}/browser/picture` | [api-v2](reference/api-v2.md#get-apisessionsidbrowserpicture) |
 | `POST /api/sessions/{session_id}/browser/window` | [api-v2](reference/api-v2.md#post-apisessionsidbrowserwindow) |
 | `GET /api/sessions/{session_id}/events` | [api-v2](reference/api-v2.md#get-apisessionsidevents) |
 | `DELETE /api/sessions/{session_id}/folders` | [api-v2](reference/api-v2.md) |
