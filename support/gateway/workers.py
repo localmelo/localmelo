@@ -3367,6 +3367,10 @@ class TaskWorkers:
         session = await self.store.get_session(chat_id)
         return session.created_at if session is not None else None
 
+    def stopping(self, task_id: str) -> bool:
+        """Whether a Stop of *task_id* is in progress (its worker has not ended yet)."""
+        return task_id in self._stopping
+
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
         body.pop("finishing", None)  # the worker's own mark, not part of the body

@@ -36,47 +36,20 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
 )
+from localmelo.support.task_stage import (
+    CALL_REASON,
+    CRASHED_REASON,
+    FENCED_REASON,
+    IN_FLIGHT_REASON,
+    PAUSED_REASON,
+    STOPPED_REASON,
+    WORKSPACE_REASON,
+)
 
 log = logging.getLogger(__name__)
 
-# Why a task waits for the person after a restart, in plain words: what
-# happened and what to do. The task's page shows the sentence as it is.
-FENCED_REASON = (
-    "localmelo could not read this task's record when it started: "
-    "check its work, then resume."
-)
-# A run a stop cut off, written by the stop itself: the next start decides it.
-STOPPED_REASON = "localmelo stopped; this task continues when it opens again"
-# Something of the run may still be going, or its record is not complete: a
-# process of the run may still be running, the record is unknown, or more than
-# one call had not returned.
-IN_FLIGHT_REASON = (
-    "localmelo stopped before it could tell whether this task's last step "
-    "finished: check its work, then resume."
-)
-# A call that can change something had not returned, and its effect is not one
-# melo can look at afterwards (a command, or one that reaches outside), or the
-# row does not say. More than one open call waits with IN_FLIGHT_REASON.
-CALL_REASON = (
-    "A step melo cannot check by itself, such as a command or one that reaches "
-    "outside this computer, was running when localmelo stopped: check whether it "
-    "finished, then resume."
-)
-# The person asked for a pause that had not settled when localmelo stopped.
-PAUSED_REASON = (
-    "You paused this task before localmelo stopped: "
-    "resume it when you want it to go on."
-)
-# The run was cut off by a crash the time before too, since it last ended done or failed.
-CRASHED_REASON = (
-    "localmelo closed unexpectedly twice while this task was working: "
-    "check its work, then resume."
-)
-# The task's folder could not be used at start (a disk not mounted yet).
-WORKSPACE_REASON = (
-    "This task's folder was missing when localmelo started: "
-    "resume it once the folder is back."
-)
+# Why a task waits for the person after a restart: the sentences, and their
+# keys for the page, live with the stage table (support/task_stage.py).
 
 Outcome = Literal["keep", "reconcile", "continue", "wait"]
 

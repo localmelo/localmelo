@@ -832,6 +832,24 @@ the shape of a session's; empty when none; answer one with `POST
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
 
+Every task object also has `stage`, where the task is as one table decides it
+for the console, the terminal and the app: `{"key", "awaited", "need",
+"ending", "why", "label"}`. `key` is `running`, `stopping`, `approval`,
+`answer`, `asked` (its chat's answer), `model`, `slot`, `queued`, `paused`,
+`resume` (it waits for the person's Resume after a restart) or `finished`;
+`awaited` is `nobody`, `person`, `model`, `slot` or `time`; `need` is `""`,
+`approval`, `answer`, `resume`, `continue`, `review` or, for a slot, the
+scheduler's reason code; `ending` is how a finished task ended (`""` for a done
+one with no ending); `why` names the reason a task waits after a restart
+(`restart`, `paused`, `unsure`, `call`, `crashed`, `folder`, `record`, or `""`
+when the stored `wait_reason` has no key); `label` is the catalog key of its
+words. The first row that holds decides: finished over everything, then a Stop
+in progress, an open approval, an open question, a hold, queued, paused, a
+task the stop cut off (it continues at the next start, so it reads `paused`,
+`awaited` `nobody`, `why` `restart`), a restart's wait, and running; a
+combination no row matches, an unknown state too, reads as `running`.
+`wait_reason` keeps the stored sentence as it is.
+
 A task you started follows the [mode](#ask-and-auto) of its chat
 (`approvals`, `ask` or `auto`) while it has not ended: it starts with the
 chat's mode, and a later switch of the chat reaches it, Auto to Ask at its

@@ -274,7 +274,8 @@ def test_human_output_strips_terminal_control_sequences() -> None:
         )
     # Columns are padded to the widest cell, so the header lines up with the row.
     assert output.getvalue() == (
-        "ID   LEVEL         STATE   TITLE\n" "abc  not recorded  queued  ?[2JTask\n"
+        "ID   LEVEL         STATE             TITLE\n"
+        "abc  not recorded  waiting to start  ?[2JTask\n"
     )
     assert chr(27) not in output.getvalue()
 
@@ -592,17 +593,22 @@ def test_list_adds_the_approval_line_under_a_waiting_task() -> None:
     quiet = {"task_id": "def", "state": "queued", "title": "Other"}
     text = _run(["list"], {"tasks": [_HELD, quiet]})
     assert text.splitlines()[1:] == [
-        "abc  P2            held    Write it",
+        "abc  P2            waiting for your approval  Write it",
         f"  {_LINE}",
-        "def  not recorded  queued  Other",
+        "def  not recorded  waiting to start           Other",
     ]
 
 
 @pytest.mark.parametrize(
-    "state,says_requested", [("held", True), ("running", True), ("cancelled", False)]
+    "state,word,says_requested",
+    [
+        ("held", "waiting for the model", True),
+        ("running", "working", True),
+        ("cancelled", "stopped", False),
+    ],
 )
 def test_stop_says_when_the_task_has_not_stopped_yet(
-    state: str, says_requested: bool
+    state: str, word: str, says_requested: bool
 ) -> None:
     def reply(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"task": {"task_id": "abc", "state": state}})
@@ -616,7 +622,7 @@ def test_stop_says_when_the_task_has_not_stopped_yet(
         )
     assert code == 0
     lines = out.getvalue().splitlines()
-    assert lines[0] == f"abc  {state}"
+    assert lines[0] == f"abc  {word}"
     if says_requested:
         assert lines[1].startswith(
             "  stop requested; the task stops when its worker ends"

@@ -21,6 +21,7 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import TOKEN_TTL_S
 from localmelo.support.gateway.task_policy import TaskPolicyError
 from localmelo.support.gateway.task_store import TaskConflictError
+from localmelo.support.task_stage import task_stage
 
 from .activity import left_line
 from .bodies import Body
@@ -109,9 +110,13 @@ async def _resume_call(operation: Awaitable[T]) -> T:
 
 
 def _approvals(console: Console, task: dict[str, Any]) -> dict[str, Any]:
-    """*task* with the approvals it waits for; the broker keys them by task id."""
-    pending = console.broker.pending(str(task.get("task_id")))
-    return {**task, "pending_approvals": [task_approval(console, r) for r in pending]}
+    """*task* with the approvals it waits for (the broker keys them by task id),
+    and the stage these facts put it at: the one every surface words."""
+    task_id = str(task.get("task_id"))
+    pending = console.broker.pending(task_id)
+    task = {**task, "pending_approvals": [task_approval(console, r) for r in pending]}
+    stopping = console.workers.stopping(task_id)
+    return {**task, "stage": task_stage(task, stopping=stopping).as_json()}
 
 
 def task_approval(console: Console, request: ApprovalRequest) -> dict[str, Any]:
