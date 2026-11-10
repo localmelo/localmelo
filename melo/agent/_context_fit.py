@@ -179,12 +179,14 @@ class _Pins:
             is not None
         ]
 
-    def order(self, units: list[list[Message]]) -> Iterator[tuple[int, list[Message]]]:
+    def order(
+        self, units: list[list[Message]], first: int = 0
+    ) -> Iterator[tuple[int, list[Message]]]:
         """The units of *units* a fit drops, with their level: oldest first, level
-        by level, each once (the caller drops each unit it is given)."""
+        by level from *first*, each once (the caller drops each unit it is given)."""
         last = units[-1] if units else None
         given: set[int] = set()
-        for level in range(3):
+        for level in range(first, 3):
             for unit in units:
                 if id(unit) not in given and self.droppable(unit, level, last):
                     given.add(id(unit))
@@ -436,12 +438,19 @@ def units_to_leave(
     """The messages of the oldest units that must leave *messages* for good, and
     the estimate of what is left.
 
-    The units go in the order :func:`fit_request` drops them (:meth:`_Pins.order`:
-    the same levels and pins), whole, nothing shortened or copied, until what is
-    left comes to *target*; when it cannot, every unit the last level may drop
-    goes. A unit whose first message is in *keep* (by identity) stays. *history*
-    is as for :func:`fit_request`. *estimate* is asked once for the whole, once
-    for nothing, once per unit alone, and once for what is left: a unit's share is
+    The units go oldest first, by the pins and levels of :func:`fit_request`
+    (:meth:`_Pins.order`) from level 1, whole, nothing shortened or copied, until
+    what is left comes to *target*; when it cannot, every unit the last level may
+    drop goes. Level 0 is left out: it keeps failure evidence and images for a
+    request that drops them unannounced, and it reads a failure in the words of a
+    result ("error", "failed"), so that in a read of a document about errors it
+    would take newer parts before older ones. What leaves here is noted first
+    (the work checkpoint), and oldest first keeps what stays in context one
+    stretch, with the latest failing check and the newest unit still kept.
+
+    A unit whose first message is in *keep* (by identity) stays. *history* is as
+    for :func:`fit_request`. *estimate* is asked once for the whole, once for
+    nothing, once per unit alone, and once for what is left: a unit's share is
     its estimate alone less the estimate of nothing.
     """
     earlier = {id(m) for m in history}
@@ -456,7 +465,7 @@ def units_to_leave(
         return [], size
     base = estimate([])
     gone: list[Message] = []
-    for _level, unit in _Pins(units, before_task).order(units):
+    for _level, unit in _Pins(units, before_task).order(units, first=1):
         if id(unit[0]) in kept_ids:
             continue
         gone.extend(unit)

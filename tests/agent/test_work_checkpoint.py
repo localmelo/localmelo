@@ -18,6 +18,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._brief_aids import covered_lines, dropped_calls
 from localmelo.melo.agent._checkpoint import (
+    CHECKPOINT_AGAIN_NOTE,
     CHECKPOINT_CARRY_NOTE,
     CHECKPOINT_PROMPT,
     EARLY_NOTE,
@@ -79,7 +80,7 @@ class Stub(BaseLLMProvider):
     def __init__(
         self,
         steps: int,
-        notes: str | None = None,
+        notes: str | list[str | None] | None = None,
         overflow_at: int = 0,
         ratio: float | None = None,
         refuse: ProviderError | None = None,
@@ -111,7 +112,12 @@ class Stub(BaseLLMProvider):
             self.asked += 1
             if self.refuse is not None:
                 raise self.refuse
-            text = self.notes if self.notes is not None else _notes(self.asked)
+            given = (
+                self.notes.pop(0)
+                if isinstance(self.notes, list) and self.notes
+                else self.notes
+            )
+            text = given if isinstance(given, str) else _notes(self.asked)
             return Message("assistant", text, usage=usage)
         self.plans += 1
         if self.plans > self.steps:
@@ -280,9 +286,10 @@ async def test_a_drop_by_the_fit_is_named_in_the_block() -> None:
 
 
 @pytest.mark.parametrize(
-    "case", ["unreadable", "empty", "failed", "refused", "no calls left"]
+    "case",
+    ["unreadable", "empty", "failed", "refused", "again", "older", "no calls left"],
 )
-async def test_without_the_models_notes_the_block_is_computed_and_the_run_goes_on(
+async def test_without_the_models_notes_the_units_stay_while_the_request_fits(
     case: str,
 ) -> None:
     if case == "no calls left":
@@ -293,27 +300,56 @@ async def test_without_the_models_notes_the_block_is_computed_and_the_run_goes_o
         llm = Stub(steps=40)
         result, _, _ = await _run(llm, max_calls=first + 2)
         assert llm.asked == 0 and len(llm.requests) > first
-    else:
-        llm = Stub(
-            steps=40,
-            notes={"unreadable": "I would rather not.", "empty": ""}.get(case),
-            refuse={
-                # A server error, and a refusal for length (its retry too).
-                "failed": ProviderError("bad gateway", status_code=502),
-                "refused": ProviderError(
-                    "too long", status_code=400, context_overflow=True
-                ),
-            }.get(case),
-        )
-        result, _, _ = await _run(llm)
-        assert llm.asked >= 1 and result.status == "completed"
-    # The planning request after it carries the computed lines alone.
-    carried = [
-        r for r in llm.requests if any(CHECKPOINT_HEADER in m.content for m in r)
+        assert not any(CHECKPOINT_HEADER in m.content for r in llm.requests for m in r)
+        return
+    bad = "I would rather not."
+    replies: dict[str, str | list[str | None]] = {
+        "unreadable": bad,
+        "empty": "",
+        "again": [bad],
+        "older": [None, bad, bad],
+    }
+    llm = Stub(
+        steps=40,
+        notes=replies.get(case),
+        refuse={
+            # A server error, and a refusal for length (its retry too).
+            "failed": ProviderError("bad gateway", status_code=502),
+            "refused": ProviderError(
+                "too long", status_code=400, context_overflow=True
+            ),
+        }.get(case),
+    )
+    result, _, _ = await _run(llm)
+    assert result.status == "completed"
+    asks = [i for i, r in enumerate(llm.requests) if _asks(r)]
+    first = asks[0] if case != "older" else asks[1]
+    # A reply that cannot be read is asked once more, with a note that says why;
+    # a failed request is not (the request layer sent it again already).
+    again = [
+        i
+        for i, r in enumerate(llm.requests)
+        if i > first and CHECKPOINT_AGAIN_NOTE in r[-1].content
     ]
-    block = _block(carried[0])
-    assert f"Goal: {TASK}" in block and "State:" not in block
-    assert "Already read or run" in block and "- echo part 1" in block
+    assert bool(again) == (case not in ("failed", "refused"))
+    after = next(r for r in llm.requests[first:] if not _asks(r))
+    if case == "again":
+        assert "state 2:" in _block(after)
+    elif case == "older":
+        assert "state 1:" in _block(after) and _calls(after) != _calls(
+            llm.requests[first]
+        )
+    else:
+        # No notes at all: nothing left, and no block, while the request fits;
+        # past the limit the oldest units go with the computed lines alone.
+        assert not _asks(after) and _calls(after) == _calls(llm.requests[first])
+        assert not any(CHECKPOINT_HEADER in m.content for m in after)
+        carried = [
+            r for r in llm.requests if any(CHECKPOINT_HEADER in m.content for m in r)
+        ]
+        block = _block(carried[0])
+        assert f"Goal: {TASK}" in block and "State:" not in block
+        assert "Results that left the context" in block and "- echo part 1" in block
 
 
 async def test_the_checkpoint_is_the_models_notes_and_nothing_more(
@@ -455,3 +491,47 @@ async def test_drops_by_the_window_cap_are_named_in_the_block() -> None:
     assert result.checkpoints == 0 and llm.asked == 0
     block = _block(llm.requests[-1])
     assert "State:" not in block and "- echo part 1" in block
+
+
+def test_a_state_far_over_its_size_leaves_results_and_next_whole() -> None:
+    results = "summary.md holds sections 1-12; section 13 is a marker line"
+    reply = json.dumps(
+        {
+            "state": "parts read hold " + "facts and numbers " * 2000,
+            "results": results,
+            "failed": ["fetching part 0 errors"],
+            "works": ["three parts a step"],
+            "next": ["1. read part 58", "2) write section 13"],
+        }
+    )
+    checkpoint = checkpoint_from(reply, goal=TASK, files=[], covered=[], step=9)
+    assert checkpoint.cut and checkpoint.state.endswith("…")
+    assert checkpoint.results == results
+    assert checkpoint.next == ["read part 58", "write section 13"]
+    assert checkpoint.failed and checkpoint.works
+    # The block numbers the steps once.
+    assert "Next: 1. read part 58 2. write section 13" in checkpoint.render()
+
+
+def test_reads_whose_words_look_like_failures_leave_oldest_first() -> None:
+    # A document about errors: every other part says "error". The oldest parts
+    # leave, whatever they say, and what stays is one stretch.
+    def unit(n: int) -> list[Message]:
+        call = ToolCall(
+            "web_fetch", {"url": "https://a.test/doc", "part": n}, id=f"c{n}"
+        )
+        text = ("a client error status " if n % 2 else "plain text ") + "x" * 100
+        return [
+            Message("assistant", tool_calls=[call]),
+            Message("tool", text, tool_call_id=call.id),
+        ]
+
+    units = [unit(n) for n in range(1, 9)]
+    messages = [Message("user", TASK), *(m for u in units for m in u)]
+
+    def size(kept: list[Message]) -> int:
+        return sum(len(m.content) + 10 for m in kept)
+
+    kept = [messages[0], *(m for u in units[4:] for m in u)]
+    gone, _ = units_to_leave(messages, target=size(kept), estimate=size)
+    assert [id(m) for m in gone] == [id(m) for u in units[:4] for m in u]

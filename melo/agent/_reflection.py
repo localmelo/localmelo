@@ -255,32 +255,30 @@ def _trimmed(
     entry: _Trimmed,
     limit: int,
     size: Callable[[_Trimmed], int],
-    lists: Sequence[str],
-    texts: Sequence[str],
+    order: Sequence[str],
 ) -> _Trimmed:
     """*entry*, trimmed until *size* of it is at most *limit*.
 
-    Items are dropped from the end of each of *lists* in turn, one at a time and
-    only until it fits; then each of *texts* in turn is shortened at a word
+    The fields of *order* are cut in turn, each only until the entry fits: a
+    list loses items from its end, one at a time; a text is shortened at a word
     boundary and ends with "…" (see :func:`shorten`). *entry* itself is not
     changed: one that fits is returned as it is, any other as a trimmed copy.
     """
     if size(entry) <= limit:
         return entry
     fitted = dataclasses.replace(entry)
-    for name in lists:
-        items = list(getattr(entry, name))  # a copy: entry keeps its own
-        setattr(fitted, name, items)
-        while items:
-            items.pop()
-            if size(fitted) <= limit:
-                return fitted
-    for name in texts:
-        over = size(fitted) - limit
-        if over <= 0:
+    for name in order:
+        value = getattr(entry, name)
+        if isinstance(value, str):
+            over = size(fitted) - limit
+            setattr(fitted, name, shorten(value, max(len(value) - over, 0)))
+        else:
+            items = list(value)  # a copy: entry keeps its own
+            setattr(fitted, name, items)
+            while items and size(fitted) > limit:
+                items.pop()
+        if size(fitted) <= limit:
             break
-        text = getattr(fitted, name)
-        setattr(fitted, name, shorten(text, max(len(text) - over, 0)))
     return fitted
 
 
@@ -296,7 +294,7 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     :func:`shorten`). *entry* itself is not changed: one that fits is
     returned as it is, any other as a trimmed copy.
     """
-    return _trimmed(entry, limit, _reflection_size, REFLECTION_TRIM_ORDER, ("summary",))
+    return _trimmed(entry, limit, _reflection_size, (*REFLECTION_TRIM_ORDER, "summary"))
 
 
 # The lists of a reflection that are capped, the most items each keeps and the

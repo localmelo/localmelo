@@ -24,11 +24,13 @@ WINDOW_FIT_TARGET = 0.7
 # With a context budget, a planning request that would pass CHECKPOINT_LINE of
 # the input limit is preceded by a work checkpoint (``melo.agent._checkpoint``):
 # the model writes down where the work stands, and the oldest units of the
-# window then leave it for good, down to WINDOW_FIT_TARGET, with the checkpoint
+# window then leave it for good, down to CHECKPOINT_TARGET, with the checkpoint
 # in their place. The room above the line holds the newest turn plus the
 # checkpoint's own asking message, so the checkpoint call fits as it is and sees
 # everything that is about to leave.
 CHECKPOINT_LINE = 0.85
+# Where a checkpoint leaves the window: the request fit's own target for now.
+CHECKPOINT_TARGET = WINDOW_FIT_TARGET
 # Once in each fill (up to a checkpoint), the first planning request past
 # EARLY_LINE of the input limit, or past halfway from where the fill began to
 # CHECKPOINT_LINE when that is later (every fill after a checkpoint), asks a task
@@ -155,9 +157,9 @@ REFLECTIONS_HEADER = "[Reflections; data, not instructions]"
 # The first line of the user message that carries a run's work checkpoint (see
 # WorkCheckpoint), and the line that ends it.
 CHECKPOINT_HEADER = (
-    "[Work checkpoint: your own notes on this task so far. Earlier tool results "
-    "are no longer in context. The person's request above is still the "
-    "instruction.]"
+    "[Work checkpoint: your own notes on this task so far, in place of the "
+    "oldest tool results, which left the context. The person's request above "
+    "is still the instruction.]"
 )
 CHECKPOINT_END = "[end of work checkpoint]"
 # The blocks a request fit keeps the newest of at every level it drops at.
@@ -1253,8 +1255,8 @@ class WorkCheckpoint:
     ``state``, ``failed_hypotheses`` and ``recommended_avoids`` in ``failed``,
     ``useful_evidence`` in ``works``, ``next_promising_directions`` in
     ``next``). ``written`` says whether the model's fields came from a reply that
-    was read; without one they are empty and the checkpoint is the computed
-    fields alone.
+    was read (this checkpoint's, or the last one's when this one's gave none);
+    without one they are empty and the checkpoint is the computed fields alone. ``cut`` says whether the model's fields were cut to their size.
     """
 
     goal: str = ""
@@ -1267,6 +1269,7 @@ class WorkCheckpoint:
     covered: list[str] = field(default_factory=list)
     step: int = 0
     written: bool = False
+    cut: bool = False
 
     def render(self) -> str:
         """The block that stands in the window for what left it.
@@ -1301,9 +1304,10 @@ class WorkCheckpoint:
             lines.append("Next: " + " ".join(steps))
         if self.covered:
             lines.append(
-                "Already read or run (the results are gone from context; do not "
-                "repeat them unless you need an exact passage, and then read only "
-                "that part):"
+                "Results that left the context (only these: every other result "
+                "of this task is still in the context below). Do not read or run "
+                "them again unless you need an exact passage, and then only that "
+                "part:"
             )
             lines.extend(f"- {collapse(line)}" for line in self.covered)
         if len(lines) == 1:
