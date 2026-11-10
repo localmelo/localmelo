@@ -29,6 +29,19 @@ gateway and console and of the model servers stay refused even when written
 (:func:`localmelo.support.local_ports.own_ports`), and so does everything a
 page or a model wrote.
 
+A second exception, for a test: the servers the developer setting ``[tools]
+web_fetch_allow_local`` lists (:mod:`localmelo.support.web_local`), exact
+``127.0.0.1:PORT`` or ``[::1]:PORT`` written as the address itself, never a
+name or another spelling. :func:`require_public` lets one through only when
+its caller passes the list (*allow*, the one
+:class:`~localmelo.support.web.guard.LocalAllow` the session built and also hands to ``web_fetch``), and the browser tools pass
+it for exactly two askers: melo's own navigation, and a page already on a
+listed server (its tab got there by one of the two). A request of any other
+page (a public one, a tab that appeared by itself, a frame of a public page)
+meets the checks with no list, as before. The ports of melo's own gateway
+and console (the session's live config's) and of the model servers stay
+refused when listed, and so does melo's console.
+
 An address with a user part (``user@host``) is not opened: browsers and
 Python split ``a\\@b`` differently, so the host checked could be another
 than the host loaded.
@@ -47,6 +60,7 @@ from localmelo.support import config, gateway_endpoint, local_ports
 from localmelo.support.browser.driver import BrowserError
 from localmelo.support.web.guard import (
     AddressError,
+    LocalAllow,
     NotPublicError,
     check_url,
     checked_addresses,
@@ -114,11 +128,14 @@ def written(parts: SplitResult) -> bool:
         return False
 
 
-async def require_public(url: str) -> None:
+async def require_public(url: str, allow: LocalAllow | None = None) -> None:
     """Return when *url* may be opened; :class:`BrowserError` with the sentence for the model if not.
 
     See the module docstring. Only the scheme, host and port are read: the
-    path and query are the site's own business.
+    path and query are the site's own business. *allow* is the list of test
+    servers, for an asker that may reach them; it is the guard's own hook
+    (:func:`check_url`, :func:`checked_addresses`), so a listed server is
+    let through by the same reading as ``web_fetch``'s and by nothing else.
     """
     try:
         parts = urlsplit(url.strip())
@@ -133,11 +150,11 @@ async def require_public(url: str) -> None:
     if written(parts):
         return
     try:
-        target = check_url(f"{parts.scheme}://{parts.netloc}/")
+        target = check_url(f"{parts.scheme}://{parts.netloc}/", allow)
         console = console_sites()
         if (target.host, target.port) in console:
             raise NotPublicError(target.host, CONSOLE)
-        found = await checked_addresses(target, system_resolver)
+        found = await checked_addresses(target, system_resolver, allow=allow)
         if any((str(ip), port) in console for ip, port in found):
             raise NotPublicError(target.host, CONSOLE)
     except NotPublicError as exc:

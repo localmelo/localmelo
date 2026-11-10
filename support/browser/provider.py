@@ -21,9 +21,12 @@ left open at the end). A tab melo did not see appear is never listed.
 No tool opens or reads this computer, its local network or melo's own
 console (:mod:`localmelo.support.browser.addresses`): the address is checked
 before its site is asked about and before the page loads, and again where the
-page lands. A picture or a wait needs a page approved in that tab and reads
-the tab's address in the tab before and after; a wait's condition counts only
-on the approved site. The tab list shows the address and title of a tab only
+page lands. The exceptions are a server the person wrote the address of, and
+the test servers the developer setting ``[tools] web_fetch_allow_local`` lists
+(*listed*), which only melo's own navigation and a page already on a listed
+server reach (:meth:`BrowserToolProvider._require`). A picture or a wait needs
+a page approved in that tab and reads the tab's address in the tab before and
+after; a wait's condition counts only on the approved site. The tab list shows the address and title of a tab only
 while its page is on the site approved for it.
 
 Acting adds rules, all kept after a click as before it. A click, a
@@ -42,7 +45,7 @@ Every text melo types is its own question too, with all of the text, asked each
 time. Enter in a box that is in no form is asked about as well, and says the page
 decides where it goes.
 
-Melo itself never opens a local or private address. It cannot stop a page from
+Melo itself never opens any other local or private address. It cannot stop a page from
 doing that itself, so after each action every tab the action touched (the one
 acted on, and up to :data:`MAX_NEW_TABS` tabs that appeared during it; a further
 new tab is neither checked, read nor closed) is checked, by the address the
@@ -97,7 +100,7 @@ from localmelo.melo.contracts.tools import (
 )
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
-from localmelo.support import local_ports
+from localmelo.support import local_ports, web_local
 from localmelo.support.browser import (
     addresses,
     apps,
@@ -128,6 +131,7 @@ from localmelo.support.browser.driver import (
     Element,
     PageMovedError,
     PointHit,
+    Shot,
     StaleElementError,
     TabInfo,
     Upload,
@@ -149,6 +153,7 @@ from localmelo.support.browser.takeover import (
     is_human_check,
     needs_person,
 )
+from localmelo.support.web.guard import LocalAllow
 
 logger = logging.getLogger(__name__)
 
@@ -512,6 +517,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 await self._begin(ACTIONS.get(fn.__name__, "read"))
                 self._allow_local()
                 self._looked, self._handoff, self._stuck = False, False, None
+                self._listed_seen = False
                 back, returned = self._back_lines()
                 stale = (
                     tab is not None
@@ -526,9 +532,12 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                     result = await fn(self, **arguments)
                     result = await self._needs_you_after(result, before)
                 shown = await self._with_downloads(_led(back, result))
-                return await self._with_screen(self._with_local(shown))
+                return self._with_listed(
+                    await self._with_screen(self._with_local(shown))
+                )
             except BrowserError as exc:
-                return ToolOutput(text=_led_text(back, str(exc)), is_error=True)
+                text = _led_text(back, str(exc))
+                return self._with_listed(ToolOutput(text=text, is_error=True))
             finally:
                 sites.BROWSER.reset(named)
                 self._set_busy(False)
@@ -661,8 +670,15 @@ class BrowserToolProvider(BaseToolProvider):
         live: bool = True,
         live_fps: float = DEFAULT_FPS,
         chat_id: str | None = None,
+        listed: LocalAllow | None = None,
     ) -> None:
         self._driver = driver
+        # The test servers ``[tools] web_fetch_allow_local`` lists (None: none), the
+        # tabs whose page is on one and got there by melo's own navigation or from
+        # a page on one, and whether this step reached one (see _require).
+        self._listed = listed
+        self._on_listed: set[str] = set()
+        self._listed_seen = False
         # The chat's work folder (#551): named after the chat, or after this run
         # when the chat has no id of its own (then it goes when the run ends).
         self._temporary = not work_folder.usable(chat_id)
@@ -1158,6 +1174,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._tab = None
         self._snaps.clear()
         self._origins.clear()
+        self._on_listed.clear()
         self._views.clear()
         self._points.clear()
         self._given.clear()
@@ -1229,6 +1246,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._views.pop(short, None)
         self._points.pop(short, None)
         self._given.pop(short, None)
+        self._on_listed.discard(short)
         self._made.discard(short)
         self._owners.forget(short)
         if self._tab == short:
@@ -1323,6 +1341,8 @@ class BrowserToolProvider(BaseToolProvider):
         except BrowserError:
             self._drop_reading(tab_id)
             raise
+        if self._is_listed(snap.origin):
+            self._seen_listed()
         return snap
 
     async def _admit(self, url: str, tab: str, done: set[str]) -> None:
@@ -1336,7 +1356,7 @@ class BrowserToolProvider(BaseToolProvider):
         origin = sites.require_origin(url)
         if origin not in done:
             try:
-                await addresses.require_public(url)
+                await self._require(url, tab in self._on_listed)
                 if self._origins.get(tab) != origin:
                     await self._ask_site(origin)
                 else:
@@ -1345,6 +1365,7 @@ class BrowserToolProvider(BaseToolProvider):
                 await self._refuse_tab(tab)  # leave the page it led to
                 raise
             done.add(origin)
+        self._place(tab, url)
         if self._origins.get(tab) != origin:
             self._origins[tab] = origin
             self._poke_live()  # the card names the site
@@ -1475,13 +1496,16 @@ class BrowserToolProvider(BaseToolProvider):
             self._given.setdefault(tab, {})[(float(x), float(y))] = view
 
     async def _admit_frames(self, frames: tuple[str, ...], tab: str) -> None:
-        """Refuse a page whose frames, as far as they can be read, are on a local address."""
+        """Refuse a page whose frames, as far as they can be read, are on a local address.
+
+        A frame on a listed test server passes only in a page on one.
+        """
         for url in frames:
             if not url.lower().startswith(("http://", "https://")):
                 continue
             try:
                 sites.require_origin(url)
-                await addresses.require_public(url)
+                await self._require(url, tab in self._on_listed)
             except BrowserError:
                 await self._refuse_tab(tab)
                 raise
@@ -1490,6 +1514,7 @@ class BrowserToolProvider(BaseToolProvider):
         """Forget what was read in *tab* and approved for it: its page is no longer known."""
         self._snaps.pop(tab, None)
         self._origins.pop(tab, None)
+        self._on_listed.discard(tab)
         self._views.pop(tab, None)
         self._points.pop(tab, None)
 
@@ -1527,9 +1552,14 @@ class BrowserToolProvider(BaseToolProvider):
         return self._known(word)
 
     async def _go(self, url: str, tab: str, same_site: str = "") -> str:
-        """Open *url* (asking about its site unless it is *same_site*) and read it."""
+        """Open *url* (asking about its site unless it is *same_site*) and read it.
+
+        A link followed (*same_site*, the page's origin) is the page's: it
+        reaches a listed test server only from a page on one, as a click does.
+        """
         origin = sites.require_origin(url)
-        await addresses.require_public(url)  # before the site question and the load
+        reach = not same_site or tab in self._on_listed
+        await self._require(url, reach)  # before the site question and the load
         if origin != same_site:
             await self._ask_site(origin)
         else:
@@ -1554,6 +1584,7 @@ class BrowserToolProvider(BaseToolProvider):
         own = self._own(info)
         if fresh:
             self._made.add(own.id)  # melo made this tab, so melo closes it
+        self._opened(own.id, url, info.url, reach)
         return await self._read_tab(own, {origin})
 
     def _current(self, tab: str | None) -> str:
@@ -1587,11 +1618,12 @@ class BrowserToolProvider(BaseToolProvider):
             try:
                 # A search is browsing: the chat's Browser card says so, and shows the results' tab while it is read.
                 await self._begin("search")
-                self._allow_local()  # the search asks no policy: no local address
-                await addresses.require_public(url)
+                self._allow_local()  # the search asks no policy: no written address
+                await self._require(url, True)
                 info = await self._driver.open(url, new_tab=True)
                 own = self._own(info)
                 self._made.add(own.id)
+                self._opened(own.id, url, info.url, True)
                 self._tab = own.id
                 try:
                     await self._read_tab(own, {origin})
@@ -2053,10 +2085,12 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError(_stale_ref(ref))
         return tab_id, snap, item
 
-    async def _check_destination(self, url: str, origin: str, done: set[str]) -> None:
-        """Check the address a click or a form would send the browser to, before anything is sent."""
+    async def _check_destination(
+        self, url: str, origin: str, done: set[str], tab: str
+    ) -> None:
+        """Check the address a click or a form on *tab*'s page (on *origin*) would send the browser to, before anything is sent."""
         target = sites.require_origin(url)
-        await addresses.require_public(url)
+        await self._require(url, tab in self._on_listed)
         if target != origin:
             await self._ask_site(target)
         done.add(target)
@@ -2110,7 +2144,7 @@ class BrowserToolProvider(BaseToolProvider):
         """
         self._no_public_boxes(snap, item)
         if item.submit:
-            await self._check_destination(item.submit, snap.origin, done)
+            await self._check_destination(item.submit, snap.origin, done, snap.tab)
         rows = list(item.form)
         if typed is not None:
             rows = [*fields.form_pairs([["typed", typed]]), *rows]
@@ -2550,7 +2584,8 @@ class BrowserToolProvider(BaseToolProvider):
                 if not url:
                     raise BrowserError(_NO_ADDRESS)
                 sites.require_origin(url)
-                await addresses.require_public(url)
+                await self._require(url, short in self._on_listed)
+                self._place(short, url)
                 urls[short] = url
             except BrowserError as exc:
                 problem = problem or exc
@@ -2982,17 +3017,74 @@ class BrowserToolProvider(BaseToolProvider):
         return f"{result}\n{text}"
 
     def _allow_local(self, *, revoke: bool = False) -> None:
-        """Tell the driver which servers on this computer the person wrote in this run, before a step loads anything (#547), or take that back (*revoke*).
+        """Tell the driver which servers on this computer the person wrote in this run, before a step loads anything (#547), or take that back (*revoke*), and the listed test servers.
 
         The driver gets the run's reader, not its answer, so its pages reach
         exactly those servers and no other local address for as long as the
         run lasts: the reader of a run that is over says none. None when the
-        run has no policy that says so. A driver that blocks nothing by itself
-        (Safari: the address check is melo's own) has nothing to tell.
+        run has no policy that says so. The listed servers are the session's
+        config, so *revoke* leaves them; the driver lets a page reach one only
+        as :meth:`_require` does (melo's own navigation, or a page on one). A
+        driver that blocks nothing by itself (Safari: the address check is
+        melo's own) has nothing to tell.
         """
         allow = getattr(self._driver, "allow_local", None)
         if callable(allow):
-            allow(None if revoke else local_ports.written_reader())
+            allow(None if revoke else local_ports.written_reader(), self._listed)
+
+    async def _require(self, url: str, reach: bool) -> None:
+        """Check *url* as melo's browser opens addresses: the one place the tools decide who reaches a listed test server.
+
+        *reach* says the asker may: melo's own navigation (``browser_open``, a
+        search), a step on a tab in ``_on_listed`` (its page is on a listed
+        server, opened by melo or reached from a page on one), or a click or a
+        form on such a page. Only then is the list passed to
+        :func:`addresses.require_public`; for any other asker (a tab that
+        appeared by itself, a page on the public web, its frames) the address
+        meets the checks with no list, as when nothing is listed. A listed
+        server reached is marked for the step. Limit: Safari tells only where
+        a page landed, so a public page passed through inside one step is not
+        seen.
+        """
+        allow = self._listed if reach else None
+        await addresses.require_public(url, allow)
+        if allow is not None and allow.listed(url) is not None:
+            self._seen_listed()
+
+    def _is_listed(self, url: str) -> bool:
+        """Whether *url* (or an origin) is on a listed test server, as the list reads it."""
+        return self._listed is not None and self._listed.listed(url) is not None
+
+    def _opened(self, tab: str, url: str, landed: str, reach: bool) -> None:
+        """melo's navigation to *url*, which *reach* says may reach a listed server, put *tab* at *landed*: the one way into ``_on_listed``.
+
+        The tab is in it when both are on the same listed origin; a redirect to
+        another origin, no address told, or an address let through for another
+        reason (a server the person wrote) leaves it out.
+        """
+        same = bool(landed) and sites.origin_of(landed) == sites.origin_of(url)
+        if reach and same and self._is_listed(url):
+            self._on_listed.add(tab)
+        else:
+            self._on_listed.discard(tab)
+
+    def _place(self, tab: str, url: str) -> None:
+        """*tab*'s page, just admitted, is at *url*: off a listed server, the tab leaves ``_on_listed`` for good."""
+        if not self._is_listed(url):
+            self._on_listed.discard(tab)
+
+    def _seen_listed(self) -> None:
+        """This step reached a listed test server: its event is marked, and its result says so."""
+        self._listed_seen = True
+        web_local.mark()
+
+    def _with_listed(self, result: str | ToolOutput) -> str | ToolOutput:
+        """*result* with :data:`web_local.NOTE` when the step reached a listed test server."""
+        if not self._listed_seen:
+            return result
+        if isinstance(result, ToolOutput):
+            return dataclasses.replace(result, text=f"{result.text}\n{web_local.NOTE}")
+        return f"{result}\n{web_local.NOTE}"
 
     def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""
@@ -3069,7 +3161,7 @@ class BrowserToolProvider(BaseToolProvider):
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
-            await self._check_destination(item.href, snap.origin, done)
+            await self._check_destination(item.href, snap.origin, done, tab_id)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
         act = Act("click", snap.url, item, doc=snap.doc, send=bool(item.submit))
@@ -3372,7 +3464,7 @@ class BrowserToolProvider(BaseToolProvider):
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
-            await self._check_destination(item.href, origin, done)
+            await self._check_destination(item.href, origin, done, tab_id)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
         if hit.at is not None:
@@ -3665,6 +3757,49 @@ class BrowserToolProvider(BaseToolProvider):
         return ToolOutput(
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
+        )
+
+    async def watcher_picture(self, tab: str | None = None) -> Shot | None:
+        """A picture of *tab* (default the current one) for somebody who watches, not for the model.
+
+        None when the chat has no page there; :class:`BrowserError` when the page
+        must not be pictured now, also at once while the person has a page of the
+        chat (a take-over: the pages are theirs, and a step waits for them under
+        the lock, which a watcher must not do). A step that is running is waited
+        for: it runs under the steps' own lock, so a picture never interleaves
+        with one, and it changes nothing a step sees or does: it
+        keeps no view or point (``_views``, ``_points``), draws no mark, asks no
+        question, shows no step on the chat's card and adds nothing to the chat.
+        The address is checked before and after, as a step checks it
+        (:meth:`_recheck`), but a page found at a private address is only not
+        pictured: it is not blanked, and no site is approved or refused here. A
+        page on a listed test server is pictured like a public one, when its tab
+        is on one (``_on_listed``).
+        """
+        if self._owners.held:
+            raise BrowserError("The person has the page.")
+        async with self._lock:
+            tab_id = tab or self._tab
+            if tab_id is None or tab_id not in self._origins or tab_id not in self._raw:
+                return None
+            raw = self._raw[tab_id]
+            await self._public_now(raw, tab_id)
+            shot = await self._driver.screenshot(raw)
+            # A page that moved while it was pictured.
+            await self._public_now(raw, tab_id)
+            return shot
+
+    async def _public_now(self, raw: str, tab: str) -> None:
+        """:class:`BrowserError` unless the browser says tab *raw* (*tab* for melo) is at a public address, or on a listed test server while the tab is in ``_on_listed``. It changes nothing.
+
+        The list is passed only for a tab in that set, as a step on it would;
+        it asks no site, marks nothing and does not move the tab in or out of
+        the set (see :meth:`_require`, which a watcher must not call).
+        """
+        url = await self._driver.location(raw)
+        sites.require_origin(url)
+        await addresses.require_public(
+            url, self._listed if tab in self._on_listed else None
         )
 
     # ── Other apps' windows ──

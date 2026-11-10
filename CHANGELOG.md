@@ -55,7 +55,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - When a click changes nothing on a page, melo is told so and tries another way; after it acts on a page it reads only what changed.
 - The hosts of one site count as one site, so one allow covers them.
 - A human check from a known provider asks you once per chat, in Chrome, in Ask and in Auto: Always in this chat covers such checks in that chat, its tasks and its chores (in the main chat, every chat). Other boxes and Safari ask as before.
-- The browser tools never open this computer, its local network or melo's own console.
+- The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
 
 ### Memory
 
@@ -124,4 +124,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every direct run is recorded, so the console's Workers view lists it.
 - `melo-retrieve` and `melo-procedures` compare memory retrievers and replay recorded runs offline.
 - The Python API (experimental) has events, stopping, approvals and sessions.
+- `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
 - The MIT license.

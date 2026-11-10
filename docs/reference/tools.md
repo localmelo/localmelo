@@ -153,8 +153,11 @@ call itself asks nothing; each site passes the site gate below first.
 
 ### Test servers on this computer
 
-A developer setting for a test that needs `web_fetch` to read a fixture page served on this
-computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
+A developer setting for a test that needs `web_fetch` to read, or melo's browser to open and act
+on, a fixture page served on this computer. `[tools] web_fetch_allow_local` is empty, so off, by
+default; it keeps the name it had when it was `web_fetch`'s alone. List only servers whose pages you
+wrote: a page on a listed server is trusted like your own app, and [SECURITY.md](../../SECURITY.md)
+says what such a page can still reach.
 
 - **Set it** in the config file, `web_fetch_allow_local = ["127.0.0.1:8123"]`, or for one run with
   `-X tools.web_fetch_allow_local=127.0.0.1:8123` (several entries are separated by commas).
@@ -173,7 +176,7 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
   computer answers at `127.0.0.1` from any of its addresses. A model server that is in neither
   the config nor the `-u` URL of the run is not protected: list only ports that serve test pages.
 - **It is read when a chat or a task starts.** A chat or task takes the list, and the ports
-  above, from its config when its `web_fetch` is made; a change to the file reaches the chats
+  above, from its config when its tools are made; a change to the file reaches the chats
   and tasks started after it, not the ones already open.
 - **A listed server asks the person.** The site gate above lets a site the user's words
   name be read at once; a listed server is not read that way, because naming `127.0.0.1` does not
@@ -188,12 +191,19 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
 - **Redirects meet the same list.** A listed address may redirect to another listed address and
   never to an unlisted one, and a page that is not itself a listed address cannot send melo to
   one. The site gate above still applies.
-- **Only `web_fetch` reads the list.** The browser tools use the guard's own checks with no list.
+- **The browser opens a listed server only as melo's own step.** `browser_open` reaches it, and
+  so does a page already on a listed server (its links, clicks, frames, forms, its own
+  requests). A request of any other page to it stays refused as before: a public page's
+  link, redirect, frame or background request, a redirect of the address melo opened to
+  another listed server, and a new tab a page opens. In Chrome in the background a page's own
+  request is judged by the page that sent it (its `Origin`, else its `Referer`), and one that
+  carries neither is blocked; Safari does not check a page's own requests, so there only where
+  a page lands and its frames are checked. The site question is asked as for any site.
 - **A call cannot set it.** A `shell_exec` or `python_exec` call that runs
   `melo config set tools.web_fetch_allow_local …`, or passes the key with `-X` or `--set`, is a
   change to localmelo itself: it asks every time, is never granted, and Auto mode refuses it. A
   key the call builds at run time is undecided.
-- **It is marked.** A fetch the list allows adds `allowed_local: true` to the call's
+- **It is marked.** A fetch or a browser step the list allows adds `allowed_local: true` to the call's
   `tool.finished` event (see [Events](events.md#toolfinished)) and the line `[This address is a test
   server on this computer, which [tools] web_fetch_allow_local lists.]` to what the call shows,
   an error included. While the list has an entry, the model's note about `web_fetch` gains one

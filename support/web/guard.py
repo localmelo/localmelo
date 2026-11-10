@@ -31,12 +31,14 @@ checks every answer, and connects to an address it checked, so a DNS answer
 that changes between the check and the connection is never used. It checks
 again on every redirect.
 
-One hook lets a non-public address through, and only a fetcher is given one:
-tests and screenshots pass a function for a test host name, and the developer
-setting ``[tools] web_fetch_allow_local`` passes a :class:`LocalAllow`, which
-lets through exactly the loopback addresses and ports it lists, written as
-addresses and never as names. Without a hook, as the browser calls these
-checks, nothing non-public passes.
+One hook lets a non-public address through: tests and screenshots pass a
+fetcher a function for a test host name, and the developer setting ``[tools]
+web_fetch_allow_local`` passes a :class:`LocalAllow`, which lets through
+exactly the loopback addresses and ports it lists, written as addresses and
+never as names. The fetcher has it for every request; the browser passes it
+only for a step that may reach a listed server (see
+:mod:`localmelo.support.browser.addresses`). Without a hook nothing
+non-public passes.
 """
 
 from __future__ import annotations
@@ -177,6 +179,7 @@ class LocalAllow:
 
     It has no port to read in the plain hook call, so :func:`_let_through`
     asks :meth:`allows` instead; called as a plain hook it refuses.
+    :meth:`listed` reads a whole URL the same way, for the browser.
     """
 
     def __init__(
@@ -195,6 +198,20 @@ class LocalAllow:
         if host != str(ip) or not ip.is_loopback or (host, port) not in self.sites:
             return False
         return self._protected is None or port not in self._protected()
+
+    def listed(self, url: object) -> tuple[str, int] | None:
+        """The listed site *url* names, as :func:`check_url` reads it and :meth:`allows` lets it through; ``None`` for any other.
+
+        Anything :func:`check_url` refuses (a name, another spelling of the
+        address, a user part, no http or https) names no listed site.
+        """
+        try:
+            target = check_url(url if isinstance(url, str) else "", self)
+        except AddressError:
+            return None
+        if target.ip is None or not self.allows(target.host, target.ip, target.port):
+            return None
+        return target.host, target.port
 
 
 def _let_through(allow: AllowHook | None, host: str, ip: IPAddress, port: int) -> bool:
