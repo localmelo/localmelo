@@ -440,6 +440,20 @@ def never_granted(tool_name: str) -> bool:
     return tool_name.startswith(NEVER_GRANTED)
 
 
+def never_kept(request: ApprovalRequest) -> bool:
+    """Whether no answer to *request* may ever be kept, by the person or by Auto.
+
+    The one list the offer (:func:`grant_offered`), Auto's keep
+    (:func:`stays_for_chat`) and the grants table's check read: a question of
+    :data:`NEVER_GRANTED`, or a step of a card-only kind (:data:`CARD_ONLY`:
+    paying, an account's settings, opening an app).
+    """
+    review = request.review
+    return never_granted(request.tool_name) or (
+        review is not None and bool(set(review.categories) & CARD_ONLY)
+    )
+
+
 # The site questions whose answer on auto mode's card may be kept for the chat
 # (#465): opening or reading a site, and clicking or choosing on it. Typing and
 # sending a form never (:data:`NEVER_GRANTED`).
@@ -536,14 +550,12 @@ def stays_for_chat(request: ApprovalRequest) -> bool:
     workspace, or a step of a card-only kind (:data:`CARD_ONLY`): nothing
     implicit covers what the person must allow themselves.
     """
-    review = request.review
     return (
         request.outside is None
         and request.tool_name.startswith(STAYS_FOR_CHAT)
-        and not never_granted(request.tool_name)
+        and not never_kept(request)
         and bool(request.arguments.get("site"))
         and ("url" not in request.arguments or plain_address(request.arguments["url"]))
-        and (review is None or not set(review.categories) & CARD_ONLY)
     )
 
 
@@ -553,10 +565,10 @@ def grant_offered(request: ApprovalRequest) -> bool:
     A routine or unreviewed call of a tool whose answers may be kept
     (:func:`~localmelo.melo.contracts.review.offers_grant`), or a site auto
     mode stopped only as not asked for (:func:`site_grant`). Never a
-    high-impact call, typing, a form sent, or a path outside the workspace
-    (whose folder has a grant of its own, #405).
+    high-impact call, anything :func:`never_kept` names, or a path outside the
+    workspace (whose folder has a grant of its own, #405).
     """
-    if request.outside is not None or never_granted(request.tool_name):
+    if request.outside is not None or never_kept(request):
         return False
     return offers_grant(request.review) or site_grant(request) or window_grant(request)
 

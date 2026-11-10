@@ -61,13 +61,14 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     grant_offered,
     never_granted,
+    never_kept,
     question_site_key,
     site_covers,
     stays_for_chat,
     whole_site,
 )
 from localmelo.melo.contracts.folders import above_home, never_offered
-from localmelo.melo.contracts.review import CARD_ONLY, url_site
+from localmelo.melo.contracts.review import url_site
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
@@ -281,9 +282,10 @@ def check_grant(
     ):
         raise GrantRefusedError("an Allow once is never kept")
     if request is not None:
-        review = request.review
-        if review is not None and set(review.categories) & CARD_ONLY:
-            raise GrantRefusedError("money and account steps ask every time")
+        if never_kept(request):
+            raise GrantRefusedError(
+                "money, account and app steps, typing and forms ask every time"
+            )
         if kind != "folder" and request.outside is not None:
             raise GrantRefusedError("a folder outside the workspace has its own grant")
         if by == "person" and kind != "folder" and not grant_offered(request):
