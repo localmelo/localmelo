@@ -81,6 +81,7 @@ from localmelo.support.task_cli import ending_words
 from ..auto_blocks import denied_steps
 from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import FINISHED, reply_language
+from ..handover import words_of
 from ..task_endings import job_finished, shown
 from ..task_files import files_line
 from ..task_policy import is_persons_task
@@ -516,7 +517,11 @@ class TaskFollowups:
         # What the task and the person wrote is fenced with a fresh nonce, as a
         # page is: nothing in it can close its block or pose as melo's words.
         nonce = secrets.token_hex(4)
-        asked = str(record.spec.get("user_words") or record.spec.get("objective") or "")
+        # The person's words, never the chat's reading of them (with_reading).
+        asked = str(
+            record.spec.get("user_words")
+            or words_of(str(record.spec.get("objective") or ""))
+        )
         if asked:
             lines.append("What the user asked:")
             lines += fence("request", _line(asked, REQUEST_CHARS), nonce)
