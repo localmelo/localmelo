@@ -540,42 +540,33 @@ def test_reads_whose_words_look_like_failures_leave_oldest_first() -> None:
 
 @pytest.mark.parametrize("case", ["no checkpoint", "checkpoint", "ended task"])
 def test_where_work_stands_without_a_model_call(case: str) -> None:
-    last = {
-        "state": "parts 1-40 read",
-        "results": "notes.md holds 1-3",
-        "failed": ["part 0 does not exist"],
-        "works": ["three parts a step"],
-        "next": ["read part 41"],
-        "step": 9,
-        "written": True,
-    }
-    fetch = {"url": "https://a.test/doc", "part": 41}
-    calls = [
-        cue("c1", "web_fetch", fetch),
-        cue("c2", "shell_exec", {"command": "make"}, exit_code=2),
-        cue("c3", "file_write", {"path": "notes.md"}, outcome="unknown"),
-    ]
+    last = {"state": "parts 1-40 read", "failed": ["part 0 is missing"],
+            "works": ["three parts a step"], "next": ["read part 41"]}  # fmt: skip
     found = standing(
         goal=TASK,
-        calls=calls,
+        calls=[
+            cue("c1", "web_fetch", {"url": "https://a.test/doc", "part": 41}),
+            cue("c2", "shell_exec", {"command": "make"}, exit_code=2),
+            cue("c3", "file_write", {"path": "notes.md"}, outcome="unknown"),
+        ],
         files=["notes.md"],
-        last=last if case != "no checkpoint" else None,
+        last=None if case == "no checkpoint" else last,
         state="Wrote sections 1-4." if case == "ended task" else "",
     )
-    assert (found.goal, found.files) == (TASK, ["notes.md"])
     # Every call, a failure and an unknown effect named as such.
-    assert found.covered == [
+    assert (found.goal, found.files, found.covered) == (TASK, ["notes.md"], [
         "web_fetch https://a.test/doc part 41",
         "shell_exec `make` (exit 2)",
         "file_write notes.md (effect unknown)",
-    ]
-    if case == "no checkpoint":
-        assert not found.written and not (found.state or found.failed or found.next)
-        return
-    # What failed and what works come from the run's last checkpoint; the
-    # freshest words take the place of its state.
-    assert (found.failed, found.works) == (last["failed"], last["works"])
-    assert found.state == (
-        "Wrote sections 1-4." if case == "ended task" else last["state"]
+    ])  # fmt: skip
+    # What failed and works come from the last checkpoint; the freshest words
+    # take the place of its state.
+    notes = (found.state, found.failed, found.works, found.next)
+    assert (
+        notes
+        == {
+            "no checkpoint": ("", [], [], []),
+            "checkpoint": tuple(last.values()),
+            "ended task": ("Wrote sections 1-4.", *list(last.values())[1:]),
+        }[case]
     )
-    assert found.next == last["next"] and found.written

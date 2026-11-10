@@ -263,15 +263,11 @@ def standing(
 ) -> WorkCheckpoint:
     """Where a run or a task stands now, for whoever goes on with it; no model call.
 
-    The model's fields are those of *last*, the fields of the last checkpoint
-    the run made (as its ``checkpoint`` notice keeps them), when it made one.
-    The model's freshest words, when the caller has them, take the place of
-    that state (*state*) and of its next steps (*then*): they are newer. The
-    computed fields are as of now: *goal* (the request's own words), *files*
-    (what the run wrote or edited) and every call it made (*calls*, after the
-    lines of the work before it, *earlier*), none of whose results the reader
-    holds. Within the sizes of a checkpoint (or *chars* of the model's fields
-    and *lines* of calls), cut as one is (:data:`CUT_ORDER`).
+    The model's fields of *last* (the run's last checkpoint, as its notice
+    keeps them), with its freshest words, when given, in place of the state and
+    the next steps; *goal*, *files* and every call (after the lines of the work
+    before it, *earlier*) as of now. Cut as a checkpoint is (:data:`CUT_ORDER`),
+    to *chars* of the model's fields and *lines* of calls.
     """
     notes = last or {}
 

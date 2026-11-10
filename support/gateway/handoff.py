@@ -6,16 +6,10 @@ fresh task, its successor. Either way the new task carries one packet, a
 :class:`Handoff`, kept as ``TaskSpec.handoff``. It is made here, by
 :func:`from_chat` or :func:`from_task`, and no other code copies its parts:
 
-- where the work stands (``checkpoint``), the fields of one
-  :class:`~localmelo.melo.schema.WorkCheckpoint` made by
-  :func:`~localmelo.melo.agent._checkpoint.standing` from melo's records: the
-  person's request, the files written, every call made there (failed, or of
-  unknown effect when no result was kept, as such), what the run's last work
-  checkpoint noted (what failed, what works) and the model's freshest words
-  (the chat's progress and what is left, or the ended task's last answer);
-- where the work began (``from``, ``source``, ``turn``), how that ended
-  (``ended``) and a chat's or melo's ``note``: data for the task, never the
-  person's;
+- where the work stands (``checkpoint``, the fields of one work checkpoint,
+  :func:`work_standing`), where it began (``from``, ``source``, ``turn``),
+  how that ended (``ended``) and a chat's or melo's ``note``: data for the
+  task, never the person's;
 - what the job carries however far it goes, so that nothing starts over on the
   way: the person's request and their messages since (``request``, ``words``,
   ``notes``, the newest that fit), the steps refused in it and the calls whose
@@ -48,7 +42,7 @@ from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import cue
 from localmelo.melo.agent._checkpoint import standing
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.sign_in import spent
 from localmelo.melo.contracts.task_files import written_paths
 from localmelo.melo.schema import (
@@ -214,14 +208,10 @@ async def from_chat(
     remaining: str,
     skip: Collection[str] = (),
 ) -> Handoff:
-    """The packet of the chat's running *turn* that hands its remaining work on.
-
-    Where its work stands (:func:`work_standing`: its calls so far, one of a
-    tool in *skip*, the call that hands the work on, still running, left out;
-    the run's last work checkpoint; the model's *account* and *remaining*), the
-    steps refused in the turn and the person's message (*typed* as they typed
-    it), which is the checkpoint's goal.
-    """
+    """The packet of the chat's running *turn* that hands its remaining work on:
+    where it stands (its calls, one still running of a tool in *skip* left out,
+    the model's *account* and *remaining*, the person's *typed* words as the
+    goal), and the steps refused in the turn."""
     calls = [
         c
         for c in await turn_calls(store, turn.session_id, turn)
@@ -261,12 +251,11 @@ async def from_task(
 ) -> Handoff:
     """The packet of the successor of *record*, an ended task, asked for *by* whom.
 
-    It keeps what *record*'s job carries and adds *record*'s own: where its
-    work stands (:func:`work_standing`, after the calls of the job before it,
-    with what it said last as the freshest words, never a placeholder for no
-    answer) and the steps refused in it. The person's *note* joins their
-    messages; anyone else's is a note in the packet. *ended* is how *record*
-    ended, in a few words.
+    It keeps what *record*'s job carries and adds where *record*'s work stands
+    (after the job's earlier calls; what it said last is the freshest words,
+    never a placeholder for no answer) and the steps refused in it. The
+    person's *note* joins their messages; anyone else's is a note in the
+    packet. *ended* is how *record* ended, in a few words.
     """
     session = await store.get_session(record.task_id)
     job = Handoff.read(record.spec, session.meta if session else None)
@@ -360,7 +349,7 @@ def work_standing(
         then=then,
         **sizes,
     )
-    return WorkCheckpoint(**{k: _redacted(v) for k, v in found.to_dict().items()})
+    return WorkCheckpoint(**{k: redacted(v) for k, v in found.to_dict().items()})
 
 
 def _unknown(calls: Sequence[TurnCall]) -> list[dict[str, Any]]:
@@ -395,14 +384,6 @@ def _status(call: TurnCall) -> str:
     if call.status == "cancelled" and call.error == CALL_NOT_STARTED:
         return "failed"
     return _CALL_STATUS.get(call.status, "unknown")
-
-
-def _redacted(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_secrets(value)[0]
-    if isinstance(value, list):
-        return [_redacted(item) for item in value]
-    return value
 
 
 def _checkpoint_of(packet: Mapping[str, Any]) -> WorkCheckpoint:
