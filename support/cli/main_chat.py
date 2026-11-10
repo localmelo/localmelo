@@ -767,7 +767,7 @@ def _outside(found: object) -> OutsideAccess | None:
     return OutsideAccess(path, folder, access, grantable)
 
 
-def kept_offered(pending: Mapping[str, Any]) -> bool:
+def gateway_keeps(pending: Mapping[str, Any]) -> bool:
     """Whether the gateway says an answer to *pending* may be kept for the chat.
 
     The gateway's word, read as the console's card reads it: ``outside.grantable``
@@ -1211,7 +1211,7 @@ class MainChat:
             request = approval_request(pending)
             # A kept answer is offered only where the gateway says so. One it
             # refuses all the same (409 not_offered) asks again without it.
-            offered = kept_offered(pending)
+            offered = gateway_keeps(pending)
             while True:
                 # The main chat's own "allow" counts in every chat: its list says so.
                 decision = await self.host.approver.ask(
