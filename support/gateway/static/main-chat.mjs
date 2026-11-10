@@ -181,6 +181,18 @@ export function timeline(turns, cards, now, echoes = []) {
   return out;
 }
 
+/**
+ * The `seen` a send carries (#617): the stored id of the newest card or line among *items* (what
+ * `timeline` gave the page to draw), kept below the oldest of *held*, the card frames held back
+ * while the person types. Only what was on the page counts; 0 for nothing.
+ */
+export function drawnUpTo(items, held = []) {
+  const ids = (list) => list.map(Number).filter(Number.isInteger);
+  const drawn = ids(items.map((item) => (item.kind === "card" ? item.card.id : item.kind === "echo" ? item.echo.id : NaN)));
+  const waiting = ids(held.map((frame) => frame?.id));
+  return Math.max(0, Math.min(Math.max(0, ...drawn), Math.min(Infinity, ...waiting) - 1));
+}
+
 /** Side chats newest first, under a heading for each day. */
 export function byDay(sessions, now) {
   const groups = [];

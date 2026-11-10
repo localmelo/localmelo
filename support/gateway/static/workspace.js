@@ -40,7 +40,7 @@ import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnP
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, stepState, taskEnds, timeline, unansweredSleep } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, drawnUpTo, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, stepState, taskEnds, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
   acknowledgeNote,
@@ -1277,7 +1277,10 @@ function mainNodes(view, turns, placed) {
   // A task nothing more will run for takes no more changes: its lines lose their buttons. One its chat still
   // follows up on keeps them, Stop included (#431).
   const ended = endedTasks(view?.cards ?? [], echoes);
-  return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
+  const items = timeline(turns, view?.cards ?? [], nowSeconds(), echoes);
+  // What a send says the person had in front of them: the newest card or line drawn here, never one held back.
+  if (view) view.seen = drawnUpTo(items, heldCards.filter((held) => held.view === view).map((held) => held.frame));
+  return items.flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
     if (item.kind === "card") {
       const card = item.card;
@@ -2353,6 +2356,8 @@ function outboxNode(entry, slot) {
 async function send({ asTask = false } = {}) {
   if (workerMode) return;
   lastKey = 0;
+  // Before the held cards show: what was on the page when the person sent.
+  const seen = seenIn(S.activeId ?? "new");
   showHeld();
   const draft = input.value;
   if (!asTask && parseCommand(draft)) {
@@ -2369,10 +2374,15 @@ async function send({ asTask = false } = {}) {
     }
     return;
   }
-  return queueMessage(draft.trim(), { clearInput: true, asTask });
+  return queueMessage(draft.trim(), { clearInput: true, asTask, seen });
 }
 
-async function queueMessage(text, {clearInput = false, asTask = false, carry = null} = {}) {
+/** The newest card or line drawn in the chat of *slot* (`drawnUpTo`), or undefined for another chat's page. */
+function seenIn(slot) {
+  return S.view && S.view.id === slot ? S.view.seen : undefined;
+}
+
+async function queueMessage(text, {clearInput = false, asTask = false, carry = null, seen = seenIn(S.activeId ?? "new")} = {}) {
   if (workerMode) return;
   // No model is configured: nothing is sent and the words stay in the box. The guide shows where the person is.
   if (S.health?.configured === false) {
@@ -2414,6 +2424,7 @@ async function queueMessage(text, {clearInput = false, asTask = false, carry = n
     error: "",
     ...(carried.length ? { media: carried } : {}),
     ...(asTask ? { asTask } : {}),
+    ...(Number.isInteger(seen) ? { seen } : {}),
   };
   if (clearInput) {
     input.value = "";
@@ -2534,7 +2545,13 @@ async function submit(slot, key, text) {
     }
     const asTask = S.outbox[slot]?.asTask === true;
     const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
-      body: { text, client_request_id: key, ...requestOf(S.outbox[slot]?.media ?? []), ...(asTask ? { as_task: true } : {}) },
+      body: {
+        text,
+        client_request_id: key,
+        ...requestOf(S.outbox[slot]?.media ?? []),
+        ...(asTask ? { as_task: true } : {}),
+        ...(Number.isInteger(S.outbox[slot]?.seen) ? { seen: S.outbox[slot].seen } : {}),
+      },
     });
     // A repeat is accepted too, so either way the text is not a draft now.
     if (S.outbox[slot]?.clientRequestId !== key) return;

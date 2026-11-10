@@ -1449,7 +1449,8 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
   holds for the one task of the chat the task table has waiting for the person
   when that task asked (it ended needing the person; one that ran out of steps
   takes none) and what the chat showed last is that task's request (its card,
-  its blocked step, or melo's follow-up on it): no message of the person's
+  its blocked step, or melo's follow-up on it), counting only cards and echoes
+  at or below the send's `seen` (what the client had drawn): no message of the person's
   (counted at the end of its turn) came after it and the words name no other
   task. The message goes to it as a named message does. A plain yes (the whole
   message one of `允许`, `可以`, `好`, `好的`, `同意`, `行`, `yes`, `ok`,
@@ -1900,6 +1901,11 @@ is no `workspace` here — the session's own folder is the Agent's.
   `invalid_workspace`, and the turn does not start.
 - `attachments` and `images` are as in a create. To add words to a turn that is running, use
   [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes) instead of waiting.
+- `seen` is optional on a chat: the stored `id` of the newest card or echo the client had drawn
+  in this chat when the person sent (one it holds back is not drawn). Only cards and echoes at or
+  below it count as what the chat showed, when a message goes to a task that asked
+  ([echoes](#echoes-in-the-main-chat)). Without it, or with a value that is not an integer, none
+  counts and the message goes to the chat's model as usual.
 
 ## POST /api/sessions/{id}/retry
 

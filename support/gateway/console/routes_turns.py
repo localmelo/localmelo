@@ -98,6 +98,10 @@ class TurnRequest(Body):
     client_request_id: str | None = None
     # The composer's Run as a task: the chat starts it as a task.
     as_task: bool = False
+    # The stored id of the newest card or line the client drew in this chat when
+    # the person sent (#617). Only an integer counts (:func:`_seen`); with none, a
+    # reply goes to no task by what the chat showed.
+    seen: Any = None
 
 
 class CreateRequest(Body):
@@ -257,6 +261,11 @@ class _Sent:
         self.whole = whole
         self.extras = extras
         self.staged = staged
+
+
+def _seen(value: Any) -> int | None:
+    """A send's ``seen`` when it is an integer, else ``None``: nothing counts as drawn."""
+    return value if type(value) is int else None
 
 
 def _marker(pictures: int, files: list[str]) -> str:
@@ -597,7 +606,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 None
                 if pictured
                 else await console.front_for(session_id).route(
-                    sent.typed, sent.whole, as_task=body.as_task, key=key
+                    sent.typed,
+                    sent.whole,
+                    as_task=body.as_task,
+                    key=key,
+                    seen=_seen(body.seen),
                 )
             )
             if echo is not None:
