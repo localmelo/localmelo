@@ -227,6 +227,59 @@ async def test_text_a_whole_reply_check_hides_is_never_shown(
     assert display.text().strip() == ""
 
 
+ECHO = ToolDef(
+    name="echo",
+    description="echo",
+    parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+)
+
+
+@pytest.mark.parametrize(
+    ("lines", "shown"),
+    [
+        # A call written as JSON over several lines: held until it is known.
+        (['{\n', '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], ""),
+        (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], ""),
+        # Prose, and a code block of a language, still stream.
+        (["Sure.\n", "{ is a brace.\n"], "Sure.\n{ is a brace.\n"),
+        (["```python\n", "print(1)\n", "```\n"], "```python\nprint(1)\n```\n"),
+    ],
+    ids=["json-lines", "json-fence", "prose", "code-block"],
+)
+async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
+    lines: list[str], shown: str
+) -> None:
+    display = Display("none")
+    seen: list[str] = []
+    content = "".join(lines)
+    llm = StreamLLM(
+        [[*lines, lambda: seen.append(display.text()), Message(role="assistant", content=content)]]
+    )
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await _scoped_chat(llm).plan_step([], [], [ECHO], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert seen == [shown]  # what showed before the reply came
+
+
+async def test_a_whole_reply_is_not_judged_as_streamed() -> None:
+    display = Display("none")
+    sent = Message(role="assistant", content="It is Paris.", thinking="It is Paris.")
+    llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
+    chat = _scoped_chat(llm)
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await chat.plan_step([], [], [], "hi")
+        # A streamed reply that repeats its reasoning is unfinished thinking; a
+        # whole one is an answer, as without a display.
+        assert not chat.unfinished(sent)
+        chat.streamed = True
+        assert chat.unfinished(sent)
+    finally:
+        STREAM_DISPLAY.reset(token)
+
+
 async def test_no_display_keeps_the_complete_reply_path() -> None:
     llm = StreamLLM([[Message(role="assistant", content="unused")]])
     reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
