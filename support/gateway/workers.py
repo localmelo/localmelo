@@ -3660,7 +3660,11 @@ class TaskWorkers:
             given = later.given if later is not None else {}
             body["allowances"].update({k: v for k, v in given.items() if k in keys})
             body["blocked"] = [
-                {**b, "can_allow": False, "used_at": b["used_at"] or ran.get(b["step_key"])}
+                {
+                    **b,
+                    "can_allow": False,
+                    "used_at": b["used_at"] or ran.get(b["step_key"]),
+                }
                 for b in body["blocked"]
             ]
         if record.state == "failed" and record.wait_reason == "invalid_workspace":

@@ -383,7 +383,10 @@ async def test_a_chore_run_that_used_all_its_steps_says_so_in_the_readers_langua
             "Ran out of steps",
         )
         # How it ended, as its task's page reads it (the Scheduled tab words it from this).
-        assert chore["last"]["ending"] == {"state": "draft", "reasons": ["out_of_steps"]}
+        assert chore["last"]["ending"] == {
+            "state": "draft",
+            "reasons": ["out_of_steps"],
+        }
         chinese = await client.get(
             "/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"}
         )
