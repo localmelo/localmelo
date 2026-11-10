@@ -412,6 +412,13 @@ NOTE_START: Final = (
 )
 
 
+def _melos_card(text: str) -> bool:
+    """Whether a task's turn *text* is a card melo wrote (a stop card, or one with
+    a note from its chat), not the request or a message the person sent."""
+    # A note may follow the request in a task that never ran: anywhere in the card.
+    return text.startswith(CARD_START) or NOTE_START in text
+
+
 def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     """A task's next turn text, and the person's own words when it differs.
 
@@ -428,8 +435,7 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
     own = typed or words_of(objective)
-    # A note may follow the request in a task that never ran: anywhere in the card.
-    if text.startswith(CARD_START) or NOTE_START in text:
+    if _melos_card(text):
         return text, own
     return text, (
         text.replace(objective, own, 1) if typed or own != objective else None
@@ -3036,6 +3042,7 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
+                            composed = _melos_card(text)
                             continued = await self.tasks.continued(task_id)
                             if (
                                 continued is not None
@@ -3047,6 +3054,7 @@ class TaskWorkers:
                                 # note is melo's: the person's words stay as they were.
                                 words = text if words is None else words
                                 text = f"{continued.check}\n\n{text}"
+                                composed = True
                             if (
                                 record.origin == "user_rule"
                                 or _moved(record.spec)
@@ -3066,6 +3074,10 @@ class TaskWorkers:
                             own: dict[str, Any] = (
                                 {} if words is None else {"words": words}
                             )
+                            if composed:
+                                # A stop card, a note, the restart's check: melo's
+                                # text, never read as words the person typed.
+                                own["composed"] = True
                             if not (
                                 is_persons_task(record.origin)
                                 or record.spec.get("user_words")

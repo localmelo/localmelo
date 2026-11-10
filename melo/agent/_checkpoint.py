@@ -35,11 +35,12 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._brief_aids import (
     COVERED_LINES,
+    Dropped,
     covered_lines,
     dropped_calls,
 )
@@ -246,6 +247,48 @@ def checkpoint_from(
     )
     fitted = _trimmed(written, min(chars, CHECKPOINT_CHARS), _model_size, CUT_ORDER)
     return dataclasses.replace(fitted, cut=cut or fitted is not written)
+
+
+def standing(
+    *,
+    goal: str,
+    calls: Sequence[Dropped],
+    files: Sequence[str],
+    last: Mapping[str, Any] | None = None,
+    earlier: Sequence[str] = (),
+    state: str = "",
+    then: str = "",
+    chars: int = CHECKPOINT_CHARS,
+    lines: int = COVERED_LINES,
+) -> WorkCheckpoint:
+    """Where a run or a task stands now, for whoever goes on with it; no model call.
+
+    The model's fields of *last* (the run's last checkpoint, as its notice
+    keeps them), with its freshest words, *state*, in place of the state when
+    given, and *then* in place of the next steps when given; *goal*, *files* and
+    every call (after the lines of the work before it, *earlier*) as of now. Cut
+    as a checkpoint is (:data:`CUT_ORDER`), to *chars* of the model's fields and
+    *lines* of calls.
+    """
+    notes = last or {}
+
+    def items(key: str) -> list[str]:
+        return [str(item) for item in notes.get(key) or () if str(item).strip()]
+
+    found = WorkCheckpoint(
+        goal=goal,
+        state=state.strip() or str(notes.get("state") or ""),
+        results=str(notes.get("results") or ""),
+        failed=items("failed"),
+        works=items("works"),
+        next=[then.strip()] if then.strip() else items("next"),
+        files=list(files),
+        covered=[*earlier, *covered_lines(calls, lines)][-lines:],
+        step=int(notes.get("step") or 0),
+        written=bool(state.strip() or then.strip() or notes.get("written")),
+    )
+    fitted = _trimmed(found, chars, _model_size, CUT_ORDER)
+    return dataclasses.replace(fitted, cut=fitted is not found)
 
 
 def _room(limit: int) -> int:

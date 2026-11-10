@@ -79,7 +79,7 @@ async def test_started_work_is_interrupted_once_with_recorded_evidence(
         await startup.run()
         task = await tasks.get_task(task.task_id)
         assert task.state == "interrupted" and task.crashes == 1
-        assert "completion unverified" in task.card
+        assert "not proof of completion" in task.card
         assert (await recovery.provenance(task.task_id)).unsafe_resume
         await startup.run()
         assert (await tasks.get_task(task.task_id)).crashes == 1
@@ -167,7 +167,7 @@ async def test_new_evidence_replaces_old_card_on_interruption(
         )
         await StartupRecovery(store, tasks).run()
         card = (await tasks.get_task(task.task_id)).card
-        assert "file_write started" in card and "without a recorded finish" in card
+        assert "- file_write a.txt (effect unknown)" in card
         assert card != "old card"
     finally:
         await store.aclose()

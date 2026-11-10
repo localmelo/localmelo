@@ -781,7 +781,7 @@ and `"run_id": ""`.
 
 | Type | When | `data` keys |
 |---|---|---|
-| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id`; `origin` (`ask_owner`) only on a turn the person did not begin; `images` (`[{sha256, mime_type, size_bytes}]`, references into the session's blobs) only on a turn with pictures the person added |
+| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id`; `origin` (`ask_owner`) only on a turn the person did not begin; `composed` (`true`) only on a turn whose text is not what a person typed; `images` (`[{sha256, mime_type, size_bytes}]`, references into the session's blobs) only on a turn with pictures the person added |
 | `turn.note` | The person added words to the turn while it ran ([`POST /api/turns/{turn_id}/notes`](api-v2.md#post-apiturnsturn_idnotes)): stored with the turn's events. `inbox.accepted` says when the run read it, its `offset` being `note`. | `turn`, `turn_id`, `note`, `text`; `images` (`[{sha256, mime_type, size_bytes}]`, references into the session's blobs) only on a note with pictures |
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
@@ -900,4 +900,4 @@ keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and
 `SESSION_EVENT_FIELDS` in `localmelo.support.sessions.store` each session
 type; `OPTIONAL_SESSION_EVENT_FIELDS` there lists the session keys an event
-may lack (`turn.started`'s `origin` and `images`).
+may lack (`turn.started`'s `origin`, `images` and `composed`).

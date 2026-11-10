@@ -20,15 +20,21 @@ import pytest
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent._earlier import EARLIER_HEAD
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.handoff import HANDOFF_HEADER
+from localmelo.support.gateway.handoff import (
+    HANDOFF_HEADER,
+    Handoff,
+    from_chat,
+    handoff_block,
+)
 from localmelo.support.gateway.handover import PICKED_HEADER
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TASK_PACK_HEADER
+from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.checker.test_redaction import AWS, GITHUB
 from localmelo.tests.memory.test_recall_list import add_turn
 from localmelo.tests.sessions.helpers import answer, tool_call
 
-from .conftest import all_events
+from .conftest import HOLDER, all_events, core_event
 from .test_ask_owner import Reply, rows, tool_results, until
 from .test_chat_owns_tasks import owner_console, say, started_task
 from .test_turn_writes import _post_turn, _wait_turn
@@ -240,12 +246,11 @@ async def test_a_chat_hands_the_rest_to_one_task_and_its_turn_ends_on_the_receip
             turn.id,
         )
         assert packet["key"] == f"turn:{chat}:{turn.id}"
-        assert (packet["remaining"], packet["account"]) == (REMAINING, PROGRESS)
-        assert [(d["tool"], d["status"]) for d in packet["done"]] == [
-            ("list_files", "succeeded"),
-            ("file_read", "failed"),
-        ]
-        assert all(isinstance(d["event"], int) for d in packet["done"])
+        # Where the work stands: the person's words, the model's, melo's records.
+        standing = packet["checkpoint"]
+        assert (standing["goal"], standing["state"]) == (TYPED, PROGRESS)
+        assert standing["next"] == [REMAINING]
+        assert standing["covered"] == ["list_files .", "file_read missing.md (failed)"]
         info = await console.store.get_session(record.task_id)
         assert info is not None and info.meta["started_by"] == "chat"
         # The receipt is the one line: no "Started" row beside it.
@@ -330,7 +335,7 @@ async def test_a_retried_hand_off_finds_its_one_task_and_admits_no_other(
         assert retried.status_code == 202, retried.text
         await _wait_turn(client, chat)
         [record] = await console.workers.tasks.list_tasks()
-        assert record.spec["handoff"]["remaining"] == REMAINING
+        assert record.spec["handoff"]["checkpoint"]["next"] == [REMAINING]
         assert len(await _handed(console, chat)) == 2
         again = (await console.store.list_turns(chat))[-1]
         assert record.title in again.answer
@@ -416,15 +421,25 @@ async def test_a_turn_given_a_password_keeps_its_work_here(
         assert told.startswith("Not done:") and "password" in told
 
 
-async def test_a_long_output_shows_its_start_and_leaves_no_part_of_a_secret(
+async def test_no_part_of_a_secret_reaches_the_packet(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Redacted whole before it is cut: wherever a cut falls, no piece of a key
-    reaches the packet, and a call's entry starts where its output starts."""
+    """A key the model wrote in its progress, one a call read, or one in a call's
+    argument where its line is cut, never reaches the packet, whole or in part."""
+    across = f"{'notes/' * 10}{GITHUB}.txt"  # the key lies across the cut
     main: list[Reply] = [
         tool_call("file_read", {"path": "keys.txt"}, "read-1"),
-        tool_call("file_read", {"path": "pad.txt"}, "read-2"),
-        hands_off(),
+        tool_call("file_read", {"path": across}, "read-2"),
+        tool_call(
+            "task_create",
+            {
+                "title": "Quarterly report",
+                "objective": REMAINING,
+                "continue_current": True,
+                "progress": f"{PROGRESS} The token is {GITHUB}.",
+            },
+            "hand-1",
+        ),
     ]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
@@ -434,18 +449,14 @@ async def test_a_long_output_shows_its_start_and_leaves_no_part_of_a_secret(
     ):
         lines = "".join(f"key {n}: {GITHUB}\n" for n in range(300))
         (tmp_path / "work" / "keys.txt").write_text(f"START of the keys\n{lines}")
-        # Folded spaces bring what the start's cut leaves of a key into view.
-        padded = f"START of the pad{' ' * 954}{GITHUB}\n"
-        (tmp_path / "work" / "pad.txt").write_text(padded)
         await say(client, console, TYPED)
         [record] = await console.workers.tasks.list_tasks()
         kept = json.dumps(record.spec["handoff"])
         pieces = {GITHUB[at : at + 8] for at in range(len(GITHUB) - 7)}
         assert not [piece for piece in pieces if piece in kept]
-        keys, pad = [
-            d for d in record.spec["handoff"]["done"] if d["tool"] == "file_read"
-        ]
-        assert "START of the keys" in keys["said"] and "START of the pad" in pad["said"]
+        assert (
+            record.spec["handoff"]["checkpoint"]["covered"][0] == "file_read keys.txt"
+        )
 
 
 async def test_a_stop_as_the_task_is_admitted_shows_it_and_it_runs(
@@ -502,3 +513,65 @@ async def test_a_chat_whose_folder_no_task_may_use_keeps_its_work(
         assert await _handed(console, str(console.main_id)) == []
         told = tool_results(models["main"], 1)[-1]
         assert told.startswith("Not done:") and "folder" in told
+
+
+async def test_a_hand_off_carries_the_persons_words_and_what_failed_and_works(
+    tmp_path: Path,
+) -> None:
+    """The model's progress restates the task: the goal is still the person's
+    sentence, and the chat's last work checkpoint says what failed and works."""
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        info = await store.create_session(workspace=str(tmp_path))
+        turn = await store.begin_turn(info.id, TYPED, holder=HOLDER)
+        notes = {
+            "state": "Two files listed.",
+            "failed": ["missing.md is not there"],
+            "works": ["notes.md has the numbers"],
+            "next": ["write section 1"],
+            "step": 2,
+            "written": True,
+        }
+        events = [
+            core_event("tool.started", seq=1, call_id="r1", name="file_read",
+                       arguments={"path": "missing.md"}),
+            core_event("tool.finished", seq=2, call_id="r1", name="file_read",
+                       status="error", error="No such file"),
+            core_event("notice", seq=3, kind="checkpoint", message="Noted.", step=2,
+                       attempt=1, detail={"units": 1, "checkpoint": notes}),
+        ]  # fmt: skip
+        await store.append_events(
+            info.id,
+            turn.turn,
+            [{**event, "run_id": turn.run_id} for event in events],
+            holder=HOLDER,
+        )
+        packet = await from_chat(
+            store,
+            turn,
+            typed=TYPED,
+            key="k",
+            account="Producing the team's Q3 summary document.",
+            remaining=REMAINING,
+        )
+        block = handoff_block(packet.to_json())
+        assert f"Goal: {TYPED}" in block
+        assert "State: Producing the team's Q3 summary document." in block
+        assert "Did not work: missing.md is not there" in block
+        assert "Works: notes.md has the numbers" in block
+        assert f"Next: 1. {REMAINING}" in block
+        assert "- file_read missing.md (failed)" in block
+    finally:
+        await store.aclose()
+
+
+def test_a_packet_kept_before_the_checkpoint_still_opens() -> None:
+    done = [{"tool": "file_read", "what": "a.md", "status": "failed"}]
+    old = {"from": "task", "source": "t0", "account": "Wrote 1-3.",
+           "remaining": "Write 4.", "done": done, "request": REQUEST}  # fmt: skip
+    block = handoff_block(old)
+    assert f"Goal: {REQUEST}" in block and "State: Wrote 1-3." in block
+    assert "Next: 1. Write 4." in block and "- file_read a.md (failed)" in block
+    job = Handoff.read({"objective": REQUEST, "handoff": old})
+    assert job.checkpoint["covered"] == ["file_read a.md (failed)"]

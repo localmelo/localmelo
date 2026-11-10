@@ -112,6 +112,9 @@ def turn_json(
     if turn.origin:
         # A turn the person did not type: the chat answers a task (#369).
         data["origin"] = turn.origin
+    if turn.composed:
+        # Its text is not what a person typed (a stop card, a task another made).
+        data["composed"] = True
     if events is not None:
         data["events"] = [event_json(event) for event in events]
     return data

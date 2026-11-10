@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._brief_aids import covered_lines, dropped_calls
+from localmelo.melo.agent._brief_aids import covered_lines, cue, dropped_calls
 from localmelo.melo.agent._checkpoint import (
     CHECKPOINT_AGAIN_NOTE,
     CHECKPOINT_CARRY_NOTE,
@@ -24,6 +24,7 @@ from localmelo.melo.agent._checkpoint import (
     EARLY_NOTE,
     _CheckpointLoop,
     checkpoint_from,
+    standing,
 )
 from localmelo.melo.agent._context_fit import units_to_leave
 from localmelo.melo.agent._request_accounting import request_proxy
@@ -544,3 +545,37 @@ def test_reads_whose_words_look_like_failures_leave_oldest_first() -> None:
     kept = [messages[0], *(m for u in units[4:] for m in u)]
     gone, _ = units_to_leave(messages, target=size(kept), estimate=size)
     assert [id(m) for m in gone] == [id(m) for u in units[:4] for m in u]
+
+
+@pytest.mark.parametrize("case", ["no checkpoint", "checkpoint", "ended task"])
+def test_where_work_stands_without_a_model_call(case: str) -> None:
+    last = {"state": "parts 1-40 read", "failed": ["part 0 is missing"],
+            "works": ["three parts a step"], "next": ["read part 41"]}  # fmt: skip
+    found = standing(
+        goal=TASK,
+        calls=[
+            cue("c1", "web_fetch", {"url": "https://a.test/doc", "part": 41}),
+            cue("c2", "shell_exec", {"command": "make"}, exit_code=2),
+            cue("c3", "file_write", {"path": "notes.md"}, outcome="unknown"),
+        ],
+        files=["notes.md"],
+        last=None if case == "no checkpoint" else last,
+        state="Wrote sections 1-4." if case == "ended task" else "",
+    )
+    # Every call, a failure and an unknown effect named as such.
+    assert (found.goal, found.files, found.covered) == (TASK, ["notes.md"], [
+        "web_fetch https://a.test/doc part 41",
+        "shell_exec `make` (exit 2)",
+        "file_write notes.md (effect unknown)",
+    ])  # fmt: skip
+    # What failed and works come from the last checkpoint; the freshest words
+    # take the place of its state.
+    notes = (found.state, found.failed, found.works, found.next)
+    assert (
+        notes
+        == {
+            "no checkpoint": ("", [], [], []),
+            "checkpoint": tuple(last.values()),
+            "ended task": ("Wrote sections 1-4.", *list(last.values())[1:]),
+        }[case]
+    )
