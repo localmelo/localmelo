@@ -109,6 +109,12 @@ class FakeGateway:
                                      "reasons": ["Installs x with pip."],
                                      "categories": ["install"]}  # fmt: skip
                 request["offers_chat"] = False
+            if "site" in text:  # a site Auto stopped as not asked for, not offered
+                request.update(tool_name="browser:https://news.example",
+                               arguments={"site": "news.example"}, offers_chat=False,
+                               review={"verdict": "high", "title": "Open news.example?",
+                                       "reasons": ["Not asked for."],
+                                       "categories": ["beyond_request"]})  # fmt: skip
             self.pending[session_id] = [request]
             self.emit(session_id, "approval.requested",
                       {k: request[k] for k in ("request_id", "call_id", "tool_name",
@@ -501,6 +507,13 @@ async def test_the_relay_offers_a_kept_answer_only_where_the_gateway_says_so(
     await _until(lambda: setup.out.text().count("Ran it.") == 2)
     answered = [r[2]["choice"] for r in gateway.requests if r[1] == "/api/approvals/r1"]
     assert answered == ["deny", "session", "once"]
+    # The gateway's word sets where the list starts too: not kept, it starts on No.
+    assert session.enter("approve site") is None
+    await _until(lambda: session.approver.pending is not None)
+    site = session.approver.pending
+    assert site is not None and not site.offer_session and site.selected == 2
+    session.approver.answer("deny")
+    await setup.idle()
 
 
 async def test_a_high_impact_call_offers_no_grant_and_starts_on_no(

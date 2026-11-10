@@ -788,7 +788,7 @@ class TerminalApprover:
             offer_always=outside is not None and kept,
             everywhere=everywhere,
         )
-        if outside is None and not offered:
+        if outside is None and not kept:
             self.pending.selected = 2
         self.on_change()
         try:
