@@ -32,6 +32,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
+from localmelo.support.sessions.grants import GrantRefusedError, check_grant, grant_kind
 
 KEYS = ActionReview("high", ("credentials",), ("Reads ~/.ssh/id_rsa.",))
 INSTALL = ActionReview(
@@ -587,6 +588,8 @@ def _site(
         # Not a site question: a command the review stopped is never kept.
         (_request("print(1)", BEYOND), False, False),
         (_request("x", INSTALL), False, False),
+        # A card-only kind is never kept, whatever its verdict.
+        (_request("print(1)", ActionReview("routine", ("money",))), False, False),
         # Ask's own questions keep their rule: unreviewed and routine may be kept.
         (_site(review=None), False, True),
         (_request("print(1)", ActionReview("routine")), False, True),
@@ -597,6 +600,14 @@ def test_what_a_chat_may_keep(
 ) -> None:
     assert site_grant(request_) is site
     assert grant_offered(request_) is offered
+    if not offered:  # the grants table refuses what the offer refuses (one list)
+        with pytest.raises(GrantRefusedError):
+            check_grant(
+                grant_kind(request_.tool_name) or "tool",
+                request_.tool_name,
+                "person",
+                request=request_,
+            )
 
 
 def _window(
