@@ -64,7 +64,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -75,6 +75,7 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import TOOL_ASK
+from localmelo.melo.contracts.review import TITLES
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
@@ -97,6 +98,7 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.browser import configured_driver
 from localmelo.support.config import LocalBackendConfig
+from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.chore_schedule import (
     Schedule,
@@ -116,11 +118,12 @@ from localmelo.support.gateway.front_rules import (
     FINISHED,
     Action,
     Routed,
+    Shown,
     TaskRef,
     allows,
     allows_level,
     allows_message,
-    control_action,
+    answered_task,
     is_chinese,
     is_question,
     level_code,
@@ -128,10 +131,12 @@ from localmelo.support.gateway.front_rules import (
     level_number,
     named_tasks,
     norm,
+    plain_reply,
+    plain_yes,
     reply_language,
     route,
     triage,
-    work_request,
+    yes_step,
 )
 from localmelo.support.gateway.handoff import Handoff, from_chat
 from localmelo.support.gateway.handover import (
@@ -140,7 +145,7 @@ from localmelo.support.gateway.handover import (
     task_line,
     with_reading,
 )
-from localmelo.support.gateway.i18n import said, said_text, t, t_in
+from localmelo.support.gateway.i18n import said, said_in, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
 from localmelo.support.gateway.resume_evidence import (
     ConfirmationRequiredError,
@@ -163,7 +168,6 @@ from localmelo.support.gateway.task_store import (
 from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
 from localmelo.support.sessions.display import (
-    GREETING,
     TITLE_WIDTH,
     short_title,
     title_width,
@@ -176,14 +180,14 @@ from localmelo.support.sessions.store import (
     TurnInfo,
 )
 from localmelo.support.task_cli import ending_words
-from localmelo.support.task_stage import task_stage
+from localmelo.support.task_stage import Stage, task_stage
 
 from .asks import ASK_ORIGIN, ASK_STEPS, FOLLOWUP_ORIGIN, PERSON_PARTS
 from .bodies import Body
 from .browser_cards import browser_of
 from .cards import CARD_EVENT, card_json, card_title
 from .errors import ApiError
-from .followups import fence
+from .followups import FOLLOWUP_ECHO, fence
 from .routes_memory import identity_changed
 
 if TYPE_CHECKING:
@@ -288,6 +292,11 @@ NEWS_TASKS: Final = "tasks that ended since the last message"
 # The cards the main chat reads back after a start, a page at a time.
 REBUILD_PAGE: Final = 200
 REBUILD_PAGES: Final = 50
+# The newest cards, lines and messages of each kind a reply's rule reads (#617).
+SHOWN_ROWS: Final = 8
+# Lines the page draws nothing for: what a follow-up did, a queued message that
+# ran, an answer delivered.
+_UNSEEN: Final = frozenset({"followed", "dequeued", "answer_delivered"})
 # Side summaries the main chat keeps for its next turn, at most.
 SIDE_NEWS_MAX: Final = 64
 # The person's answer to a task's question, named (#369).
@@ -298,14 +307,10 @@ _THE_MODELS: Final = frozenset({"plan", "chore"})
 _REQUEST: Final = re.compile(
     r"^(?:please\b|(?:can|could|would|will)\s+you\b)|^(?:请|能不能|你能)"
 )
-_REFUSED: Final = (
-    "Not done: a change to a task needs the user's own words naming it. The user "
-    "sees a one-tap suggestion instead; say so in one short sentence."
-)
-_WHICH: Final = (
-    "Not done: the user's words fit more than one task. The user sees a one-tap "
-    "suggestion for each instead; say so in one short sentence."
-)
+# What a chat's model reads when code offered a suggestion instead of the
+# change (:func:`_refused` adds the lines and buttons the user sees).
+_REFUSED: Final = "Not done: a change to a task needs the user's own words naming it."
+_WHICH: Final = "Not done: the user's words fit more than one task."
 _NOT_PAUSED: Final = (
     "Not done: that task is not paused. One that stopped before finishing goes on "
     "with task_message; one that finished takes no new work."
@@ -419,24 +424,6 @@ def thinking_off(settings: Config) -> Config:
     kwargs["enable_thinking"] = False
     section.extra_body = {**section.extra_body, "chat_template_kwargs": kwargs}
     return settings
-
-
-def _plain_answer(routed: Routed, typed: str, composed: str) -> bool:
-    """Whether a message code left to the model can be a waiting task's answer.
-
-    Not a question, a work request, a command, a control phrase, a greeting,
-    or a message with attachments.
-    """
-    text = typed.strip()
-    return (
-        routed.route == "plan"
-        and text == composed.strip()
-        and not text.startswith("/")
-        and not GREETING.match(norm(text))
-        and not is_question(text)
-        and not work_request(text)
-        and control_action(text) is None
-    )
 
 
 class FrontAgent(Agent):
@@ -1040,11 +1027,11 @@ class TaskTools(BaseToolProvider):
         # Words raise a task to P1 at most: P0 is the person's own tap.
         number = max(number, 1)
         if not allows_level(typed, raise_, _ref(record)):
-            await front.suggest(record, "level", level=number)
-            return _REFUSED
+            echo = await front.suggest(record, "level", level=number)
+            return _refused(_REFUSED, [echo], typed)
         if not await front.reaches(record, typed):
-            await front.choose(record, "level", level=number)
-            return _WHICH
+            picks = await front.choose(record, "level", level=number)
+            return _refused(_WHICH, picks, typed)
         echo = await front.set_level(record, number)
         return f"Done: {echo['line']}{_from(echo)}"
 
@@ -1060,11 +1047,9 @@ class TaskTools(BaseToolProvider):
         if act == "resume" and record.state in FINISHED:
             return _NOT_PAUSED
         if not allows(typed, act, _ref(record)):
-            await front.suggest(record, act)
-            return _REFUSED
+            return _refused(_REFUSED, [await front.suggest(record, act)], typed)
         if not await front.reaches(record, typed):
-            await front.choose(record, act)
-            return _WHICH
+            return _refused(_WHICH, await front.choose(record, act), typed)
         echo = await front.control(_ref(record), act)
         return f"Done: {echo['line']}{_from(echo)}"
 
@@ -1090,11 +1075,11 @@ class TaskTools(BaseToolProvider):
             shared = points and await front.reaches(record, typed)
             return await self._begin(earlier=record if shared else None)
         if not allows_message(typed, _ref(record), newest=newest):
-            await front.suggest(record, "send", text=turn.user_text)
-            return _REFUSED
+            echo = await front.suggest(record, "send", text=turn.user_text)
+            return _refused(_REFUSED, [echo], typed)
         if not await front.reaches(record, typed):
-            await front.choose(record, "send", text=turn.user_text)
-            return _WHICH
+            picks = await front.choose(record, "send", text=turn.user_text)
+            return _refused(_WHICH, picks, typed)
         echo = await front.follow(record, turn.user_text, typed=typed, turn=turn)
         if echo.get("echo") == "started":
             return (
@@ -1196,6 +1181,66 @@ def _holds_sign_in() -> str:
     if callable(check) and check() is True:
         return "a password the user gave in this turn can only be typed in this chat."
     return ""
+
+
+def _button(echo: dict[str, Any], language: str) -> str:
+    """The button a suggestion's line has on the page, in *language* (as ``echoActions`` labels it)."""
+    action = str(echo.get("action") or "")
+    if action == "level":
+        meaning = t_in(language, f"levels.p{echo.get('level', 2)}")
+        return t_in(language, "mainChat.echo.setTo", level=meaning)
+    word = t_in(language, f"mainChat.echo.{action}")
+    return word[:1].upper() + word[1:]
+
+
+def _refused(head: str, echoes: list[dict[str, Any]], typed: str) -> str:
+    """*head*, then the lines and buttons the user sees under the reply for *echoes*.
+
+    In the page's words, in the language of the user's message, so the reply
+    names what is on the page and nothing else (#617).
+    """
+    language = "zh-Hans" if is_chinese(typed) else "en"
+    shown = [
+        f"“{said_in(language, _short(echo['said']))}” with a “{_button(echo, language)}” button"
+        for echo in echoes
+        if isinstance(echo.get("said"), dict)
+    ]
+    what = "the line" if len(shown) == 1 else "one line for each task:"
+    return (
+        f"{head} Under your reply the user sees {what} {'; '.join(shown)}. Tell them "
+        "so in one short sentence with these words, and name no other button, card "
+        "or control."
+    )
+
+
+def _short(words: dict[str, Any]) -> dict[str, Any]:
+    """*words* with the task's title on one line and cut as a card cuts it."""
+    params = words.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("title"), str):
+        return words
+    return {**words, "params": {**params, "title": card_title(params["title"])}}
+
+
+def _kind(block: Mapping[str, Any]) -> str:
+    """The first kind of step a block's review named, as its card titles it."""
+    review = block.get("review")
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    first = kinds[0] if isinstance(kinds, list) and kinds else ""
+    return str(first) if first in TITLES else "beyond_request"
+
+
+def _card_asks(data: dict[str, Any]) -> bool:
+    """Whether a task's card asks for the person: a step it had blocked, an approval
+    it waits on, or an end the stage table has waiting for them."""
+    state = data.get("state")
+    if state in ("blocked", "waiting"):
+        return True
+    facts = {
+        "state": "done" if state == "done" else "failed",
+        "ending": data.get("ending"),
+        "out_of_steps": state == "stopped",
+    }
+    return task_stage(facts).awaited == "person"
 
 
 def _ref(record: TaskRecord) -> TaskRef:
@@ -1321,15 +1366,16 @@ class Front:
         *,
         level: int | None = None,
         text: str = "",
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """Ask which task the person meant: a one-tap suggestion for each task of this chat their words fit, then for *record*."""
         own = self._own_refs(await self.records())
         picks = named_tasks(self.typed(), "", own, strict=False, finished=True)
+        echoes = []
         for ref in picks[:MAX_PICKS]:
             found = await self.record(ref.task_id)
             if found is not None:
-                await self.suggest(found, action, level=level, text=text)
-        await self.suggest(record, action, level=level, text=text)
+                echoes.append(await self.suggest(found, action, level=level, text=text))
+        return [*echoes, await self.suggest(record, action, level=level, text=text)]
 
     def typed(self) -> str:
         """What the person typed in the running turn, never an attachment ("" with none).
@@ -1636,6 +1682,187 @@ class Front:
                     break
         return newest[1] if newest is not None else None
 
+    def stage(self, record: TaskRecord) -> Stage:
+        """*record*'s stage from the facts its page reads: the one table every surface words."""
+        console = self.console
+        task_id = record.task_id
+        return task_stage(
+            {
+                "state": record.state,
+                "wait_reason": console.gate.held(task_id) or record.wait_reason,
+                "out_of_steps": is_out_of_steps(record.state, record.wait_reason),
+                "ending": shown(record),
+                "pending_approvals": console.broker.pending(task_id),
+                "ask": console.asks.waiting(task_id),
+            },
+            stopping=console.workers.stopping(task_id),
+        )
+
+    async def _shown(self, seen: int | None) -> list[Shown]:
+        """What this chat showed the person last, oldest first, as :func:`answered_task` reads it.
+
+        Its newest cards and lines and the person's own messages, by when they
+        happened (a card at its source's time, as the page orders them). Rows
+        the page draws nothing for, and answers that fold into their card, are
+        left out; a turn melo began itself is stood for by its row. A message
+        of the person's counts at the end of its turn (now while it runs).
+
+        *seen* is the stored id of the newest card or line the person's client
+        had drawn when the person sent (the send's ``seen``): a card or line
+        stored after it was not on the page, so it is no request of a task's.
+        With none, no card or line counts. Cards are not written here: a
+        task's end that no client read yet was shown to no one.
+        """
+        chat, store = self.chat_id, self.console.store
+        if chat is None:
+            return []
+
+        def drawn(event: StoredEvent) -> bool:
+            return seen is not None and event.id is not None and event.id <= seen
+
+        found: list[tuple[float, Shown]] = []
+        for event in await store.events_of_type(chat, CARD_EVENT, limit=SHOWN_ROWS):
+            data = event.event.get("data") or {}
+            if data.get("state") == "answered" or not drawn(event):
+                continue
+            task = str(data.get("source_id") or "")
+            if data.get("source_kind") != "task":
+                task = ""
+            at = float(data.get("at") or event.event.get("ts") or 0)
+            block = data.get("block")
+            offered = (
+                str(block.get("request_id") or "") if isinstance(block, dict) else ""
+            )
+            asks = bool(task) and _card_asks(data)
+            found.append((at, Shown(task, asks=asks, block=offered)))
+        for event in await store.events_of_type(chat, ECHO_EVENT, limit=SHOWN_ROWS):
+            data = event.event.get("data") or {}
+            kind = data.get("echo")
+            if kind in _UNSEEN:
+                continue
+            at = float(event.event.get("ts") or 0)
+            if data.get("typed"):
+                # The person's words above it: theirs, drawn yet or not.
+                found.append((at, Shown(person=True)))
+            if drawn(event):
+                asks = kind == FOLLOWUP_ECHO
+                found.append((at, Shown(str(data.get("task_id") or ""), asks=asks)))
+        now = time.time()
+        for turn in await store.list_turns(chat, limit=SHOWN_ROWS):
+            if not turn.origin:
+                # At its end, or now while it runs: a card that came while the
+                # turn ran was shown before the turn's reply and its notes.
+                at = max(turn.started_at, turn.finished_at or now)
+                found.append((at, Shown(person=True)))
+        found.sort(key=lambda item: item[0])
+        return [item for _, item in found]
+
+    async def _answered(
+        self, typed: str, seen: int | None
+    ) -> tuple[TaskRecord, str] | None:
+        """The task of this chat *typed* answers without naming it (:func:`answered_task`)
+        and the step its newest card offers to allow (``""`` for none), or None.
+        *seen* is the newest card or line the person's client drew (:meth:`_shown`).
+
+        Waiting: the stage table has it waiting for the person, and its job
+        did not go on in a newer task. A message continues it only when it
+        asked (``stage.need == "review"``: it stopped on a blocked step or a
+        question) and no answer of the person's to it waits out its Undo; a
+        task that ran out of steps waits too, and takes none (its card has
+        Continue).
+        """
+        workers, asks = self.console.workers, self.console.asks
+        records = await self.records()
+        waiting: list[TaskRecord] = []
+        takes: set[str] = set()
+        for record in records:
+            if not self.mine(record):
+                continue
+            stage = self.stage(record)
+            if stage.awaited != "person":
+                continue
+            if (await workers.newest(record)).task_id != record.task_id:
+                continue
+            waiting.append(record)
+            if stage.need == "review" and asks.held(record.task_id) is None:
+                takes.add(record.task_id)
+        if len(waiting) != 1 or not takes:
+            return None  # what the rule refuses anyway: nothing more to read
+        shown = await self._shown(seen)
+        found = answered_task(
+            typed,
+            [_ref(record) for record in waiting],
+            takes,
+            shown,
+            [_ref(record) for record in records],
+        )
+        if found is None:
+            return None
+        cards = [s.block for s in shown if s.task_id == found.task_id]
+        offered = next((b for b in reversed(cards) if b is not None), "")
+        return waiting[0], offered
+
+    async def answer_waiting(
+        self, typed: str, seen: int | None = None
+    ) -> dict[str, Any] | None:
+        """The person's plain reply to the one task of this chat that asked for them last (#617).
+
+        Code decides it from the typed words and stored facts
+        (:meth:`_answered`); no model reads it. A plain yes
+        (:func:`plain_yes`) to a task that waits on exactly one step Auto
+        blocked allows that step once, as the step's own Allow once does;
+        any other reply goes to the task as the person's message, shown as
+        sent as its answer with Undo (``asks.send_answer``), then on the path
+        a named message takes (:meth:`follow`). ``None`` leaves the message
+        to the model, also when a lookup failed: nothing is delivered then.
+        """
+        chat = self.chat_id
+        try:
+            found = await self._answered(typed, seen)
+            blocks = (
+                await self.console.workers.open_blocks(found[0].task_id)
+                if found is not None and plain_yes(typed)
+                else []
+            )
+        except Exception:
+            logger.warning("Could not tell which task a reply answers", exc_info=True)
+            return None
+        if found is None or chat is None:
+            return None
+        record, offered = found
+        step = yes_step(typed, offered, blocks)
+        if step is not None:
+            return await self._allow_block(record, step, typed)
+
+        async def deliver(text: str) -> None:
+            now = await self.record(record.task_id) or record
+            await self.follow(now, text, typed=text)
+
+        return await self.console.asks.send_answer(
+            chat, record.task_id, record.title, typed, deliver
+        )
+
+    async def _allow_block(
+        self, record: TaskRecord, block: Mapping[str, Any], typed: str
+    ) -> dict[str, Any]:
+        """Allow once *block*, a step Auto blocked in *record*: what the step's Allow once calls."""
+        try:
+            request_id = str(block["request_id"])
+            await self.console.workers.allow_once(record.task_id, request_id)
+        except BlockError as exc:
+            return await self._failed(
+                typed, "front.echo.allowFailed", title=record.title, problem=exc.message
+            )
+        except Exception as exc:
+            return await self._failed(
+                typed, "front.echo.allowFailed", title=record.title, problem=_plain(exc)
+            )
+        words = said("cards.allowedOnceStep", what=said(f"auto.title.{_kind(block)}"))
+        return await self._echo(
+            "sent", record.task_id, record.title, said_in("en", words), typed,
+            how="allowed", request_id=request_id, said=words,
+        )  # fmt: skip
+
     # ── Code's rules, before any model call ──
 
     async def claims(self, typed: str) -> bool:
@@ -1655,10 +1882,12 @@ class Front:
         as_task: bool,
         key: str | None,
         create_key: str | None = None,
+        seen: int | None = None,
     ) -> dict[str, Any] | None:
         """The echo of a message that code handled, or ``None`` for the model.
 
-        *create_key* is the key of the create that made this chat for a task.
+        *create_key* is the key of the create that made this chat for a task;
+        *seen* the send's ``seen``, the newest card or line its client drew.
         """
         asks, chat = self.console.asks, self.chat_id
         command = _ANSWER_COMMAND.match(typed.strip())
@@ -1714,10 +1943,12 @@ class Front:
         if routed.route == "reminder" and typed.strip() == composed.strip():
             found = parse_reminder(typed, self._now())
             return None if found is None else await self._remind(found, typed)
-        if chat is not None and _plain_answer(routed, typed, composed):
-            # One task waits for the person here: a plain message answers it.
-            return await asks.answer_from_chat(chat, typed)
-        return None
+        if chat is None or routed.route != "plan" or typed.strip() != composed.strip():
+            return None
+        # One task waits for the person here: a plain message answers it, its
+        # open question first, else the task that asked for the person last.
+        echo = await asks.answer_from_chat(chat, typed) if plain_reply(typed) else None
+        return echo or await self.answer_waiting(typed, seen)
 
     async def _take_back(self, echo_id: int, echo: dict[str, Any]) -> dict[str, Any]:
         """Undo of a message sent as a task's answer: the task still waits, the message is the chat's."""
@@ -1725,11 +1956,11 @@ class Front:
         chat = self.chat_id
         if found is None or chat is None:
             raise ApiError(409, "already_answered", t("errors.echoAnswered"))
-        ask, typed = found
+        task_id, title, typed = found
         undone = await self.echo(
-            {"echo": "undone", "of": echo_id, "task_id": ask.task_id,
-             "title": ask.title, "line": t_in("en", "ask.takenBack", title=ask.title),
-             "said": said("ask.takenBack", title=ask.title)}
+            {"echo": "undone", "of": echo_id, "task_id": task_id,
+             "title": title, "line": t_in("en", "ask.takenBack", title=title),
+             "said": said("ask.takenBack", title=title)}
         )  # fmt: skip
         try:
             await self.console.sessions.start_turn(chat, typed, typed)

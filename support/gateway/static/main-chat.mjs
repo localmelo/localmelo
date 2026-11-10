@@ -73,6 +73,15 @@ export function readCard(row) {
     ...(endOf(data.end_id) !== null ? {endId: endOf(data.end_id)} : {}),
     // The start continued its task by itself after a restart: when.
     ...(Number(data.continued_at) > 0 ? {continuedAt: Number(data.continued_at)} : {}),
+    // An end that needs the person while exactly one step Auto blocked can still be allowed once: that step.
+    // It holds what the step's own card shows, so the card says which step its button allows.
+    ...(state === "done" && data.block?.request_id ? {block: {
+      requestId: String(data.block.request_id),
+      stepKey: String(data.block.step_key ?? ""),
+      name: String(data.block.name ?? ""),
+      preview: String(data.block.preview ?? ""),
+      review: data.block.review && typeof data.block.review === "object" ? data.block.review : {},
+    }} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
       stepKey: String(data.step_key ?? ""),
@@ -88,14 +97,17 @@ export function readCard(row) {
 /** What a blocked card's block says (`blocked.mjs`), or null; Allow once only where the server offers it. */
 export function cardBlock(card) {
   if (card?.state !== "blocked") return null;
-  const facts = blockFacts({
-    approval: {origin: "auto", allowed: false, request_id: card.requestId, step_key: card.stepKey, review: card.review},
-    name: card.name,
-    preview: card.preview,
-  });
+  const facts = stepFacts({requestId: card.requestId, stepKey: card.stepKey, name: card.name, preview: card.preview, review: card.review});
   if (!facts || !facts.category) return null;
   return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
 }
+
+/** What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review; null if unusable. */
+const stepFacts = ({requestId, stepKey, name, preview, review}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review},
+  name,
+  preview,
+});
 
 /**
  * *cards* as the person reads them: a waiting card whose approval was answered becomes an answered
@@ -169,6 +181,18 @@ export function timeline(turns, cards, now, echoes = []) {
   return out;
 }
 
+/**
+ * The `seen` a send carries (#617): the stored id of the newest card or line among *items* (what
+ * `timeline` gave the page to draw), kept below the oldest of *held*, the card frames held back
+ * while the person types. Only what was on the page counts; 0 for nothing.
+ */
+export function drawnUpTo(items, held = []) {
+  const ids = (list) => list.map(Number).filter(Number.isInteger);
+  const drawn = ids(items.map((item) => (item.kind === "card" ? item.card.id : item.kind === "echo" ? item.echo.id : NaN)));
+  const waiting = ids(held.map((frame) => frame?.id));
+  return Math.max(0, Math.min(Math.max(0, ...drawn), Math.min(Infinity, ...waiting) - 1));
+}
+
 /** Side chats newest first, under a heading for each day. */
 export function byDay(sessions, now) {
   const groups = [];
@@ -210,13 +234,14 @@ export function cardWords(card) {
 }
 
 /**
- * One card's node: `{doc, card, open, resume, approval, block}`; `open` gets the card, and
+ * One card's node: `{doc, card, open, resume, approval, block, step}`; `open` gets the card, and
  * `resume(card, button)` is the Continue of a stopped task's card. `approval` is a waiting task's
  * approval card, drawn inside it (its Open then only opens the task). `block` is what a blocked
  * card's Allow once needs (`blockCard`'s options: `allowing`, `busy`, `onAllow`, `error`,
- * `developer`). Its day is the divider above it.
+ * `developer`). `step` is the Allow this step of a card that needs the person (`stepAllow`'s
+ * `{state, error, onAllow}`). Its day is the divider above it.
  */
-export function cardNode({doc, card, open, resume = null, approval = null, block = null}) {
+export function cardNode({doc, card, open, resume = null, approval = null, block = null, step = null}) {
   const {node: el} = maker(doc);
   const words = cardWords(card);
   const node = el("article", "main-card");
@@ -249,6 +274,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   action.dataset.focusKey = `card:${card.id}`;
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
+  if (card.block && step) foot.append(...stepNodes(el, step, stepFacts(card.block)));
   if (words.more && resume) {
     const more = el("button", "outline-button", words.more);
     more.type = "button";
@@ -258,6 +284,36 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   foot.append(action, el("span", "main-card-time", card.at ? clock(card.at) : ""));
   node.append(mark, text, foot);
   return node;
+}
+
+/**
+ * The Allow this step of a card that needs the person: the step it allows in the words of its own card (*facts*),
+ * then the button, what it did once clicked, or why it did not.
+ */
+function stepNodes(el, {state = "open", error = "", onAllow = null}, facts = null) {
+  const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
+  if (state === "allowed") return [...what, el("span", "main-card-note", t("cards.allowedOnce"))];
+  const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
+  allow.type = "button";
+  allow.disabled = state === "allowing";
+  if (onAllow) allow.addEventListener("click", onAllow);
+  const problem = error ? el("span", "main-card-note", t("auto.blocked.failed", {problem: error})) : null;
+  if (problem) problem.setAttribute("role", "alert");
+  return [...what, allow, ...(problem ? [problem] : [])];
+}
+
+/**
+ * Where a card's Allow this step stands: `allowed` once this page allowed the step (`given`, by request id) or the
+ * chat allowed it from the person's typed yes (an echo `sent` with `how: "allowed"`), `allowing` while the request is
+ * under way, else `open`; `error` is the last failure's text.
+ */
+export function stepState(card, {given = {}, busy = {}, echoes = []} = {}) {
+  const id = card.block?.requestId;
+  if (!id) return null;
+  const typed = echoes.some((echo) => echo.kind === "sent" && echo.how === "allowed" && String(echo.request_id) === id);
+  if (typed || given[id]) return {state: "allowed"};
+  const now = busy[id];
+  return {state: now === "allowing" ? "allowing" : "open", error: now && now !== "allowing" ? now : ""};
 }
 
 // ── Echoes: what the main chat did with a task ──
@@ -344,6 +400,13 @@ export function endedTasks(cards, echoes = []) {
   return new Set([...newest].filter(([, end]) => !end.live).map(([task]) => task));
 }
 
+/** How each task ended, by task id, from its newest card that says (`ending`): what its browser cards say once over. */
+export function taskEnds(cards) {
+  const ends = new Map();
+  for (const card of cards) if (card.sourceKind === "task" && card.ending) ends.set(card.sourceId, card.ending);
+  return ends;
+}
+
 /** A card's or a follow-up row's end id, or null (rows from before ends were named have none). */
 function endOf(value) {
   const id = value === null || value === undefined || value === "" ? NaN : Number(value);
@@ -358,10 +421,12 @@ function later(end, seen) {
 
 /**
  * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
- * *ended*, see `endedTasks`).
+ * *ended*, see `endedTasks`). A suggestion to send the person's message keeps its Send: a message reaches
+ * a task in any state (it goes on with its job, or a new task starts from its record).
  */
 export function echoDone(echo, done, ended) {
-  return done.has(echo.id) || ended.has(echo.task_id);
+  const sends = echo.kind === "suggest" && echo.action === "send";
+  return done.has(echo.id) || (!sends && ended.has(echo.task_id));
 }
 
 /** A level as a line names it: its P-code for a developer, what it means in words (`today`) in default mode. */
@@ -390,7 +455,7 @@ export function echoActions(echo, done, plain = false) {
   if (echo.kind === "answer_sent") return [undo];
   if (echo.kind === "suggest") {
     if (echo.action === "level") return [[t("mainChat.echo.setTo", {level: levelName(echo.level, plain)}), "apply"]];
-    const word = ["stop", "pause", "resume", "first"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
+    const word = ["stop", "pause", "resume", "first", "send"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
   // "When should I remind you?" is answered by typing a time.

@@ -15,7 +15,11 @@ left on a stopped one (a task that ran out of steps, which can continue), what
 is asked on a waiting one. A task's card also keeps its ``ending`` (``state``,
 ``proposed``, ``reasons``, ``question``): how code found that end ended, as its
 ``sched.finished`` event carries it (:mod:`..task_endings`), which the page reads
-as Ready, Done, not finished or Needs you.
+as Ready, Done, not finished or Needs you. A Needs you card also has ``block``
+(``request_id``, ``step_key``, ``name``, ``preview``, ``review``) when exactly
+one step Auto blocked in its task can still be allowed once
+(``TaskWorkers.open_blocks``) and it is a step of the run that end closed: its
+Allow this step.
 
 A waiting card carries its ``request_id``. When that approval is answered, a
 card with state ``answered``, the same ``request_id`` and the answer in words as
@@ -388,6 +392,8 @@ class MainChatCards:
             if found is not None:
                 keys = ("state", "proposed", "reasons", "question", "notes", "missing")
                 card["ending"] = {key: found[key] for key in keys if key in found}
+            if isinstance(found, dict) and found.get("state") == "blocked":
+                card.update(await self._one_block(info.id, found.get("turn")))
             # Which end this is: a follow-up's row names the end it follows, so the
             # page orders the two by end and not by when each was written (#431).
             card["end_id"] = stored.id
@@ -476,6 +482,22 @@ class MainChatCards:
             "finished": job_finished(record),
         }
 
+    async def _one_block(self, task_id: str, turn: object) -> dict[str, Any]:
+        """``block`` when exactly one step Auto blocked in *task_id* can still be
+        allowed once and it is a step of the run this end closed (its *turn*), else
+        nothing (#617). It holds what the step's own card shows: ``request_id``,
+        ``step_key``, ``name``, ``preview`` and ``review``. A turn that is not a
+        number on either side matches nothing."""
+        try:
+            found = await self._console.workers.open_blocks(task_id)
+        except Exception:
+            logger.debug("No open block read for task %s", task_id, exc_info=True)
+            return {}
+        if len(found) != 1 or not _same_turn(found[0].get("turn"), turn):
+            return {}
+        keys = ("request_id", "step_key", "name", "preview", "review")
+        return {"block": {k: found[0][k] for k in keys}}
+
     async def _reminder_words(self, task_id: str) -> str | None:
         """The person's words of a reminder's task, or ``None`` for any other task."""
         try:
@@ -534,6 +556,14 @@ class MainChatCards:
     async def _read_unanswered(self, owner: str) -> set[str]:
         """The request ids of the newest waiting cards of *owner* that no answer follows."""
         return {str(card["request_id"]) for card in await self.waiting_in(owner)}
+
+
+def _same_turn(left: object, right: object) -> bool:
+    """Whether two turn numbers are the same int (a bool or a missing one is none)."""
+    numbers = [
+        n for n in (left, right) if isinstance(n, int) and not isinstance(n, bool)
+    ]
+    return len(numbers) == 2 and left == right
 
 
 def _first(review: dict[str, Any]) -> str:

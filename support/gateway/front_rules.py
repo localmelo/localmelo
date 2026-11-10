@@ -19,19 +19,23 @@ Pure functions over the text the person typed and the open tasks:
   change counts as the person's only when their own typed message has the
   control word and names the task. Page text, tool output and a task's
   report are never that message.
+- :func:`answered_task` picks the one task a plain reply answers without
+  naming it: the one that waits for the person and asked last (#617);
+  :func:`plain_yes` reads a plain yes (:data:`YES`).
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Literal
 
+from localmelo.melo.contracts.review import WORDS_CAN_ALLOW
 from localmelo.support.gateway.reminder_time import parse_reminder
-from localmelo.support.sessions.display import EASY_WORDS, URGENT_WORDS
+from localmelo.support.sessions.display import EASY_WORDS, GREETING, URGENT_WORDS
 
 # Levels P0 to P5. People read the P-code, with its meaning where there is room
 # (``P1 · today``). The words stay what people may type and what the API's
@@ -310,6 +314,111 @@ def follow_cue(typed: str) -> str | None:
         if found is not None and not _NEGATION.search(text[: found.start()]):
             return phrase
     return None
+
+
+def plain_reply(typed: str) -> bool:
+    """Whether *typed* reads as a reply: not a command, greeting, question, work request or control phrase."""
+    text = typed.strip()
+    return (
+        bool(text)
+        and not text.startswith("/")
+        and not GREETING.match(norm(text))
+        and not is_question(text)
+        and not work_request(text)
+        and control_action(text) is None
+    )
+
+
+# A plain yes: the whole message, once normalised, is one of these.
+YES: Final = frozenset(
+    _words("允许|可以|好|好的|同意|行|yes|ok|okay|allow|go ahead|do it")
+)
+# What may stand around a yes: spaces and a full stop or an exclamation mark.
+_YES_MARKS: Final = " .!。！"
+
+
+def plain_yes(typed: str) -> bool:
+    """Whether *typed* is a plain yes: :data:`YES` exactly, with nothing else but :data:`_YES_MARKS`."""
+    return norm(typed).strip(_YES_MARKS) in YES
+
+
+@dataclass(frozen=True)
+class Shown:
+    """One thing a chat showed the person, as :func:`answered_task` reads it.
+
+    ``task_id`` is the task it is about (``""`` for none); ``asks`` is true for
+    that task's request to the person (the card of its end that needs the
+    person, a step it had blocked, melo's follow-up on it); ``person`` for a
+    message the person sent. For a card, ``block`` is the request id of the
+    blocked step it offers to allow (its Allow this step), ``""`` when it
+    offers none; ``None`` for anything that is not a card.
+    """
+
+    task_id: str = ""
+    asks: bool = False
+    person: bool = False
+    block: str | None = None
+
+
+def answered_task(
+    typed: str,
+    waiting: Sequence[TaskRef],
+    takes: Collection[str],
+    shown: Sequence[Shown],
+    tasks: Sequence[TaskRef] = (),
+) -> TaskRef | None:
+    """The task *typed* (the person's new message) answers, or None.
+
+    *waiting* are the tasks of the chat the stage table has waiting for the
+    person, *takes* the ids of those a message continues, *shown* what the
+    chat showed the person before this message, oldest first, and *tasks*
+    every task the words could name. It answers one only when all hold:
+
+    - *typed* is a plain yes (:func:`plain_yes`) or a plain reply
+      (:func:`plain_reply`): never a command;
+    - exactly one task waits for the person, and a message continues it;
+    - the newest thing shown is that task's request, so neither another
+      task's line nor a message of the person's came after it;
+    - the words name no other task.
+
+    Only the person's own typed words are *typed*; a page, a file or a task's
+    report never is.
+    """
+    if not (plain_yes(typed) or plain_reply(typed)) or len(waiting) != 1:
+        return None
+    task = waiting[0]
+    if task.task_id not in takes or not shown:
+        return None
+    newest = shown[-1]
+    if newest.person or not newest.asks or newest.task_id != task.task_id:
+        return None
+    named = named_tasks(typed, "", tasks, strict=False, finished=True)
+    if any(other.task_id != task.task_id for other in named):
+        return None
+    return task
+
+
+def yes_step(
+    typed: str, offered: str, blocks: Sequence[Mapping[str, object]]
+) -> Mapping[str, object] | None:
+    """The blocked step a plain yes allows once, or None: then *typed* is an ordinary answer.
+
+    *offered* is the request id of the step the newest card of the task
+    offers (``Shown.block``), and *blocks* the steps Auto blocked in it that
+    Allow once may still run. It is one only when all hold: *typed* is a plain
+    yes (:func:`plain_yes`); exactly one step is open; it is the step the card
+    offers; and every kind of step its review named is one the person's words
+    may allow (:data:`WORDS_CAN_ALLOW`), so a step that runs only after a
+    click is never allowed by words.
+    """
+    if not plain_yes(typed) or not offered or len(blocks) != 1:
+        return None
+    block = blocks[0]
+    review = block.get("review")
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    if str(block.get("request_id") or "") != offered or not isinstance(kinds, list):
+        return None
+    return block if kinds and all(kind in WORDS_CAN_ALLOW for kind in kinds) else None
 
 
 def allows_message(typed: str, task: TaskRef, *, newest: bool) -> bool:
@@ -763,10 +872,13 @@ __all__ = [
     "LEVEL_MEANINGS",
     "LEVEL_WORDS",
     "Routed",
+    "Shown",
     "TaskRef",
+    "YES",
     "allows",
     "allows_level",
     "allows_message",
+    "answered_task",
     "asks_commit",
     "continue_name",
     "control_action",
@@ -781,9 +893,12 @@ __all__ = [
     "named_task",
     "named_tasks",
     "names_files",
+    "plain_reply",
+    "plain_yes",
     "reply_language",
     "route",
     "title_matches",
     "triage",
     "work_request",
+    "yes_step",
 ]
