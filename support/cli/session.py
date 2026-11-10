@@ -80,7 +80,10 @@ from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
 from localmelo.support.cli.work import WorkBeside, work_parts
 from localmelo.support.progress_line import run_elapsed, wall_range
-from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    words_before_files,
+)
 from localmelo.support.sessions.display import (
     clean_output,
     format_duration,
@@ -1632,7 +1635,9 @@ class CliSession:
             Attachment(a.name, a.text, len(a.text.encode("utf-8")), len(a.text), False)
             for a in (turn.attachments or ())
         )
-        message = turn.typed_text if staged else turn.user_text
+        # An older turn has its files in its text: the words are what comes before
+        # them, never a file's text (#626).
+        message = turn.typed_text if staged else words_before_files(turn.user_text)
         self.renderer.begin_turn(message, first_turn=False)
         self._work = self.spawn(
             self._turn(message, typed_text=turn.typed_text, attachments=staged)

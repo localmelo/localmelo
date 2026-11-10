@@ -81,7 +81,8 @@ from localmelo.support.sessions.attachments import (
     compose_user_text,
     decode_attachments,
     encode_attachments,
-    parse_user_text,
+    is_stand_in,
+    words_before_files,
 )
 from localmelo.support.sessions.display import home_label, short_title
 from localmelo.support.sessions.submissions import (
@@ -489,15 +490,18 @@ def typed_words(turn: TurnInfo) -> str:
 
     The one reader of the typed words of an earlier turn (#626). A turn with files
     stored keeps its typed text apart from them, and so does a turn whose words
-    were given apart from its text. A row with no typed text is its own text, but
-    for the file blocks a row written before files were stored as attachments
-    still has at its end.
+    were given apart from its text. A row with no typed text is its own text, cut
+    at its first file block: a row written before files were stored as
+    attachments still has them there. Words that are only the stand-in melo wrote
+    for a message with no words (``[1 file]``) are nothing the person typed.
     """
     if turn.composed:
         return ""
     if turn.attachments or turn.typed_text:
-        return turn.typed_text
-    return parse_user_text(turn.user_text)[0]
+        said = turn.typed_text
+    else:
+        said = words_before_files(turn.user_text)
+    return "" if is_stand_in(said) else said
 
 
 def check_attachment_submission(

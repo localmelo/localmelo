@@ -25,7 +25,11 @@ import pytest
 import localmelo.melo.memory._sqlite as core_sqlite
 import localmelo.support.sessions.store as store_mod
 from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinking
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    stand_in,
+)
 from localmelo.support.sessions.store import (
     LEASE_S,
     OPTIONAL_SESSION_EVENT_FIELDS,
@@ -2663,8 +2667,34 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
             {"user_text": compose_user_text("sign in", (FILE,)), "attachments": ()},
             "sign in",
         ),
+        # What melo wrote for a message with no words is nothing the person typed.
+        (
+            {
+                "user_text": compose_user_text(stand_in(0, 1), (FILE,)),
+                "typed_text": stand_in(0, 1),
+                "attachments": (FILE,),
+            },
+            "",
+        ),
+        ({"user_text": "[2 pictures]"}, ""),
+        (
+            {
+                "user_text": "[attached: a.example.txt]",
+                "typed_text": "[attached: a.example.txt]",
+            },
+            "",
+        ),
     ],
-    ids=["composed", "files", "words given", "plain", "legacy blocks"],
+    ids=[
+        "composed",
+        "files",
+        "words given",
+        "plain",
+        "legacy blocks",
+        "stand-in",
+        "pictures only",
+        "older stand-in",
+    ],
 )
 def test_the_typed_words_of_a_turn_are_never_a_files_text(
     row: dict[str, Any], typed: str

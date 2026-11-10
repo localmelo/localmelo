@@ -60,6 +60,7 @@ from localmelo.support.sessions.attachments import (
     TextAttachment,
     compose_user_text,
     hide_message,
+    is_stand_in,
 )
 from localmelo.support.sessions.live import LiveReply
 from localmelo.support.sessions.store import (
@@ -912,7 +913,9 @@ class SessionRunner:
                 kwargs["images"] = turn.images
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
-            kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            said = turn.typed if turn.words is None else turn.words
+            # The stand-in melo wrote for a message with no words is none of theirs.
+            kwargs["user_words"] = "" if is_stand_in(said) else said
             if turn.origin or not turn.from_person:
                 # Not the person's message: no consent, and no note of theirs.
                 kwargs["from_person"] = False

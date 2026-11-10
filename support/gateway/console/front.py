@@ -167,6 +167,7 @@ from localmelo.support.gateway.task_store import (
 )
 from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
+from localmelo.support.sessions.attachments import words_before_files
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     short_title,
@@ -1156,9 +1157,16 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
 
 
 def _retried(turn: TurnInfo) -> bool:
-    """Whether Try again made *turn*: it has no typed text, or it holds files that were sent again without the key a typed message has (#626)."""
-    return not turn.typed_text.strip() or bool(
-        turn.attachments and turn.client_request_id is None
+    """Whether Try again made *turn*: it has no typed text, or it carries files and has not the key a message sent from the page has (#626).
+
+    A retry of a message whose files are stored keeps its typed words; one of an
+    older message has them in its text, and its words are what comes before them.
+    """
+    return not turn.typed_text.strip() or (
+        turn.client_request_id is None
+        and bool(
+            turn.attachments or words_before_files(turn.user_text) != turn.user_text
+        )
     )
 
 
