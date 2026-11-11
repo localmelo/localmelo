@@ -9,6 +9,7 @@ is never taken for the user's own statement. Synthetic items only.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from datetime import datetime
 from pathlib import Path
@@ -184,6 +185,75 @@ def test_a_tie_in_time_goes_to_the_later_note() -> None:
     when = at(2026, 10, 30, 9, 0)
     a, b = note(1, SYNC_OLD, when), note(2, SYNC_NEW, when)
     assert [i.key for i in records.newer_values_first([a, b])] == ["r:2", "r:1"]
+
+
+BOB = "Your manager is Bob."
+ALICE = "Your manager is Alice Wu."
+CAROL = "Your manager is Carol Ng."
+
+
+def source_note(key: int, text: str, when: float, how: str = "pointed") -> Item:
+    """A note from a page (or a result): its ``how`` says so and it quotes nothing."""
+    return dataclasses.replace(
+        note(key, text, when),
+        how=how,
+        quote="",
+        where=f"from jane.example.com, {day(when)}",
+    )
+
+
+def test_a_newer_note_from_a_page_does_not_mark_the_persons_own_older() -> None:
+    mine = note(1, BOB, at(2026, 10, 29))
+    page = source_note(2, ALICE, at(2026, 10, 30))
+    for items in ([mine, page], [page, mine]):
+        ordered = records.newer_values_first(items)
+        assert [i.key for i in ordered] == ["r:1", "r:2"]
+        assert [i.older for i in ordered] == ["", ""]
+    text, used = block(records.newer_values_first([page, mine]))
+    assert OLDER not in text and len(used) == 2
+    mine_line, page_line = text.split("\n")[1:]
+    assert "the user said" in mine_line and BOB[:-1].split(" is ")[1] in mine_line
+    assert "from jane.example.com" in page_line and "Alice Wu" in page_line
+
+
+def test_a_newer_note_of_the_person_marks_an_older_one_from_a_page() -> None:
+    page = source_note(1, ALICE, at(2026, 10, 29), "result")
+    mine = note(2, BOB, at(2026, 10, 30))
+    ordered = records.newer_values_first([page, mine])
+    assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:1", OLDER)]
+
+
+def test_the_persons_newest_note_is_current_beside_a_note_from_a_page() -> None:
+    first = note(1, BOB, at(2026, 10, 27))
+    page = source_note(2, ALICE, at(2026, 10, 28))
+    second = note(3, CAROL, at(2026, 10, 29))
+    ordered = records.newer_values_first([first, page, second])
+    # The page's note is older than the person's newest one, which replaced it.
+    assert [(i.key, i.older) for i in ordered] == [
+        ("r:3", ""),
+        ("r:1", OLDER),
+        ("r:2", OLDER),
+    ]
+    newest = source_note(4, "Your manager is Dev Rao.", at(2026, 10, 30))
+    ordered = records.newer_values_first([first, page, second, newest])
+    assert [(i.key, i.older) for i in ordered] == [
+        ("r:3", ""),
+        ("r:1", OLDER),
+        ("r:4", ""),
+        ("r:2", OLDER),
+    ]
+
+
+def test_notes_of_one_kind_are_ordered_and_marked_as_before() -> None:
+    first, second = note(1, BOB, at(2026, 10, 27)), note(2, CAROL, at(2026, 10, 28))
+    ordered = records.newer_values_first([first, second])
+    assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:1", OLDER)]
+    pages = [
+        source_note(3, BOB, at(2026, 10, 27)),
+        source_note(4, ALICE, at(2026, 10, 28)),
+    ]
+    ordered = records.newer_values_first(pages)
+    assert [(i.key, i.older) for i in ordered] == [("r:4", ""), ("r:3", OLDER)]
 
 
 def test_a_turn_says_who_said_what() -> None:

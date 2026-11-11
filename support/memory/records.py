@@ -1444,6 +1444,12 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
     a record that says the newest value again is not marked. A record that reads
     as older already (:func:`~localmelo.support.memory.recall.newer_first`) is
     left as it is. Other items stay where they were.
+
+    A record from a page, a file or a result (``how`` is set) never replaces one of
+    the person's own (:func:`write`), so it is never the value that marks theirs
+    older: the person's own records come first, the newest of them current, and the
+    others follow, each showing its source. A record of the person's own does
+    replace an older one from a page, so that one is marked as ever.
     """
     groups: dict[str, list[int]] = {}
     for at, item in enumerate(items):
@@ -1451,15 +1457,23 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
             groups.setdefault(key, []).append(at)
     out = list(items)
     for slots in groups.values():
-        newest, *rest = sorted(
-            (items[at] for at in slots),
-            key=lambda item: (item.created_at, _record_number(item.key)),
+        found = [items[at] for at in slots]
+        values = {normalise(item.text) for item in found}
+        if len(found) < 2 or len(values) < 2:
+            continue
+        ranked = sorted(
+            found,
+            key=lambda item: (not item.how, item.created_at, _record_number(item.key)),
             reverse=True,
         )
-        current = normalise(newest.text)
-        if len(slots) < 2 or all(normalise(item.text) == current for item in rest):
-            continue
-        for at, item in zip(slots, [newest, *rest], strict=True):
+        # What replaces a record: for the person's own, their newest own; for the
+        # others, the newest of all.
+        mine = normalise(ranked[0].text)
+        latest = normalise(
+            max(found, key=lambda i: (i.created_at, _record_number(i.key))).text
+        )
+        for at, item in zip(slots, ranked, strict=True):
+            current = latest if item.how else mine
             same = normalise(item.text) == current
             out[at] = item if same else dataclasses.replace(item, older=OLDER)
     return out

@@ -136,7 +136,7 @@ Where did I live before?
 - `search_memory` still returns the older turn, with the same label.
 - A recalled turn says who spoke: `the user said “…”; melo replied “…”`, so an old reply of melo's is not read as something you said.
 - A date shows its year when it is not this year (`May 20, 2023`), and its time when another line of the block is from the same day (`Oct 30, 14:05`).
-- Notes about one subject with different values (for example two weekly-sync days) are listed newest first, and each older one ends `(older; replaced by a newer note)`; none is dropped.
+- Notes about one subject with different values (for example two weekly-sync days) are listed newest first, and each older one ends `(older; replaced by a newer note)`; none is dropped. A note from a page, a file or a task's result never replaces one you typed, so yours is listed first and is not marked, and the other follows it with its source, not marked either; a note you typed after it does mark it older.
 - Without a note too: of two earlier turns where you said one thing with different values, the older one stays out of the block and, when you ask about the past, comes after the newer and ends `(older; replaced by a newer message)`.
 - When only the older turn matches the message, the newer one comes with it, first.
 - Notes are written to you ("You live in Utrecht."), so melo is told that "you" in a note is you; a note without the words you typed reads `a note to the user “…”` in the block.

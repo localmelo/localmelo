@@ -658,6 +658,49 @@ async def test_a_note_a_page_gives_never_replaces_a_note_the_user_typed(
     assert again == "Already remembered: Your manager is Alice Wu."
 
 
+async def recalled(gate: Gate, question: str) -> list[str]:
+    """The lines of the recall block a new chat gets for *question*."""
+    chat = await gate.store.begin_turn(
+        None, "q", holder=HOLDER, title="q", new_session=NewSession()
+    )
+    found = await gate.memory.before_turn(gate.store, chat, question)
+    return [line for line in found.block.splitlines() if line.startswith("- ")]
+
+
+async def test_recall_lists_the_typed_note_unmarked_and_the_page_s_note_beside_it(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn("My manager is Bob.")
+    await gate.remember("Your manager is Bob.", "people")
+    await gate.finish(first)
+    second = await gate.turn(f"Read {URL} and tell me who runs the lab.")
+    await gate.fetch(second, URL, "Manager: Alice Wu. Lab: robotics.")
+    reply = await gate.remember("Your manager is Alice Wu.", "people")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST}): ")
+    typed, page = await recalled(gate, "Who is my manager?")
+    assert typed.startswith("- the user said “My manager is Bob.” (")
+    assert page.startswith("- a note to the user “Your manager is Alice Wu.” (from ")
+    assert HOST in page
+    assert "older" not in typed and "older" not in page
+
+
+async def test_recall_marks_a_page_s_note_older_when_the_typed_note_came_later(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn(f"Read {URL} and tell me who runs the lab.")
+    await gate.fetch(first, URL, "Manager: Alice Wu. Lab: robotics.")
+    await gate.remember("Your manager is Alice Wu.", "people")
+    await gate.finish(first)
+    await gate.turn("My manager is Bob now.")
+    await gate.remember("Your manager is Bob.", "people")
+    # The typed note replaced the page's, so the block lists the typed one alone.
+    (line,) = await recalled(gate, "Who is my manager?")
+    assert line.startswith("- the user said “My manager is Bob now.” (")
+    assert "older" not in line
+
+
 @pytest.mark.parametrize("level", LEVELS)
 async def test_a_page_the_user_called_someone_else_s_supports_no_note_about_them(
     make: Any, level: str
