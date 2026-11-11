@@ -20,7 +20,10 @@ password word (:data:`CUES`) followed by a value, never by the model and never
 by a page (a page's text never reaches :func:`hide`). When the text is not
 plainly a password given, nothing is cut out and nothing can be typed: the page
 is handed to the person, as before. A card number or a one-time code is never
-cut out or typed: those stay the person's.
+cut out or typed: those stay the person's. A value is read whole or not at all:
+one over :data:`MAX_CHARS` is cut out too, with :data:`SPENT` in its place and
+nothing kept (melo could not type it). A shell's working folder (``PWD=/tmp
+make``, ``$PWD``, ``pwd /tmp``) is no password and is read as it is.
 
 Text that is kept and never typed from is read by two functions that only
 read: :func:`password_spans` says where a text gives a password, for memory to
@@ -38,7 +41,8 @@ from typing import Final
 
 # The words that say a value is a password.
 CUES: Final = ("password", "passwd", "pwd", "pw", "密码", "口令")
-# A value is 4 to 128 characters with no space (a quoted one may hold spaces).
+# A value is 4 to 128 characters with no space (a quoted one may hold spaces). A
+# longer one is cut out whole and never kept: nothing can type it (see Vault.hide).
 MIN_CHARS: Final = 4
 MAX_CHARS: Final = 128
 # Passwords the vault keeps at once: the newest. A handle is never used for two
@@ -51,52 +55,99 @@ HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
-_SIZE = "{" + f"{MIN_CHARS},{MAX_CHARS}" + "}"
-# The quoted forms, one group each, and a bare value.
+# A quoted value runs to the first closing quote on its line, a bare one to the
+# next space, quote or end of text; neither is ever cut short (see _values).
 _QUOTES = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("「", "」"))
-_QUOTED = "|".join(
-    f"{left}(?P<q{n}>[^{right}\\n]{_SIZE}){right}"
-    for n, (left, right) in enumerate(_QUOTES)
-)
-_BARE = rf"(?P<bare>[^\s\"'“”‘’「」`]{_SIZE})"
+_CLOSING = dict(_QUOTES)
+_OPENING = "".join(_CLOSING)
+_QUOTE_CHARS = "".join(left + right for left, right in _QUOTES)
 # A password word (not inside a longer word: "keypassword"), a joint that says
-# a value follows, and the value. After ":" or "=" any value counts; after
-# "is" or only a space a bare value counts only when it is no plain word (it
-# holds a digit or a symbol), so "the password manager" gives nothing.
+# a value follows, and the start of the value: an opening quote or a bare run.
+# After ":" or "=" any value counts; after "is" or only a space a bare value
+# counts only when it is no plain word (it holds a digit or a symbol), so "the
+# password manager" gives nothing.
 _GIVEN = re.compile(
     rf"(?<![A-Za-z0-9_])(?P<cue>{_CUE})(?![A-Za-z0-9_])"
     r"(?:(?P<strong>\s*[:：=]\s*)|\s+(?:is|are)\s+|\s*[为是]\s*|\s+)"
-    rf"(?:{_QUOTED}|{_BARE})",
+    rf"(?:(?P<open>[{_OPENING}])|(?P<bare>[^\s{_QUOTE_CHARS}`]{{{MIN_CHARS},}}))",
     re.IGNORECASE,
 )
 _TRAILING = ".,;，。；)）"
+# A shell line says ``pwd`` too, and what it gives is a folder, not a password.
+# Read as the shell reads them, in these shapes only (each narrower than a shell
+# would allow, so that an ODBC string ``PWD=...`` or a password that starts with
+# ``-`` or ``$`` is still hidden): a variable (``$PWD``, ``${PWD:-/tmp}``), an
+# assignment (``PWD=/some/folder make``: upper case, no space round the ``=``,
+# a folder or a variable after it) and the command (``pwd /some/folder``: lower
+# case, only blanks between, a path or an option after it).
+_FOLDER = re.compile(r"/|~/|\.{1,2}/|\$(?:[({]|[A-Z_])")
+_ARGUMENT = re.compile(r"/|~/|\.{1,2}/|--?[A-Za-z][A-Za-z-]*$")
+
+
+def _shell(match: re.Match[str], text: str, value: str, *, quoted: bool) -> bool:
+    """Whether the word of *match* is the shell's own, with *value* after it."""
+    cue, at = match.group("cue"), match.start("cue")
+    if cue.lower() == "pwd" and text.endswith(("$", "${"), 0, at):
+        return True
+    if cue == "PWD":
+        return match.group("strong") == "=" and _FOLDER.match(value) is not None
+    if cue == "pwd" and not quoted and match.group("strong") is None:
+        joint = text[match.end("cue") : match.start("bare")]
+        return not joint.strip(" \t") and _ARGUMENT.match(value) is not None
+    return False
+
+
+def _first(text: str, char: str, start: int, memo: dict[str, int]) -> int:
+    """Where *char* first stands in *text* at or after *start*, or -1.
+
+    *start* only grows from call to call, so an answer found before holds while it
+    is not behind *start*, and "nowhere" holds for good: a line of opening quotes
+    with no closing one is read once, not once per quote.
+    """
+    at = memo.get(char, -2)
+    if at != -1 and at < start:
+        memo[char] = at = text.find(char, start)
+    return at
 
 
 def _values(text: str) -> list[tuple[int, int, str]]:
-    """The passwords *text* gives, as ``(start, end, value)`` of the value, in order."""
+    """The passwords *text* gives, as ``(start, end, value)`` of the value, in order.
+
+    A value is a whole run: a bare one to the next space, quote or end of text, a
+    quoted one to its closing quote on the same line; never a part of one. A run
+    over :data:`MAX_CHARS` is a value too (the caller keeps none of it).
+    """
     found: list[tuple[int, int, str]] = []
-    for match in _GIVEN.finditer(text):
-        name = next(
-            (
-                n
-                for n in (*(f"q{i}" for i in range(len(_QUOTES))), "bare")
-                if match.group(n)
-            ),
-            "",
-        )
-        if not name:
-            continue
-        value, start, end = match.group(name), match.start(name), match.end(name)
-        if name == "bare":
-            stripped = value.rstrip(_TRAILING)
-            end -= len(value) - len(stripped)
-            value = stripped
+    memo: dict[str, int] = {}
+    pos = 0
+    while (match := _GIVEN.search(text, pos)) is not None:
+        # Where the next look starts when nothing was read: after the word.
+        pos = match.end("cue")
+        opening = match.group("open")
+        if opening is not None:
+            start = match.end()
+            end = _first(text, _CLOSING[opening], start, memo)
+            line = _first(text, "\n", start, memo)
+            if end < 0 or 0 <= line < end or end - start < MIN_CHARS:
+                continue
+            value = text[start:end]
+            after = end + 1
+        else:
+            start, end = match.span("bare")
+            value = text[start:end].rstrip(_TRAILING)
+            after = end
+            end = start + len(value)
             if len(value) < MIN_CHARS:
+                pos = after
                 continue
             # A bare word after "is" or a space is no password by its shape.
             if match.group("strong") is None and value.isalpha():
+                pos = after
                 continue
-        if HANDLE.fullmatch(value):
+        if _shell(match, text, value, quoted=opening is not None):
+            continue
+        pos = after
+        if HANDLE.fullmatch(value) or value == SPENT:
             continue
         found.append((start, end, value))
     return found
@@ -124,13 +175,17 @@ class Vault:
 
         The same value always has the same handle while it is kept, so hiding
         a text again (or the same message twice) changes nothing the second
-        time.
+        time. A value over :data:`MAX_CHARS` is cut out whole and kept nowhere:
+        :data:`SPENT` stands in its place, for no handle could be typed from it.
         """
         spans = _values(text)
         if not spans:
             return text
         with self._lock:
-            handles = [self._handle(value) for _, _, value in spans]
+            handles = [
+                self._handle(value) if len(value) <= MAX_CHARS else SPENT
+                for _, _, value in spans
+            ]
         out = text
         for (start, end, _), handle in reversed(list(zip(spans, handles, strict=True))):
             out = out[:start] + handle + out[end:]
@@ -177,8 +232,9 @@ def hide_passwords(text: str) -> str:
 def password_spans(text: str) -> list[tuple[int, int]]:
     """Where *text* gives a password: the ``(start, end)`` of each value, in order.
 
-    The places :func:`hide_passwords` would hide. It only reads: nothing is
-    kept and no handle is made. A handle is not a value.
+    The places :func:`hide_passwords` would hide, a run over :data:`MAX_CHARS`
+    whole. It only reads: nothing is kept and no handle is made. A handle is not
+    a value.
     """
     return [(start, end) for start, end, _ in _values(text)]
 

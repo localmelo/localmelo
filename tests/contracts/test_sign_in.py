@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from localmelo.melo.contracts.sign_in import (
@@ -97,3 +99,108 @@ def test_the_same_value_has_one_handle_and_the_vault_is_bounded_and_shows_nothin
     assert HANDLE.fullmatch(newest[10:]) and not HANDLE.fullmatch("[password-0]")
     VAULT.forget()
     assert VAULT.value(f"[password-{MAX_KEPT + 3}]") is None
+
+
+def _run(size: int) -> str:
+    return ("a1" * size)[:size]
+
+
+@pytest.mark.parametrize("size", [129, 500])
+@pytest.mark.parametrize(
+    "shape",
+    ["pw: {} end", 'pw: "{}" end', "my password {} end", "password={}. end"],
+    ids=["bare", "quoted", "weak joint", "trailing full stop"],
+)
+def test_a_value_over_the_limit_is_cut_out_whole_and_kept_nowhere(
+    shape: str, size: int
+) -> None:
+    text = shape.format(_run(size))
+    out = hide_passwords(text)
+    assert out == shape.format(SPENT) and _run(8) not in out
+    assert repr(VAULT) == "Vault(0 password(s))" and not handles_in(out)
+    ((start, end),) = password_spans(text)
+    assert text[start:end] == _run(size), "reported whole, never a part of the run"
+    assert without_passwords(text) == out
+
+
+def test_a_value_at_the_limit_still_gets_a_handle() -> None:
+    assert hide_passwords(f"pw: {_run(128)}. end") == "pw: [password-1]. end"
+    assert VAULT.value("[password-1]") == _run(128)
+    # The same value, quoted: the same handle.
+    assert hide_passwords(f'pw: "{_run(128)}" end') == 'pw: "[password-1]" end'
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"pw: {_run(129)}",  # cut out whole
+        f"password: {_run(300)}.",
+        f'pw: "{_run(200)}" and pwd = "{_run(9)}"',
+        "pw: [password-1].",  # a handle, also with the full stop the check strips
+        'pw: "[password-1]" and pw: [password-2]),',
+        f"pw: {SPENT}.",  # the mark left by a cut
+        f'pw: "{SPENT}"',
+        f"pw: {_run(12)}[password-1]{_run(12)} then password is {_run(150)}",
+        "pw: ab\npassword:\n\"two words\" and pw is 'a b c d'",
+    ],
+)
+def test_hiding_twice_gives_the_same_text(text: str) -> None:
+    once = hide_passwords(text)
+    assert hide_passwords(once) == once
+    assert without_passwords(without_passwords(text)) == without_passwords(text)
+
+
+# What a shell line says is read as it is: the variable and the command are no
+# password given, in these shapes only.
+SHELL = [
+    "PWD=/some/folder npm test",
+    "export PWD=/tmp; make",
+    'PWD="/some folder" make',
+    "env PWD=~/proj PWD=../proj PWD=$HOME/proj PWD=$(pwd) make",
+    "echo $PWD /tmp/x",
+    "echo ${PWD:-/tmp} and $pwd ./x/y",
+    "run pwd /tmp/x",
+    "pwd ~/proj, then pwd ../proj and pwd --version",
+]
+# Next to them, still a password given and hidden.
+STILL_GIVEN = [
+    "pwd: /x/y1",
+    "pwd=Abc123!",
+    "my pwd is /x/y1",
+    "pwd=/x/y1",  # lower case with "=": unclear
+    "PWD = /x/y1",
+    "PWD= /x/y1",
+    "PWD:/x/y1",
+    "PWD=Abc123!",
+    "PWD=.hidden1",  # a dot is no folder by itself
+    "PWD=$ecret12",  # a variable is upper case
+    'PWD="Abc 123"',
+    "pwd Abc123!",
+    "pwd -Abc123",  # an option is letters
+    "pwd $ecret12",
+    "pwd\n/x/y1",  # on another line
+    "pw /tmp/x/y1",  # no other word is the shell's
+    "password: /x/y1",
+    "echo $pw /tmp/x/y1",
+    "${PASSWORD:-secret123}",
+]
+
+
+@pytest.mark.parametrize("text", SHELL)
+def test_a_shells_working_folder_is_read_as_it_is(text: str) -> None:
+    assert hide_passwords(text) == text and password_spans(text) == []
+    assert without_passwords(text) == text and repr(VAULT) == "Vault(0 password(s))"
+
+
+@pytest.mark.parametrize("text", STILL_GIVEN)
+def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> None:
+    assert password_spans(text) and hide_passwords(text) != text
+
+
+def test_a_line_of_openers_is_read_in_linear_time() -> None:
+    # A quoted value needs its closing quote on the line: a line of openers that
+    # never close must not look to the end of the line once per opener.
+    line = "pw:“ " * 200_000
+    started = time.perf_counter()
+    assert password_spans(line) == []
+    assert time.perf_counter() - started < 3, "0.15 s when read once, minutes if not"
