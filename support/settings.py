@@ -194,7 +194,9 @@ def coerce(key: Key, value: Any, text: str) -> Any:
 
 
 def check(key: Key, value: Any) -> Any:
-    """*value* if the config accepts it for *key*; else exit 2 with why."""
+    """*value* if the config accepts it for *key*, as the config reads it
+    (:func:`config.read_alias`); else exit 2 with why."""
+    value = config.read_alias(key.name, value)
     if key.file:
         cfg = config.Config()
         before = cfg.setting_errors()

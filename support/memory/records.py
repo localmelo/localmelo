@@ -20,7 +20,9 @@ subject an active note holds (:func:`changes`: "My weekly sync is on Friday." af
 said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
 Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
-kept, not recalled, and comes back with an undo of the new one. The subject is
+kept, not recalled, and comes back with an undo of the new one; a note from a page, a
+file or a result replaces only an older note of that kind, and both stand otherwise
+(:func:`write`). The subject is
 what a note is about without its value (:func:`subject`); with an embedding
 model, a note close in meaning that differs from an old one in one short span
 is the same subject too (:func:`value_apart`). A third party's fact names its
@@ -53,13 +55,25 @@ from localmelo.melo.memory.hippo.policy import (
     normalise,
     overlap,
 )
-from localmelo.melo.memory.hippo.signals import classify_user_text, request_clause
+from localmelo.melo.memory.hippo.signals import (
+    classify_user_text,
+    request_clause,
+    request_note,
+)
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
 from localmelo.support.memory import people
-from localmelo.support.memory.recall import OLDER, Item, stem, unit
+from localmelo.support.memory.recall import (
+    OLDER,
+    OWN,
+    REWORDED,
+    TAKEN,
+    Item,
+    stem,
+    unit,
+)
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
 TOPIC_LABELS: Final = {
@@ -441,9 +455,10 @@ class Candidate:
 class Written:
     """A record a turn wrote; ``replaced`` is the id it superseded, if any.
 
-    ``source`` is where the note came from (``typed``, ``pointed``, ``result`` or
-    ``inferred``) when the note gate says so (``[memory] note_gate`` above ``typed``);
-    ``""`` otherwise, and then the event has no ``source``.
+    ``source`` is where the note came from (``pointed``, ``result`` or ``inferred``)
+    when the note gate says so, which it does for a note that rests on something
+    other than the user's own words; ``""`` otherwise, and then the event has no
+    ``source``.
     """
 
     id: int
@@ -902,8 +917,10 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     facts = [_release(f) for f in signals.facts]
     found = [_release(f) for f in signals.request_facts]
     # A request whose words after the marker did not read as a fact alone
-    # ("Remember, I'm allergic to peanuts.") keeps the whole sentence.
-    found += [f for f in facts if classify_user_text(f).remember]
+    # ("Remember, I'm allergic to peanuts.") keeps the sentence without its marker.
+    for fact in facts:
+        if classify_user_text(fact).remember and (note := request_note(fact)):
+            found.append(note)
     # A statement is not kept by rule, but one with a secret still says so.
     refused = any(sensitive(s) for s in facts)
     out: list[Candidate] = []
@@ -1464,6 +1481,60 @@ def _near(vector: Sequence[float] | None, model: str, entry: StoredEntry) -> boo
     return mine.shape == theirs.shape and float(np.dot(mine, theirs)) >= NEAR_COSINE
 
 
+# The sources the note gate tags a note with (``provenance["source"]``), most
+# trusted first. A note the person's own words made has none.
+TYPED: Final = "typed"
+POINTED: Final = "pointed"
+RESULT: Final = "result"
+INFERRED: Final = "inferred"
+# The sources of a note from material: a page or file, a finished task's result, or
+# the model's own inference.
+FROM_MATERIAL: Final = (POINTED, RESULT, INFERRED)
+
+# What ``admitted_by`` is for a record the person's own words made: their message
+# asked for it (``user_request``) or stated it (``user_statement``). Any other
+# signal (a note from a page, a file or a result is ``outcome``) is not their words.
+OWN_WORDS: Final = ("user_statement", "user_request")
+
+
+def by_person(entry: StoredEntry) -> bool:
+    """Whether the person's own words made *entry*: its signal is one of
+    :data:`OWN_WORDS` and its provenance names no other source (a note kept from a
+    page, a file or a result says so there, whatever signal it carries)."""
+    return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
+
+
+def standing(entry: StoredEntry) -> int:
+    """How far *entry* is the person's own, for what may replace it and for which
+    note of a subject recall shows as the current one.
+
+    :data:`TAKEN`: a note from a page, a file or a result as melo took it (its signal
+    is ``outcome`` or its source is one of :data:`FROM_MATERIAL`; also one kept
+    before sources were written). :data:`REWORDED`: such a note that the person
+    edited by hand. :data:`OWN`: any other note: one they typed or asked for, one
+    sleep wrote, an imported one, edited or not."""
+    from_material = (
+        entry.admitted_by == "outcome"
+        or entry.provenance.get("source") in FROM_MATERIAL
+    )
+    if not from_material:
+        return OWN
+    return REWORDED if entry.provenance.get("edited") else TAKEN
+
+
+def kept_from_replacement(entry: StoredEntry) -> bool:
+    """Whether a note from a page, a file or a result must not replace *entry*: it
+    stands above :data:`TAKEN` (:func:`standing`). An older note from a page, a file
+    or a result that nobody edited is replaced."""
+    return standing(entry) > TAKEN
+
+
+def may_replace(admitted_by: str, old: StoredEntry) -> bool:
+    """Whether a note admitted as *admitted_by* may replace *old*: not when it is
+    from a page, a file or a result (``outcome``) and *old* is kept from replacement."""
+    return admitted_by != "outcome" or not kept_from_replacement(old)
+
+
 def decide(
     text: str,
     active: Sequence[StoredEntry],
@@ -1600,6 +1671,13 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
     a record that says the newest value again is not marked. A record that reads
     as older already (:func:`~localmelo.support.memory.recall.newer_first`) is
     left as it is. Other items stay where they were.
+
+    A record is marked older only by a newer one that stands at least as high
+    (``standing``: :func:`standing`), and the records come highest first. So a
+    record from a page, a file or a result never marks the person's own older, nor
+    one from a page that they reworded; a reworded one never marks their own; and
+    the person's own newest marks every older record of the subject, as ever. Each
+    record shows its source.
     """
     groups: dict[str, list[int]] = {}
     for at, item in enumerate(items):
@@ -1607,18 +1685,31 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
             groups.setdefault(key, []).append(at)
     out = list(items)
     for slots in groups.values():
-        newest, *rest = sorted(
-            (items[at] for at in slots),
-            key=lambda item: (item.created_at, _record_number(item.key)),
+        found = [items[at] for at in slots]
+        values = {normalise(item.text) for item in found}
+        if len(found) < 2 or len(values) < 2:
+            continue
+        ranked = sorted(
+            found,
+            key=lambda item: (item.standing, *_newness(item)),
             reverse=True,
         )
-        current = normalise(newest.text)
-        if len(slots) < 2 or all(normalise(item.text) == current for item in rest):
-            continue
-        for at, item in zip(slots, [newest, *rest], strict=True):
-            same = normalise(item.text) == current
+        # What replaces a record: the newest of those that stand at least as high.
+        current = {
+            level: normalise(
+                max((i for i in found if i.standing >= level), key=_newness).text
+            )
+            for level in {item.standing for item in found}
+        }
+        for at, item in zip(slots, ranked, strict=True):
+            same = normalise(item.text) == current[item.standing]
             out[at] = item if same else dataclasses.replace(item, older=OLDER)
     return out
+
+
+def _newness(item: Item) -> tuple[float, int]:
+    """What orders two records of a subject by age: the time, then the number."""
+    return item.created_at, _record_number(item.key)
 
 
 def _record_number(key: str) -> int:
@@ -1656,6 +1747,13 @@ async def write(
 
     *origin* and *created_at* are what the store keeps as the row's source and
     time; sleep writes as ``sleep``, at the time of the turn it read.
+
+    A candidate admitted as ``outcome`` (a note from a page, a file or a result)
+    replaces only an older note that is itself from a page, a file or a result and
+    was not reworded by hand (:func:`kept_from_replacement`); beside any other note
+    (one the person typed or asked for, one sleep wrote, an imported one) it is
+    written as a note of its own, each with its source. Any other candidate still
+    replaces any older note of its subject.
     """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
@@ -1663,6 +1761,16 @@ async def write(
         action, target = decide(
             cand.text, active, kind=cand.kind, vector=vector, embed_model=embed_model
         )
+        if action == "UPDATE" and any(
+            e.id == target and not may_replace(cand.admitted_by, e) for e in active
+        ):
+            action, target = decide(
+                cand.text,
+                [e for e in active if may_replace(cand.admitted_by, e)],
+                kind=cand.kind,
+                vector=vector,
+                embed_model=embed_model,
+            )
         if action == "IGNORE":
             continue
         provenance = {
