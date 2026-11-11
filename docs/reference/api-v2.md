@@ -1923,7 +1923,8 @@ Create a session, usually with its first turn.
   `invalid_request` with the file named, and so is a file or name that is over its limit
   once a password in it is hidden. The gateway cleans each file, redacts secrets in it,
   cuts a password it gives out as it does in the words (a handle such as `[password-482913075]`,
-  a number that is new each time melo starts, stays) and adds it to the message as an `<attachment>` block, so the turn's `user_text`
+  a number that is new each time melo starts, stays; a key, token, key block or code beside it is
+  hidden with it when cutting the password would take its keyword or first line) and adds it to the message as an `<attachment>` block, so the turn's `user_text`
   holds the words and the files. When the words say to sign in or name a password,
   give none of their own, and the files hold exactly one (none when a password in the
   message could not be kept), the run of that turn may type it on a site the words

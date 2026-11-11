@@ -564,6 +564,15 @@ THE_FILE = TextAttachment("login.txt", "password: file-Secret7\n")
 ASK = "sign in to forum.example for me"
 
 
+def test_a_secret_beside_a_password_in_a_files_text_is_cut_with_it_by_the_same_door() -> (
+    None
+):
+    file = TextAttachment("login.txt", "password: Bearer abcdefghijklmnopqrstuv\n")
+    hidden = hide_message(ASK, (file,))
+    assert hidden.attachments[0].text == "password: [password-1] [redacted]\n"
+    assert hidden.file_handles == {"[password-1]"}
+
+
 def test_the_door_names_the_handles_it_made_from_values_in_the_files_never_from_their_text() -> (
     None
 ):

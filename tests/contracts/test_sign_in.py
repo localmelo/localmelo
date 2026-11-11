@@ -9,7 +9,8 @@ import time
 import pytest
 
 from localmelo.melo.agent._step_review import holds_secret
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker import redaction
+from localmelo.melo.checker.redaction import REDACTED, redact_secrets, secret_spans
 from localmelo.melo.contracts.sign_in import (
     HANDLE,
     MAX_KEPT,
@@ -466,3 +467,79 @@ def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) 
     assert len(password_spans(line)) == spans
     assert len(hide_passwords(line)) <= len(line)
     assert time.perf_counter() - started < 1, "tens of milliseconds, seconds if not"
+
+
+# Made-up values with the shape of a secret.
+TOKEN = "abcdefghijklmnopqrstuv"
+KEY = "sk-" + "a1b2" * 6
+BLOCK_ENDS = ("-----BEGIN RSA PRIVATE KEY-----\n", "\n-----END RSA PRIVATE KEY-----")
+KEY_BLOCK = BLOCK_ENDS[0] + "MIIEvQIBADANBgkqhkiG9w0BAQEF\nAASCBKcwggSj" + BLOCK_ENDS[1]
+BESIDE = [
+    # The cut took the token's keyword: the token, and the code, are cut with it.
+    (
+        f"password: Bearer {TOKEN}, my otp 123456",
+        "password: [password-1] [redacted], my otp [redacted]",
+    ),
+    # ... or the first line of a key block: the body is cut, on a line of its own.
+    (
+        f"password: {KEY_BLOCK}",
+        "password: [password-1] RSA PRIVATE KEY-----\n[redacted]\n-----END RSA PRIVATE KEY-----",
+    ),
+    # A password inside a key block: the joined place is its handle, on a line of its own.
+    (
+        f"{BLOCK_ENDS[0]}MIIE\npassword: abcd1234\nxyz{BLOCK_ENDS[1]}",
+        "-----BEGIN RSA PRIVATE KEY-----\n[password-1]\n-----END RSA PRIVATE KEY-----",
+    ),
+    # A password word straight after a cut secret would read as one once the mark stands
+    # before it: it goes with the secret.
+    (
+        f"password: Bearer {TOKEN} and {KEY}密码 hunter22",
+        "password: [password-1] [redacted] and [redacted] hunter22",
+    ),
+    # A cut place that held a line break keeps one: quotes are paired by line.
+    (
+        f'password: "{KEY_BLOCK}; pw: "x1y2',
+        'password: "[password-1] RSA PRIVATE KEY-----\n[redacted]\n-----END RSA PRIVATE KEY-----; pw: "[password-2]',
+    ),
+    # A password that is key-shaped: only the password is cut, as before.
+    (f"my password: {KEY}", "my password: [password-1]"),
+    # A code the redaction still finds after the cut stays readable (the model reads it).
+    (
+        "password: hunter22 and my otp 123456",
+        "password: [password-1] and my otp 123456",
+    ),
+    # No password: nothing is cut, and the text is not read for secrets at all.
+    (f"Bearer {TOKEN} and {KEY}", f"Bearer {TOKEN} and {KEY}"),
+]
+
+
+@pytest.mark.parametrize(("text", "hidden"), BESIDE)
+def test_a_password_beside_another_secret_hides_both_unless_the_redaction_still_finds_it(
+    text: str, hidden: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    real = redaction.secret_spans
+
+    def spy(text: str) -> list[tuple[int, int]]:
+        reads.append(text)
+        return real(text)
+
+    monkeypatch.setattr(redaction, "secret_spans", spy)
+    out = hide_passwords(text)
+    assert out == hidden
+    assert bool(reads) == bool(password_spans(text)), "read only with a password"
+    # No secret the redaction finds in the text as given is readable in the result,
+    # unless it finds it in the result too.
+    found = {out[start:end] for start, end in secret_spans(out)}
+    for start, end in secret_spans(text):
+        assert text[start:end] not in out or text[start:end] in found
+    assert hide_passwords(out) == out, "twice is once"
+    assert password_spans(out) == [], "the handle and the mark are no password"
+
+
+def test_a_handle_of_nine_digits_and_the_mark_are_read_as_no_secret_and_no_password() -> (
+    None
+):
+    handle = Vault().hide("password: a1b2c3d4")[10:]
+    for text in (handle, REDACTED, f"{handle} {REDACTED}", f"otp {REDACTED}{handle}"):
+        assert secret_spans(text) == [] and password_spans(text) == []
