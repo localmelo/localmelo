@@ -666,7 +666,7 @@ export function newTurn(row) {
     images: pictureRefs(source.images),
     // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
     origin: String(source.origin ?? ""),
-    // Its text is not what the person typed (a stopped task going on, a task another made).
+    // Its text is not what the person typed (a stopped task going on, a task another made, the go-ahead of Allow once).
     composed: source.composed === true,
     status: String(source.status ?? ""),
     cause: String(source.cause ?? ""),

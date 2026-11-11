@@ -121,6 +121,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The terminal keeps a running turn when its connection to the gateway breaks, and shows the rest of it when the connection is back.
 - `melo` no longer starts tool servers it will not use when the gateway is already running.
 - `melo task` says Did not finish where it said Failed, and Continued in a newer task (with no hint to continue it) for a run whose work went on.
+- In the terminal, the sentence melo words itself for Allow once never lands in your input box or ↑ history, and `/retry` says what it tries again.
 
 ### Setup
 

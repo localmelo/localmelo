@@ -136,12 +136,15 @@ async def _run(
     task: str = TASK,
     big: int = 0,
     own_chars: int | None = None,
+    words: str | None = None,
+    earlier: list[tuple[str, str]] | None = None,
     **options: Any,
 ) -> tuple[RunResult, list[AgentEvent], Agent]:
     """A run of *task* on *llm*; echo returns *pad* characters, 50,000 for part *big*.
 
     The person's part of *task* is its first *own_chars* characters (all of it
-    when not given).
+    when not given); *words* are what they typed when that is not the task, and
+    *earlier* the chat's turns before it.
     """
     agent = Agent(
         llm=llm,
@@ -161,7 +164,13 @@ async def _run(
     agent.executor.register("echo", echo)
     events: list[AgentEvent] = []
     try:
-        result = await agent.run_task(task, own_chars=own_chars, on_event=events.append)
+        result = await agent.run_task(
+            task,
+            own_chars=own_chars,
+            user_words=words,
+            earlier_turns=earlier,
+            on_event=events.append,
+        )
     finally:
         await agent.close()
     return result, events, agent
@@ -237,6 +246,20 @@ async def test_the_checkpoint_comes_at_the_line_and_the_window_starts_over(
     later = llm.requests[first + 1 : nxt]
     for earlier, request in zip(later, later[1:], strict=False):
         assert _wire(request)[: len(earlier)] == _wire(earlier)
+
+
+async def test_a_turn_with_no_words_has_the_persons_request_as_its_goal() -> None:
+    """The go-ahead of Allow once is melo's sentence; the goal is what the person asked before it."""
+    sentence = "Go ahead with the step melo blocked: install software."
+    llm = Stub(steps=40)
+    result, _, _ = await _run(
+        llm, task=sentence, words="", earlier=[(TASK, "Blocked.")]
+    )
+    assert result.checkpoints >= 1
+    block = _block(
+        llm.requests[next(i for i, r in enumerate(llm.requests) if _asks(r)) + 1]
+    )
+    assert f"Goal: {TASK}" in block and sentence not in block
 
 
 async def test_a_second_checkpoint_replaces_the_first_and_saw_it() -> None:
