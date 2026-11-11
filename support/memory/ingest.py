@@ -27,13 +27,18 @@ user message before it, and a message with no text, are skipped and counted.
 A user message over :data:`~localmelo.melo.checker.validators.MAX_QUERY_LEN`
 characters is cut there and counted as ``trimmed``.
 
-A password a user message or a session's title gives is replaced by its handle
-before anything is stored, indexed, kept as a note or read by a model, as at a
-chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): a
-value a user message or a title gives reaches no record. An assistant message is
-stored as it came; what counts as a password given is decided from the person's
-text only. A handle can be longer than the value it stands for, so the message
-is cut after the hiding, and a title is cut to the store's limit.
+A password a message or a session's title gives is cut out before anything is
+stored, indexed, kept as a note or read by a model, and ``[…]`` stands in its
+place (:func:`~localmelo.melo.contracts.sign_in.without_passwords`): what the
+sign-in contract reads as the value reaches no record. Nothing is typed from a
+loaded chat, so no handle is made and the passwords of the person at the
+keyboard are not touched. An assistant message is cut the same way, after its
+keys are redacted as the store redacts an answer: in a file it can repeat what
+the person gave, and a stored answer is read again by search and by a model
+when the chat goes on. A user message and a title keep their other text as the
+store keeps a person's words. A user message is cut to the store's limit after
+that, so no part of a value is left at the cut. A title is cut to the store's
+limit too: a longer one would stop the run.
 
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
@@ -64,8 +69,9 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from localmelo.melo import clock
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.melo.contracts.sign_in import hide_passwords
+from localmelo.melo.contracts.sign_in import without_passwords
 from localmelo.support.memory import ChatMemory, hippo_encode, hippo_judge
 from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import is_cut
@@ -418,11 +424,14 @@ async def run(
         source: dict[str, Any] = {}
         mine: list[hippo_encode.Turn] = []
         for exchange in pairs:
-            # Hidden first, then cut: no part of a value is left at the cut.
-            typed = hide_passwords(exchange.typed)
+            # Cut out first, then cut to length: no part of a value is left there.
+            typed = without_passwords(exchange.typed)
             if len(typed) > MAX_QUERY_LEN:
                 typed = typed[:MAX_QUERY_LEN]
                 report.trimmed += 1
+            # Keys first, as the store redacts an answer: a key after a password
+            # word would lose its first part to the cut and no longer read as one.
+            answer = without_passwords(redact_secrets(exchange.answer)[0])
             pin.at = exchange.asked_at
             info = await chats.begin_turn(
                 session_id or None,
@@ -434,9 +443,9 @@ async def run(
                 session_id = info.session_id
                 report.sessions += 1
                 report.ids[chat.label] = session_id
-                # Hidden, then cut to the store's limit: a handle can be longer than
-                # its value, and a title over the limit would stop the run.
-                title = hide_passwords(chat.title).strip()[:_MAX_TITLE_CHARS].rstrip()
+                # Cut to the store's limit: a longer title would stop the run.
+                title = without_passwords(chat.title).strip()
+                title = title[:_MAX_TITLE_CHARS].rstrip()
                 if title:
                     await chats.rename_session(session_id, title)
                 session = await chats.get_session(session_id)
@@ -453,20 +462,18 @@ async def run(
                 status="completed",
                 cause="run",
                 result=None,
-                answer=exchange.answer,
+                answer=answer,
             )
             report.turns += 1
-            report.cut += int(is_cut(typed, exchange.answer))
-            turns.append(
-                (source, info.turn, typed, exchange.answer, exchange.answered_at)
-            )
+            report.cut += int(is_cut(typed, answer))
+            turns.append((source, info.turn, typed, answer, exchange.answered_at))
             mine.append(
                 hippo_encode.Turn(
                     info.turn,
                     exchange.asked_at,
                     exchange.answered_at,
                     typed,
-                    exchange.answer,
+                    answer,
                 )
             )
             if notes == "rules":

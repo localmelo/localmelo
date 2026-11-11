@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from localmelo.melo.checker.redaction import REDACTED, redact_secrets
+from localmelo.melo.checker.redaction import REDACTED, redact_secrets, secret_spans
 
 LETTERS = string.ascii_letters[:24]
 GITHUB = "ghp_" + "aB3" * 12  # 36 letters and digits
@@ -52,6 +52,24 @@ EXAMPLES = [
 @pytest.mark.parametrize(("text", "result", "count"), EXAMPLES)
 def test_the_examples(text: str, result: str, count: int) -> None:
     assert redact_secrets(text) == (result, count)
+
+
+@pytest.mark.parametrize(("text", "result", "count"), EXAMPLES)
+def test_a_text_has_a_secrets_place_exactly_when_it_has_a_secret(
+    text: str, result: str, count: int
+) -> None:
+    spans = secret_spans(text)
+    assert bool(spans) == (count > 0)
+    assert all(text[start:end] not in result for start, end in spans)
+
+
+def test_a_secrets_place_is_read_in_the_text_as_given() -> None:
+    # The word before a token and a code's keyword may stand in another sentence.
+    assert secret_spans("Bearer\nabcdefghijklmnop1234 ok") == [(7, 27)]
+    assert secret_spans("The code is 4821. Use this OTP now.") == [(12, 16)]
+    block = "-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----"
+    assert secret_spans(block) == [(27, 35)]
+    assert secret_spans(redact_secrets(block)[0]) == []
 
 
 @pytest.mark.parametrize(("text", "result", "count"), EXAMPLES)

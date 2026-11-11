@@ -293,6 +293,7 @@ async def test_the_error_does_not_offer_the_browser_when_it_is_on() -> None:
         "python asyncio TaskGroup",
         "番茄 晚疫病 怎么防治",
         "what does my password manager do",  # the word alone is not a secret
+        "password: reset steps",  # reads like one given, but a search holds no value
         "release notes for version 3.2.1",
     ],
 )
