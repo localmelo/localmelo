@@ -1,29 +1,28 @@
 """The note gate: where a note the chat's model keeps with ``remember`` may come from.
 
-Developer setting ``[memory] note_gate`` (#442), three cumulative levels. A note is
+Setting ``[memory] note_gate`` (#442), two cumulative levels. A note is
 kept when something the chat shows supports it, and the gate tags the note with that
 source (source monitoring): what the user typed (``typed``), material the user
 pointed to (``pointed``) or a finished task's result (``result``), in that order of
 trust. A note kept by an earlier version may also carry ``inferred`` (the model's own
 inference), which no level writes now and recall still reads.
 
-- ``typed``, the default, is the rule that always was: the note's words are in what
-  the user typed in this chat or in a finished task's result shown in it
-  (:func:`records.unsupported`). This module is not asked at all.
-- ``pointed`` adds the page or file the user pointed to: one the chat fetched or read
-  (:func:`pointed_material`, from the chat's stored tool events) whose address or
-  file name the user typed, or that the user's words in that turn call theirs
-  (:data:`THEIRS`). A page the user did not point to is no source at any level, and a
-  page the user called someone else's supports no note about the user.
+- ``pointed``, the default: the note's words are in what the user typed in this chat,
+  in a page or file the user pointed to, or in a finished task's result shown in it
+  (:func:`records.unsupported`). A page or file the user pointed to is one the chat
+  fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
+  address or file name the user typed, or that the user's words in that turn call
+  theirs (:data:`THEIRS`). A page the user did not point to is no source at any level,
+  and a page the user called someone else's supports no note about the user.
 - ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
   numbers, dates, addresses, e-mail addresses, names) must be found in a source, and
   the rest of it may say the same in other words or another language, judged by the
   cosine between its embedding and the best window of the sources
-  (:func:`windows`). Without an embedding model that is the ``typed`` word check.
+  (:func:`windows`). Without an embedding model that is the ``pointed`` word check.
 
-Every level but ``typed`` also refuses a note that is an instruction to the assistant
-(:func:`is_instruction`), not a fact about the user. Secrets are refused at every
-level before this module is asked.
+Both levels refuse a note that is an instruction to the assistant
+(:func:`is_instruction`), not a fact about the user. Secrets are refused before this
+module is asked.
 
 What a page, a file or a finished task's result may support is what it *states*, not
 what it hides or asks the assistant to do. Material (a page or a file) goes through
@@ -63,7 +62,6 @@ from urllib.parse import unquote, urlsplit
 import numpy as np
 
 from localmelo.melo.agent._step_review import named_sites
-from localmelo.support.config import MEMORY_NOTE_GATE
 from localmelo.support.memory import markup, records
 from localmelo.support.memory.index import CHUNK_OVERLAP
 
@@ -1226,9 +1224,3 @@ def cosine(left: Sequence[float], right: Sequence[float]) -> float:
 def best_cosine(vector: Sequence[float], group: Sequence[Sequence[float]]) -> float:
     """The highest cosine of *vector* to a vector of *group* (0 for none)."""
     return max((cosine(vector, other) for other in group), default=0.0)
-
-
-def level_at_least(level: str, wanted: str) -> bool:
-    """Whether the gate *level* includes *wanted*; an unknown level is ``typed``."""
-    ranks = {name: n for n, name in enumerate(MEMORY_NOTE_GATE)}
-    return ranks.get(level, 0) >= ranks[wanted]

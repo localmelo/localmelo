@@ -22,7 +22,7 @@ import pytest
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.contracts.providers import ProviderError
 from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.memory import ChatMemory, note_judge, records
+from localmelo.support.memory import ChatMemory, note_gate, note_judge, records
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.service import (
     CHAT_TURN,
@@ -41,7 +41,7 @@ from localmelo.tests.memory.test_note_judge import FakeProvider
 from localmelo.tests.sessions.helpers import core_event
 
 HOLDER = "test-host:1:remember"
-NOT_SAID = "Not remembered: not something the user said."
+NOT_SAID = note_gate.NOT_SUPPORTED
 
 
 @pytest.fixture()
@@ -103,7 +103,7 @@ async def test_the_tool_sits_beside_search_memory_and_asks_no_approval(
     assert topic["enum"] == list(records.TOPICS)
     # No confirmation: the tier that never asks, and no approval of its own.
     assert tier_of(remember.definition) == "read" and not remember.requires_approval
-    for words in ("never ask the user first", "Never a password", "a tool's output"):
+    for words in ("never ask the user first", "Never a password", "did not point to"):
         assert words in remember.definition.description
 
 
@@ -179,7 +179,6 @@ async def test_a_fact_only_a_page_or_a_tool_said_is_refused(
     await memory.before_turn(store, turn, typed)
     answer = await memory.tools().remember(text=note, topic="about")
     assert answer.startswith(NOT_SAID)
-    assert "Keep only what the user told you, in their words." in answer
     assert await memory.records() == []
 
 
@@ -189,7 +188,7 @@ async def test_the_refusal_names_the_words_the_user_never_typed(
     typed = "My manager is Bob."
     await memory.before_turn(store, await _turn(store, typed), typed)
     answer = await memory.remember("Your manager is Alice.", "people")
-    assert answer.startswith(f"{NOT_SAID} alice: not in what the user typed")
+    assert answer.startswith(f"{NOT_SAID}alice.")
     # Told so, the model keeps what the user said.
     assert (await memory.remember("Your manager is Bob.", "people")).startswith(
         "Remembered: Your manager is Bob."
@@ -265,11 +264,9 @@ async def test_a_note_in_another_language_or_with_a_changed_value_is_refused(
 ) -> None:
     await memory.before_turn(store, await _turn(store, typed), typed)
     answer = await memory.remember(note, "about")
-    assert answer.startswith(f"{NOT_SAID} {words}: not in what the user typed")
+    assert answer.startswith(f"{NOT_SAID}{words}.")
     assert answer.endswith(
-        "in their words."
-        + (" Write it in the language the user used." if hint else "")
-        + TRY_ONCE_MORE
+        (" Write it in the language the user used." if hint else "") + TRY_ONCE_MORE
     )
     assert await memory.records() == []
 
@@ -331,7 +328,9 @@ async def test_a_finished_task_result_shown_in_the_chat_counts(
         "task “Make the group talk slides”"
     ]
     note = "Your group talk slides are in ~/talk, due Oct 30 15:00."
-    assert (await memory.remember(note, "projects")).startswith("Remembered: ")
+    assert (await memory.remember(note, "projects")).startswith(
+        "Remembered (source: result): "
+    )
     (entry,) = await memory.records()
     assert entry.admitted_by == "outcome" and entry.provenance["quote"] == ""
     assert entry.provenance["topic"] == "projects" and entry.kind == "episodic"
@@ -694,7 +693,7 @@ async def test_a_note_that_adds_who_is_kept_and_one_that_adds_a_value_is_not(
     refused = await memory.remember(
         "You have a cousin named Ren who lives in Osaka.", "people"
     )
-    assert refused.startswith(f"{NOT_SAID} osaka: not in what the user typed")
+    assert refused.startswith(f"{NOT_SAID}osaka.")
     kept = "You have a cousin named Ren who lives in Kyoto."
     assert (await memory.remember(kept, "people")).startswith(f"Remembered: {kept} ")
     (entry,) = await memory.records()
@@ -1119,7 +1118,8 @@ async def test_an_order_in_chinese_or_japanese_is_refused_without_the_judge(
 ) -> None:
     judge = _judge(memory, YES)
     await _begin(memory, store, said)
-    assert (await memory.remember(note, "about")).startswith(NOT_SAID)
+    refused = await memory.remember(note, "about")
+    assert refused.startswith((NOT_SAID, note_gate.NOT_A_FACT)), refused
     assert await memory.records() == [] and judge.calls == []
 
 

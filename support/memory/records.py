@@ -389,9 +389,10 @@ class Candidate:
 class Written:
     """A record a turn wrote; ``replaced`` is the id it superseded, if any.
 
-    ``source`` is where the note came from (``typed``, ``pointed``, ``result`` or
-    ``inferred``) when the note gate says so (``[memory] note_gate`` above ``typed``);
-    ``""`` otherwise, and then the event has no ``source``.
+    ``source`` is where the note came from (``pointed``, ``result`` or ``inferred``)
+    when the note gate says so, which it does for a note that rests on something
+    other than the user's own words; ``""`` otherwise, and then the event has no
+    ``source``.
     """
 
     id: int

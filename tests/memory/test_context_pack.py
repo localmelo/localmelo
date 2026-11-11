@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory import ChatMemory, note_gate, records
 from localmelo.support.memory.service import (
     ASK_OWNER,
     CHAT_TURN,
@@ -518,7 +518,7 @@ async def test_a_task_question_is_not_indexed_and_not_evidence(
     third = await turn(store, "What next?", first.session_id)
     await memory.before_turn(store, third, "What next?")
     reply = await memory.remember("Your gate for Faro is 9.", "about")
-    assert reply.startswith("Not remembered: not something the user said.")
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
     assert await memory.records() == []
     # The normal turn still keeps a note of its own words.
     fourth = await turn(store, "I use gate 9 for Faro.", first.session_id)

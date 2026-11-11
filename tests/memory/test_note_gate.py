@@ -188,15 +188,6 @@ def test_cosine_and_the_best_of_a_group() -> None:
     assert gate.best_cosine([1.0, 0.0], []) == 0.0
 
 
-def test_the_levels_include_the_ones_before_them() -> None:
-    order = ["typed", "pointed", "meaning"]
-    for n, level in enumerate(order):
-        for m, wanted in enumerate(order):
-            assert gate.level_at_least(level, wanted) is (n >= m)
-    assert gate.level_at_least("nonsense", "typed")
-    assert not gate.level_at_least("nonsense", "pointed")
-
-
 # ── Pointed material ──
 
 

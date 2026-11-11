@@ -372,20 +372,22 @@ def _guide(gathers: bool, lines: Iterable[Item]) -> str:
 
 class NoteSettings(NamedTuple):
     """The ``[memory]`` settings of the note gate (:mod:`.note_gate`): its *level*,
-    ``typed`` (today's rule), ``pointed`` or ``meaning``, and *min_cosine*, the least
-    similarity of meaning that counts as a source's support."""
+    ``pointed`` or ``meaning``, and *min_cosine*, the least similarity of meaning
+    that counts as a source's support."""
 
-    level: str = note_gate.TYPED
+    level: str = note_gate.POINTED
     min_cosine: float = note_gate.MIN_COSINE
 
 
 class Admission(NamedTuple):
     """Where the note gate found a note's support: its *source* (``typed``,
     ``pointed`` or ``result``) and, for ``pointed``, the page's address or the
-    file's name as *ref*."""
+    file's name as *ref*. *judged* says the chat's model confirmed a restatement of
+    the typed words (:meth:`ChatMemory._judged`)."""
 
     source: str
     ref: str = ""
+    judged: bool = False
 
 
 class Embedded(NamedTuple):
@@ -1045,16 +1047,16 @@ class ChatMemory:
     def note_settings(self) -> NoteSettings:
         """The note gate's settings of the settings now: ``[memory] note_gate`` and
         ``note_min_cosine``. A value out of its bounds or of the wrong type reads as
-        its default (``typed``, 0.55), as :meth:`recall_settings` reads its own."""
+        its default (``pointed``, 0.55), as :meth:`recall_settings` reads its own."""
         cfg = self._settings()
         if cfg is None:
             return NoteSettings()
-        level = getattr(cfg.memory, "note_gate", note_gate.TYPED)
+        level = getattr(cfg.memory, "note_gate", note_gate.POINTED)
         bar = getattr(cfg.memory, "note_min_cosine", note_gate.MIN_COSINE)
         low, high = MEMORY_NOTE_MIN_COSINE
         fits = isinstance(bar, int | float) and not isinstance(bar, bool)
         return NoteSettings(
-            level if level in MEMORY_NOTE_GATE else note_gate.TYPED,
+            level if level in MEMORY_NOTE_GATE else note_gate.POINTED,
             float(bar) if fits and low <= bar <= high else note_gate.MIN_COSINE,
         )
 
@@ -1732,25 +1734,20 @@ class ChatMemory:
 
         Refused: outside a chat's turn, in a turn the person did not begin
         (``TurnInfo.origin``), a secret, a note that says "I" and "you", or "I"
-        and "the user" (:data:`WRITE_IN_YOU`: its "I" is melo), and words the
-        user did not type in this chat and no finished task's result shown in it
-        holds. A note that says "I" or "my" and nothing of the user otherwise is
-        kept in the second person (:func:`records.second_person`), as the user's
-        own words are; a sentence the user typed that the note copies exactly
-        stays as typed and is not read for "I" (:func:`records.typed_spans`).
+        and "the user" (:data:`WRITE_IN_YOU`: its "I" is melo), an instruction to
+        the assistant, and a note that no source supports (:meth:`_admit`): what
+        the user typed in this chat, a page or file the user pointed to, or a
+        finished task's result shown in it. A note that says "I" or "my" and
+        nothing of the user otherwise is kept in the second person
+        (:func:`records.second_person`), as the user's own words are; a sentence
+        the user typed that the note copies exactly stays as typed and is not read
+        for "I" (:func:`records.typed_spans`). A note a page, a file or a result
+        supports says where it came from, in the reply and in the turn's event
+        (``source``).
 
         A turn gets :data:`MAX_REFUSALS` refusals. The first says the model may try
         once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
         answers :data:`NO_MORE_TRIES` with no check run (:attr:`ChatTurn.refusals`).
-
-        That is the rule at ``[memory] note_gate = "typed"``, the default. A note it
-        refuses only for Chinese or Japanese wording goes once to the chat's model
-        (:meth:`_judged`), which keeps it when no name, place, number or date
-        changed; a refusal it does not lift counts as any other. Above it
-        (:meth:`_admit`) a page or file the user pointed to is a source too, a note
-        may say the same in other words, and an instruction to the assistant is
-        refused; the note is then kept with where it came from, and the reply and
-        the turn's event say so (``source``).
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -1787,39 +1784,12 @@ class ChatMemory:
             ):
                 return WRITE_IN_YOU
             note = records.second_person(note, protect=True, keep=typed)
-        gate = self.note_settings()
-        admission: Admission | None = None
-        judged = False
-        if gate.level == note_gate.TYPED:
-            admitted = "user_statement"
-            missing = records.unsupported(note, said)
-            if missing:
-                admitted = "outcome"
-                missing = records.unsupported(note, said + await self._results(turn))
-            if missing and await self._judged(note, said):
-                # A restatement the chat's model confirmed: from here on it is a
-                # note the typed rule passed.
-                admitted, missing, judged = "user_statement", [], True
-            if missing:
-                return (
-                    "Not remembered: not something the user said. "
-                    f"{', '.join(missing[:3])}: not in what the user typed in this "
-                    "chat or in a finished task's result shown here. Keep only what "
-                    "the user told you, in their words."
-                    + (
-                        " Write it in the language the user used."
-                        if records.other_script(missing, said)
-                        else ""
-                    )
-                )
-        else:
-            found = await self._admit(turn, note, said, gate)
-            if isinstance(found, str):
-                return found
-            admission = found
-            admitted = (
-                "user_statement" if found.source == note_gate.TYPED else "outcome"
-            )
+        admission = await self._admit(turn, note, said, self.note_settings())
+        if isinstance(admission, str):
+            return admission
+        admitted = (
+            "user_statement" if admission.source == note_gate.TYPED else "outcome"
+        )
         if topic not in records.TOPICS:
             topic = records.topic_of(note, request=False)
         quote = records.quote_for(note, said) if admitted == "user_statement" else ""
@@ -1828,9 +1798,9 @@ class ChatMemory:
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)
-        if judged:
+        if admission.judged:
             source["judged"] = True
-        if admission is not None and admission.source == note_gate.POINTED:
+        if admission.source == note_gate.POINTED:
             # Where the note came from stays with it: recall says so.
             source = {**source, "source": admission.source}
             if admission.ref:
@@ -1846,7 +1816,9 @@ class ChatMemory:
         if not written:
             return f"Already remembered: {note}"
         label = ""
-        if admission is not None:
+        if admission.source != note_gate.TYPED:
+            # A note from the user's own words reads as it always did; any other
+            # says where it came from, in the reply and in the turn's event.
             written = [replace(w, source=admission.source) for w in written]
             label = f" (source: {admission.source}"
             if admission.source == note_gate.POINTED:
@@ -1857,14 +1829,15 @@ class ChatMemory:
         return f"Remembered{label}: {note} The user sees it and can undo it."
 
     async def _judged(self, note: str, said: list[str]) -> bool:
-        """Whether the chat's model confirms a note the typed rule refused.
+        """Whether the chat's model confirms a note that no source supports.
 
-        Asked only when nothing but Chinese or Japanese wording is missing
-        (:func:`note_judge.cjk_only_refusal`) and a chat model is set up: one
-        request, within :data:`note_judge.JUDGE_TIMEOUT_S`, with *said* (the user's
-        own typed words) as the only evidence. No memory lock is held meanwhile.
-        A no, an unreadable reply, a timeout or an error leaves the refusal; one
-        log line says which and how long it took, never the note.
+        Asked only when nothing but Chinese or Japanese wording is missing from
+        what the user typed (:func:`note_judge.cjk_only_refusal`) and a chat model
+        is set up: one request, within :data:`note_judge.JUDGE_TIMEOUT_S`, with
+        *said* (the user's own typed words; never a page's or a result's text) as
+        the only evidence. No memory lock is held meanwhile. A no, an unreadable
+        reply, a timeout or an error leaves the refusal; one log line says which and
+        how long it took, never the note.
         """
         if not note_judge.cjk_only_refusal(note, said):
             return False
@@ -1884,20 +1857,24 @@ class ChatMemory:
         self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
     ) -> Admission | str:
         """Where the support of *note* is, at the note gate's level, or why it is
-        refused (a message for the model). Not asked at the ``typed`` level.
+        refused (a message for the model).
 
         An instruction to the assistant is refused first. Then the sources, most
-        trusted first: what the user typed (the ``typed`` rule: its words), a page or
-        file the user pointed to, a finished task's result shown in the chat. With
-        ``meaning``, a note whose key tokens are all found may also say the same in
-        other words or another language (:meth:`_by_meaning`). A
-        page or file the user did not point to supports nothing, and one the user
-        called someone else's supports no note about the user. A page read in the
-        browser supports nothing either; the refusal says so
-        (:data:`note_gate.NOT_BROWSER`). What a page or a file supports is what it
-        states (:func:`note_gate.material_text`): its hidden text and its paragraphs
-        that order the assistant are left out; of a result only the paragraphs aimed
-        at an assistant (:func:`note_gate.result_text`).
+        trusted first: what the user typed (its words), a page or file the user
+        pointed to, a finished task's result shown in the chat. With ``meaning``, a
+        note whose key tokens are all found may also say the same in other words or
+        another language (:meth:`_by_meaning`). A page or file the user did not
+        point to supports nothing, and one the user called someone else's supports
+        no note about the user. A page read in the browser supports nothing either;
+        the refusal says so (:data:`note_gate.NOT_BROWSER`). What a page or a file
+        supports is what it states (:func:`note_gate.material_text`): its hidden text
+        and its paragraphs that order the assistant are left out; of a result only
+        the paragraphs aimed at an assistant (:func:`note_gate.result_text`).
+
+        A note no source supports, and that only Chinese or Japanese wording keeps
+        from the typed words, goes once to the chat's model (:meth:`_judged`), which
+        keeps it as a note the typed words support when no name, place, number or
+        date changed.
         """
         if note_gate.is_instruction(note):
             return note_gate.NOT_A_FACT
@@ -1925,10 +1902,12 @@ class ChatMemory:
             note, evidence + [m.text for m in browsed]
         ):
             return note_gate.NOT_BROWSER
-        if note_gate.level_at_least(gate.level, "meaning"):
-            judged = await self._by_meaning(note, said, usable, results, gate)
-            if judged is not None:
-                return judged
+        if gate.level == "meaning":
+            meant = await self._by_meaning(note, said, usable, results, gate)
+            if meant is not None:
+                return meant
+        if await self._judged(note, said):
+            return Admission(note_gate.TYPED, judged=True)
         missing = records.unsupported(note, evidence)
         return (
             note_gate.NOT_SUPPORTED
@@ -3362,8 +3341,10 @@ REMEMBER: Final = ToolDef(
         "written to the user in the second person, so “you” is the user, in the "
         "language of the user's message in this turn and with the user's facts. "
         "Never a password, a key, a login or one-time code or "
-        "a card number, and never something only "
-        "a web page, a file or a tool's output says."
+        "a card number, and never something only a page or file the user did not "
+        "point to says, or that a page or file says of someone else. What a page "
+        "or file the user pointed to, such as their own website or resume, shows "
+        "about them may be kept."
     ),
     parameters={
         "type": "object",
@@ -3378,39 +3359,6 @@ REMEMBER: Final = ToolDef(
     # file: like search_memory it asks for no approval (no confirmation).
     annotations={"readOnlyHint": True},
 )
-
-
-# What ``remember`` says of pages and files with ``[memory] note_gate = "typed"``, and
-# what it says instead above that level, where a page or file the user pointed to may
-# support a note (:mod:`.note_gate`).
-_NEVER_PAGES: Final = (
-    "and never something only a web page, a file or a tool's output says."
-)
-_POINTED_PAGES: Final = (
-    "and never something only a page or file the user did not point to says, or "
-    "that a page or file says of someone else. What a page or file the user pointed "
-    "to, such as their own website or resume, shows about them may be kept."
-)
-
-
-def remember_for(level: str) -> ToolDef:
-    """``remember`` for the note gate's *level* (``[memory] note_gate``).
-
-    ``typed`` is :data:`REMEMBER` itself, its text unchanged. Above it the closing
-    words about pages and files say that what the user pointed to may support a
-    note and what they did not point to may not.
-    """
-    if level not in ("pointed", "meaning"):
-        return REMEMBER
-    assert REMEMBER.description.endswith(_NEVER_PAGES)
-    text = REMEMBER.description[: -len(_NEVER_PAGES)] + _POINTED_PAGES
-    return ToolDef(
-        name=REMEMBER.name,
-        description=text,
-        parameters=copy.deepcopy(REMEMBER.parameters),
-        semantic_tags=list(REMEMBER.semantic_tags),
-        annotations=REMEMBER.annotations,
-    )
 
 
 def search_memory_listing(list_max: int, items: bool = False) -> ToolDef:
@@ -3592,7 +3540,7 @@ class MemoryTools(BaseToolProvider):
             reading = Reading(False, 0.0)
         settings = self._memory.recall_settings(reading)
         remember = ProvidedTool(
-            definition=remember_for(self._memory.note_settings().level),
+            definition=REMEMBER,
             function=self.remember,
         )
         opening: ToolDef | None
