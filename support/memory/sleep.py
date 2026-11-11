@@ -196,8 +196,8 @@ class SleepTurn:
 async def sleep_turns(chats: SessionStore, since: float) -> list[SleepTurn]:
     """The chat turns that finished after *since* with a ``turn.memory`` event
     (memory was on): completed, not undone, not a task's or a worker's."""
-    from localmelo.support.memory.service import _typed_words, is_owner_question
-    from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
+    from localmelo.support.memory.service import is_owner_question
+    from localmelo.support.sessions.store import MEMORY_EVENT_TYPE, typed_words
 
     out: list[SleepTurn] = []
     used: dict[tuple[str, int], float] = {}
@@ -214,7 +214,7 @@ async def sleep_turns(chats: SessionStore, since: float) -> list[SleepTurn]:
                 continue
             if is_owner_question(turn):
                 continue
-            typed = _typed_words(turn)
+            typed = typed_words(turn)
             before, previous = previous, typed
             data = seen.get(turn.turn)
             if data is None or (turn.finished_at or 0) <= since:
