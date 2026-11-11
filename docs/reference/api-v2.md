@@ -1932,7 +1932,8 @@ Create a session, usually with its first turn.
   (`turn.started` lists them as `images`, and the [blobs route](#get-apisessionsidblobssha256) serves
   them), so a retry sends them again.
 - A message may have no words when it has pictures or files: `text` may then be empty, and the turn's
-  words read `[2 pictures]` or `[attached: notes.md]`.
+  words read how many, never a name: `[2 pictures]`, `[1 file]` or `[2 pictures] [1 file]`. The words are
+  melo's, not the person's: the run is given none, and a file's name is read from the file itself.
   The text is checked by the gateway ingress checker; a refusal is 400
   `text_rejected`.
 

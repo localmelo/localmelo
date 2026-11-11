@@ -40,6 +40,7 @@ from localmelo.support.sessions.attachments import (
     compose_user_text,
     hide_message,
     snapshot,
+    stand_in,
 )
 from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.picture_input import MAX_PICTURES
@@ -218,7 +219,7 @@ def _compose(request: CancelRequest) -> str:
     if not words:
         if not request.images and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
-        words = _marker(len(request.images), [file.name for file in attached])
+        words = stand_in(len(request.images), len(attached))
     return compose_user_text(words, attached)
 
 
@@ -284,16 +285,6 @@ def _seen(value: Any) -> int | None:
     return value if type(value) is int else None
 
 
-def _marker(pictures: int, files: list[str]) -> str:
-    """The words of a message sent with a picture or a file and no words."""
-    parts = []
-    if pictures:
-        parts.append(f"[{pictures} picture{'' if pictures == 1 else 's'}]")
-    if files:
-        parts.append(f"[attached: {', '.join(files)}]")
-    return " ".join(parts)
-
-
 async def _sent(
     console: Console, request: TurnRequest, session_id: str | None
 ) -> _Sent:
@@ -313,7 +304,7 @@ async def _sent(
     if not words:
         if not staged and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
-        words = _marker(len(staged), [file.name for file in attached])
+        words = stand_in(len(staged), len(attached))
     words = _check_text(console, words, session_id)
     whole = compose_user_text(words, attached)
     if len(whole) > MAX_QUERY_LEN:
@@ -394,7 +385,9 @@ async def _while_running(
     if sent.extras.images:
         # A queued message keeps words; these pictures wait in the composer.
         raise ApiError(409, "chat_answering", t("errors.picturesWhileAnswering"))
-    echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
+    echo = await console.asks.queue(
+        session_id, sent.typed, sent.words, key, sent.extras.attachments
+    )
     return JSONResponse(status_code=200, content={"echo": echo})
 
 
@@ -643,7 +636,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
-                echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
+                echo = await console.asks.queue(
+                    session_id, sent.typed, sent.words, key, sent.extras.attachments
+                )
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
@@ -741,7 +736,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 400, "invalid_request", t("errors.noteTooLong", n=MAX_NOTE_CHARS)
             )
         # The words a picture stands in for when there are none, as a message has.
-        words = text or _marker(len(staged), [])
+        words = text or stand_in(len(staged), 0)
         composed = _check_text(console, words, entry.session_id)
         note = await console.asks.add_note(
             entry.session_id, turn_id, text, composed, key, staged

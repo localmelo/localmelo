@@ -403,8 +403,15 @@ def _old_row(words: str, **more: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize(
     "more",
-    [{}, {"reading": True}, {"images": [{"blob": "b1", "media_type": "image/png"}]}],
-    ids=["unread", "read", "with a picture"],
+    [
+        {},
+        {"reading": True},
+        {"images": [{"blob": "b1", "media_type": "image/png"}]},
+        # A message row whose files are not a list of files is not run: its text may
+        # hold what the person never meant to send.
+        {"message": True, "attachments": [{"name": 1}]},
+    ],
+    ids=["unread", "read", "with a picture", "files that are not files"],
 )
 async def test_a_row_from_before_the_mark_starts_nothing_after_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, more: dict[str, Any]

@@ -365,6 +365,9 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
         await s.runner.start_turn("Install matplotlib and chart", words="chart it")
         await s.runner.wait()
         assert run_task.call_args.kwargs["user_words"] == "chart it"
+        # The row says what was typed when the words are given apart from the text (#626).
+        stored = await s.store.list_turns(session.id)
+        assert [turn.typed_text for turn in stored][1:] == ["chart it"]
 
         # A turn whose text melo wrote (a stopped task's card): the review reads the
         # person's words, memory gets no typed words, and it needs those words.

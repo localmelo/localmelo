@@ -85,9 +85,9 @@ export function splitAttachments(userText) {
   return { words: text.slice(0, start), files };
 }
 
-/** Whether *words* are only what the gateway writes for a message sent with no words. */
+/** Whether *words* are only what the gateway writes for a message sent with no words: how many (`[2 pictures] [1 file]`), or an older message's `[attached: a.txt]`. */
 export function isStandIn(words) {
-  return /^(?:\[\d+ pictures?\])?(?: ?\[attached: [^\]]*\])?$/.test(String(words).trim()) && String(words).trim() !== "";
+  return /^(?:\[\d+ pictures?\])?(?: ?\[(?:\d+ files?|attached: [^\n]*)\])?$/.test(String(words).trim()) && String(words).trim() !== "";
 }
 
 let counter = 0;

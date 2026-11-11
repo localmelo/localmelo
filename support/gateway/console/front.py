@@ -167,6 +167,7 @@ from localmelo.support.gateway.task_store import (
 )
 from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
+from localmelo.support.sessions.attachments import words_before_files
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     short_title,
@@ -1154,6 +1155,20 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     if live.get("left"):
         lines.append(f"its last note: {answer_head(live['left'], ANSWER_CHARS)}")
     return lines
+
+
+def _retried(turn: TurnInfo) -> bool:
+    """Whether Try again made *turn*: it has no typed text, or it carries files and has not the key a message sent from the page has (#626).
+
+    A retry of a message whose files are stored keeps its typed words; one of an
+    older message has them in its text, and its words are what comes before them.
+    """
+    return not turn.typed_text.strip() or (
+        turn.client_request_id is None
+        and bool(
+            turn.attachments or words_before_files(turn.user_text) != turn.user_text
+        )
+    )
 
 
 def _receipt(typed: str, title: str | None) -> str:
@@ -2389,7 +2404,7 @@ class Front:
     async def _accepted(self, turn: TurnInfo) -> TurnInfo:
         """The turn *turn*'s words were accepted in: itself, or the one its retries go back to."""
         accepted = turn
-        while not accepted.typed_text.strip():
+        while _retried(accepted):
             earlier = await self.console.store.list_turns(
                 turn.session_id, before=accepted.turn, limit=RETRIES_READ
             )
@@ -2397,7 +2412,7 @@ class Front:
                 if not row.undone or row.user_text != turn.user_text:
                     return accepted
                 accepted = row
-                if row.typed_text.strip():
+                if not _retried(row):
                     return accepted
             if len(earlier) < RETRIES_READ:
                 return accepted
