@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -21,7 +22,8 @@ import pytest
 
 from localmelo.support import command_words, config, memory_cli, onboard
 from localmelo.support.backends import discovery
-from localmelo.support.memory import ChatMemory
+from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory.recall import day
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.cli.test_choice_lists import DOWN, ENTER, ESC, seen, typed
 from localmelo.tests.fixtures.http_stub import HttpStub
@@ -84,6 +86,52 @@ def test_list_prints_the_notes_newest_first_and_status_counts_them(
     status = capsys.readouterr().out
     assert "on, across chats" in status and "notes       2" in status
     assert "by words only" in status and "~/.cache/localmelo/memory" in status
+
+
+SOURCES: list[tuple[str, dict[str, str], str]] = [
+    (
+        "Your lab is in Leeds.",
+        {"source": "pointed", "from": "https://jane.example.com/a"},
+        "from jane.example.com",
+    ),
+    (
+        "Your skills are Python.",
+        {"source": "pointed", "from": "resume.pdf"},
+        "from the file resume.pdf",
+    ),
+    ("Your desk is D4.", {"source": "result"}, "from a finished task's result"),
+    ("Your team is Atlas.", {"source": "inferred"}, "melo inferred it from Main chat"),
+    ("Your cat is Mo.", {}, "from Main chat"),
+]
+
+
+def test_the_list_says_where_a_note_from_a_page_a_file_or_a_result_came_from(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def seed() -> list[tuple[str, str]]:
+        memory = ChatMemory(lambda: None)
+        try:
+            for turn, (text, provenance, _) in enumerate(SOURCES, 1):
+                source = {"session_id": "s1", "turn": turn, "chat": "Main chat"}
+                await records.write(
+                    memory.stores()[0],
+                    [records.Candidate(text, "", "about", "outcome")],
+                    [None],
+                    source={**source, **provenance},
+                    embed_model="",
+                )
+            return [(e.text, memory_cli.note_origin(e)) for e in await memory.records()]
+        finally:
+            await memory.aclose()
+
+    origins = dict(asyncio.run(seed()))
+    for text, _, words in SOURCES:
+        assert origins[text].startswith(words), (text, origins[text])
+        assert origins[text].endswith(f", {day(time.time())}")
+    assert memory_cli.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert f"      from jane.example.com, {day(time.time())}\n" in out
+    assert "from a finished task's result" in out and "from Main chat" in out
 
 
 def test_an_empty_list_says_how_memory_starts(

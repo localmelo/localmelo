@@ -136,14 +136,6 @@ def _inferred_words(info: Any, label: str, gone: bool, at: float, surface: str) 
     return t("memoryRows.inferred", chat=_chat_words(info, label, surface), day=on)
 
 
-def _from_page(prov: dict[str, Any], at: float) -> str:
-    """Where a note kept from material the user pointed to came from: the page's host
-    or the file's name, and the day."""
-    ref = str(prov.get("from") or "")
-    key = "memoryRows.fromPage" if "://" in ref else "memoryRows.fromFile"
-    return t(key, name=note_gate.name_of(ref), day=_on(at))
-
-
 def _from_file(prov: dict[str, Any], at: float) -> str:
     """Where an imported note came from: its file's name and the day."""
     name = Path(str(prov.get("path") or "")).name or str(prov.get("chat") or "")
@@ -171,12 +163,13 @@ def _row(
     pointed = how == note_gate.POINTED and bool(prov.get("from"))
     inferred = how == note_gate.INFERRED
     when = day(entry.created_at)
+    material = note_gate.where_from(prov, t, _on(entry.created_at))
     if pointed:
         source = f"from {note_gate.name_of(str(prov['from']))}, {when}"
-        origin = _from_page(prov, entry.created_at)
+        origin = material
     elif how == note_gate.RESULT:
         source = f"from a finished task's result, {when}"
-        origin = t("memoryRows.fromResult", day=_on(entry.created_at))
+        origin = material
     elif inferred:
         source = f"melo inferred it · {label}, {when}"
         origin = _inferred_words(info, label, gone, entry.created_at, surface)
