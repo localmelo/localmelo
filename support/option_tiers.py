@@ -129,8 +129,6 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.recall_list_max": "#428",
     "memory.recall_open_chars": "#428",
     "memory.recall_source": "#428",
-    "memory.note_gate": "#442",
-    "memory.note_min_cosine": "#442",
 }
 
 # Long option name -> tier, for every option the parser has.
@@ -213,6 +211,11 @@ REMOVED_SETTINGS: dict[str, str] = {
     "memory.recall_notes": "recall carries notes",
     "memory.open_sources": "an opened item shows its title and text and names its turns",
     "memory.keep_statements": "code keeps no fact the model did not keep with remember",
+    "memory.note_gate": (
+        "the note gate has one rule now: a note's words are in what you typed, in a "
+        "page or file you pointed to, or in a finished task's result"
+    ),
+    "memory.note_min_cosine": "the note gate checks no closeness of meaning now",
 }
 
 # The two settings whose option takes no value: the option means the key has this one.
