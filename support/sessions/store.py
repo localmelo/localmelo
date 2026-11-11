@@ -320,6 +320,7 @@ _SCHEMA: Final = (
     note        TEXT NOT NULL DEFAULT '',
     origin      TEXT NOT NULL DEFAULT '',
     composed    INTEGER NOT NULL DEFAULT 0,
+    typed_apart INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, turn)
 )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS turns_running ON turns(session_id) "
@@ -483,21 +484,28 @@ class TurnInfo:
     # The turn's text is not what a person typed (a stop card, a task melo or
     # another agent made): no reader takes it for the person's words.
     composed: bool = False
+    # The caller gave the typed text apart from the turn's text, so ``typed_text``
+    # holds the words that caller gave: the person's, for every turn that is not
+    # ``composed``. Without it ``typed_text`` may be only the session's first
+    # title (``begin_turn``): never read it as words (#626).
+    typed_apart: bool = False
 
 
 def typed_words(turn: TurnInfo) -> str:
-    """What the person typed in *turn*: never a file's text; ``""`` for a turn whose text melo composed.
+    """What the person typed in *turn*: never a file's text or a title; ``""`` for a turn whose text melo composed.
 
     The one reader of the typed words of an earlier turn (#626). A turn with files
     stored keeps its typed text apart from them, and so does a turn whose words
-    were given apart from its text. A row with no typed text is its own text, cut
-    at its first file block: a row written before files were stored as
-    attachments still has them there. Words that are only the stand-in melo wrote
-    for a message with no words (``[1 file]``) are nothing the person typed.
+    were given apart from its text (``typed_apart``). Any other row has no typed
+    text: its ``typed_text`` is only the title the session got from it, so the
+    words are the row's own text, cut at its first file block (a row written
+    before files were stored as attachments still has them there). Words that are
+    only the stand-in melo wrote for a message with no words (``[1 file]``) are
+    nothing the person typed.
     """
     if turn.composed:
         return ""
-    if turn.attachments or turn.typed_text:
+    if turn.attachments or turn.typed_apart:
         said = turn.typed_text
     else:
         said = words_before_files(turn.user_text)
@@ -865,7 +873,7 @@ _TURN_COLUMNS: Final = (
     "t.answer, t.result, t.holder, t.undone, t.started_at, t.finished_at, "
     "(SELECT a.client_request_id FROM submissions a WHERE a.session_id = t.session_id "
     "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text, t.attachments, "
-    "t.origin, t.composed"
+    "t.origin, t.composed, t.typed_apart"
 )
 _SUBMISSION_COLUMNS: Final = (
     "u.client_request_id, u.scope, u.state, u.session_id, u.text_sha256, u.error, "
@@ -893,6 +901,7 @@ def _turn_info(row: Sequence[Any]) -> TurnInfo:
         attachments=decode_attachments(row[15]),
         origin=row[16],
         composed=bool(row[17]),
+        typed_apart=bool(row[18]),
     )
 
 
@@ -1130,12 +1139,15 @@ class SessionStore:
                         )
                     await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 # Added in version 3 without a new version, so that a build from
-                # before it still opens the file: it never reads the column.
+                # before them still opens the file: it never reads the columns.
                 rows = await _rows(conn, "PRAGMA table_info(turns)")
-                if "composed" not in {row[1] for row in rows}:
-                    await conn.execute(
-                        "ALTER TABLE turns ADD COLUMN composed INTEGER NOT NULL DEFAULT 0"
-                    )
+                have = {row[1] for row in rows}
+                for column in ("composed", "typed_apart"):
+                    if column not in have:
+                        await conn.execute(
+                            f"ALTER TABLE turns ADD COLUMN {column} "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
         # 7. Retention (T-2) and 8. recovery (T-3), before anything serves.
         self._stop_if_closed()
         await self._retain(conn)
@@ -2456,7 +2468,10 @@ class SessionStore:
         ``turn.started`` and, with that title, ``session.title``. *origin*
         (:data:`TURN_ORIGINS`) marks a turn the person did not begin, which
         gives the session no title; *composed* marks a turn whose text is not
-        what a person typed (:attr:`TurnInfo.composed`). *images* are the pictures the person added:
+        what a person typed (:attr:`TurnInfo.composed`). *typed_text* is what the
+        person typed when it is not *user_text* (with files, or words given apart):
+        it marks the row (:attr:`TurnInfo.typed_apart`), and without it the column
+        holds *title*. *images* are the pictures the person added:
         their payloads go to ``blobs`` in the same transaction and
         ``turn.started`` lists them (``sha256``, ``mime_type``, ``size_bytes``),
         so they show again after a reload.
@@ -2554,8 +2569,8 @@ class SessionStore:
                 turn_id = uuid.uuid4().hex
                 await conn.execute(
                     "INSERT INTO turns (session_id, turn, id, user_text, typed_text, "
-                    "attachments, holder, started_at, origin, composed) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "attachments, holder, started_at, origin, composed, typed_apart) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session_id,
                         number,
@@ -2567,6 +2582,7 @@ class SessionStore:
                         now,
                         origin,
                         int(composed),
+                        int(typed_text is not None),
                     ),
                 )
                 for image in images:
