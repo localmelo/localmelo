@@ -493,9 +493,18 @@ def number_spans(text: str) -> list[tuple[int, int]]:
     takes text out by its place, as :func:`~localmelo.melo.checker.redaction.secret_spans`
     is: a number alone on a line, or one that crosses a line, belongs to no sentence.
 
-    Not found: a card inside a longer run of four-digit numbers on one line, a card
-    written with tabs or wide gaps between its groups, and a card wrapped over two
-    lines with another number joined to it on either side.
+    A dot or a dash separates a card's digits only in the form
+    ``4111.1111.1111.1111``, and a card does not start right after a digit and a dot
+    (a decimal number's fraction): floats, prices, versions, addresses, coordinates
+    and year ranges are no cards.
+
+    Not found: a card written in groups after a group of four or more digits on its
+    line; a card with tabs or wide gaps between its groups; a card wrapped over two
+    lines with another number joined to it on the line before or after (a line
+    before it that is itself cut as a secret does not count: the cleaning of the
+    index repeats, and finds the card when that line is gone); a hyphen followed by a
+    line break; a card with one group per line; ``4111. 1111.``; and, of the ID
+    numbers, ``123 45 6789``, nine bare digits and the 15-digit form.
     """
     places = [match.span(1) for match in _ID_NUMBER.finditer(text)]
     for pattern in (_CARD, _CARD_WRITTEN):

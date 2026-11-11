@@ -1594,7 +1594,8 @@ class ChatMemory:
         session = await store.get_session(info.session_id)
         kind = session.kind if session is not None else "chat"
         # A note's provenance keeps the title and recall shows its label to the
-        # model, so a title that holds a secret's place is stored without it.
+        # model: from now on the title is stored without the places of secrets
+        # (a note stored before keeps it as it was, and recall cleans the label).
         title = cleaned_title(session.title) if session is not None else ""
         folder = session.workspace if session is not None else None
         return {

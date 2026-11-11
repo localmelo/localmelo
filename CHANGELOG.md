@@ -140,7 +140,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
 - A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
 - A text file you send on to a task, running or finished, is data too: only the words you typed with it count as yours.
-- A card number written across a line break, with dots or unusual spaces, alone on a line, or followed by its expiry date or security code is kept out of what melo remembers, and so is a card number or password in a chat's title.
+- A card number alone on a line, written with dots or unusual spaces, across one line break, or followed by its expiry or security code is kept out of what melo remembers from now on; a chat's title loses such a number too.
 - A password longer than 128 characters is cut out whole, not in part; hiding a message twice gives the same text, and a shell's `PWD=/folder` or `pwd /folder` is no longer taken for a password.
 
 ### Scripts and API
