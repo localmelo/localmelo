@@ -112,6 +112,10 @@ def test_a_remember_request_that_points_elsewhere_carries_no_fact(text: str) -> 
         ("Items are kept in the blue box.", True),
         ("我对花生过敏。", True),
         ("我姐姐住在利兹。", True),
+        ("it takes me 40 minutes to get to work.", True),
+        ("几年前我住在利兹。", True),
+        ("几乎每天我都在公园跑步。", True),
+        ("哪怕下雨我也喜欢跑步。", True),
         ("where I work now", False),
         ("What the room number is", False),
         ("whether she moved", False),
@@ -133,6 +137,42 @@ def test_a_note_stands_alone_unless_it_opens_by_pointing_elsewhere(
     note: str, alone: bool
 ) -> None:
     assert stands_alone(note) is alone
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "when I'm travelling I prefer window seats.",
+        "what I like most is hiking.",
+        "how I take my coffee is black, no sugar.",
+    ],
+)
+def test_a_statement_may_open_with_a_question_word(note: str) -> None:
+    # After "that" the words are a statement, never an indirect question.
+    assert stands_alone(note) is False
+    assert stands_alone(note, statement=True) is True
+    assert classify_user_text(f"Remember that {note}").request_facts == (note,)
+
+
+@pytest.mark.parametrize("note", ["she prefers email.", "their office is in Leeds."])
+def test_a_statement_about_someone_unnamed_does_not_stand_alone(note: str) -> None:
+    assert stands_alone(note, statement=True) is False
+    assert classify_user_text(f"Remember that {note}").request_facts == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Remember who my manager is.",
+        "Please remember when the meeting starts.",
+        "记住几点开会。",
+        "记住什么时候开会。",
+    ],
+)
+def test_an_indirect_question_leaves_no_note(text: str) -> None:
+    signals = classify_user_text(text)
+    assert signals.facts == ()
+    assert signals.request_facts == ()
 
 
 def test_a_request_note_cuts_the_marker_and_keeps_the_rest() -> None:

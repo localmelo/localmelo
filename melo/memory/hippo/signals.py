@@ -90,14 +90,21 @@ _CLAUSE_LEAD = re.compile(r"^[\s,:;，：；\-—–、]+", re.UNICODE)
 _CLAUSE_THAT = re.compile(r"^(?:the\s+fact\s+)?that\b[\s,:;，：；]*", re.IGNORECASE)
 # "Remember to buy milk." is a to-do, not a fact.
 _INFINITIVE_LEAD = re.compile(r"^(?:to\b|去)", re.IGNORECASE)
-# A note read later without its chat has to hold what it says. A clause that opens with
-# the word of an indirect question ("where I work now") or with a third-person pronoun
-# ("her email") points at something the chat held: what the person asked melo to
-# remember is that thing, and these words only name it.
-_POINTS_ELSEWHERE = re.compile(
-    r"^[\s\"'“‘(（\[]*(?:(?:where|what|when|who|whom|which|how|why|whether"
-    r"|he|him|his|she|her|hers|they|them|their|theirs|it|its)\b"
-    r"|哪|什么|谁|何时|怎么|多少|几|他|她|它)",
+# A note read later without its chat has to hold what it says. Two openings say its
+# words point at something the chat held. One is a third-person pronoun ("her email",
+# "he lives in Leeds"): the note does not say who. "It" is left out: it is as often a
+# subject that names nothing ("it takes me 40 minutes to get to work").
+_OPENING = r"^[\s\"'“‘(（\[]*"
+_THIRD_PERSON_LEAD = re.compile(
+    _OPENING + r"(?:(?:he|him|his|she|her|hers|they|them|their|theirs|its)\b|他|她|它)",
+    re.IGNORECASE,
+)
+# The other is the word of an indirect question ("where I work now"): what the person
+# asked melo to remember is the answer, and these words only name it. 几 asks only
+# before what it counts on a clock or a calendar (几点, 几号): 几年前 and 几乎 state.
+_QUESTION_LEAD = re.compile(
+    _OPENING + r"(?:(?:where|what|when|who|whom|which|how|why|whether)\b"
+    r"|哪(?!怕)|什么|谁|何时|怎么|多少|几(?=[点号月岁楼时]))",
     re.IGNORECASE,
 )
 
@@ -155,27 +162,38 @@ def _marker_span(sentence: str, marker: str) -> tuple[int, int] | None:
     return None if start < 0 else (start, start + len(marker))
 
 
-def request_clause(sentence: str) -> str:
-    """The fact a remember request carries after its earliest marker."""
+def _after_marker(sentence: str) -> tuple[str, bool]:
+    """The words a remember request carries after its earliest marker, and whether
+    "that" led them: then they are a statement ("remember that …"), never an
+    indirect question."""
     spans = [
         span
         for marker in REMEMBER_MARKERS
         if (span := _marker_span(sentence, marker)) is not None
     ]
     if not spans:
-        return ""
+        return "", False
     start = min(spans)[1]
-    clause = _CLAUSE_LEAD.sub("", sentence[start:])
-    clause = _CLAUSE_THAT.sub("", clause)
-    return clause.strip()
+    led = _CLAUSE_LEAD.sub("", sentence[start:])
+    clause = _CLAUSE_THAT.sub("", led)
+    return clause.strip(), clause != led
 
 
-def stands_alone(note: str) -> bool:
+def request_clause(sentence: str) -> str:
+    """The fact a remember request carries after its earliest marker."""
+    return _after_marker(sentence)[0]
+
+
+def stands_alone(note: str, *, statement: bool = False) -> bool:
     """Whether *note*, the words a remember request leaves, reads on its own when it is
-    found later without its chat: it is no to-do ("remember to call …") and it does not
-    open with the word of an indirect question or a third-person pronoun
-    (:data:`_POINTS_ELSEWHERE`)."""
-    return not (_INFINITIVE_LEAD.match(note) or _POINTS_ELSEWHERE.match(note))
+    found later without its chat. It is no to-do ("remember to call …"), it does not
+    open with a third-person pronoun (:data:`_THIRD_PERSON_LEAD`), and it does not open
+    with the word of an indirect question (:data:`_QUESTION_LEAD`) unless it is a
+    *statement*: the words after "that", or a whole sentence ("remember that when I
+    travel I prefer window seats")."""
+    if _INFINITIVE_LEAD.match(note) or _THIRD_PERSON_LEAD.match(note):
+        return False
+    return statement or not _QUESTION_LEAD.match(note)
 
 
 def request_note(sentence: str) -> str:
@@ -184,12 +202,10 @@ def request_note(sentence: str) -> str:
     words when they state the fact ("Remember that I'm allergic to peanuts." leaves "I'm
     allergic to peanuts."), else the whole *sentence* ("I live in Leeds, remember
     that."). ``""`` when that note does not stand alone (:func:`stands_alone`)."""
-    clause = request_clause(sentence)
-    stated = bool(clause) and (
-        _states_a_statement_marker(clause) or _states_a_fact(clause)
-    )
-    note = clause if stated else sentence
-    return note if stands_alone(note) else ""
+    clause, that = _after_marker(sentence)
+    if clause and (_states_a_statement_marker(clause) or _states_a_fact(clause)):
+        return clause if stands_alone(clause, statement=that) else ""
+    return sentence if stands_alone(sentence, statement=True) else ""
 
 
 def _is_meta_statement(text: str) -> bool:
@@ -263,9 +279,9 @@ def classify_user_text(text: str) -> UserSignals:
         )
         remember = remember or sentence_remember
         if sentence_remember:
-            clause = request_clause(stripped)
+            clause, that = _after_marker(stripped)
             if clause and _states_a_declarative_fact(clause):
-                if clause not in request_facts and stands_alone(clause):
+                if clause not in request_facts and stands_alone(clause, statement=that):
                     request_facts.append(clause)
                 continue
         stated = _states_a_statement_marker(stripped)
