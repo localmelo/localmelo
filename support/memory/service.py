@@ -1970,7 +1970,9 @@ class ChatMemory:
         """The pages and files this chat read that the user pointed to, from the
         chat's stored tool events (:func:`note_gate.pointed_material`): each
         ``tool.started`` with its ``tool.finished`` output, in turns the user began
-        and did not undo, the turn under way included."""
+        and did not undo, the turn under way included. The addresses in the notes the
+        person's own words made are the places that "my website" may stand for; a
+        note kept from a page, a file or a result names none."""
         typed: dict[int, str] = {}
         for earlier in await turn.store.list_turns(turn.info.session_id):
             if earlier.turn < turn.info.turn and not (
@@ -1997,7 +1999,15 @@ class ChatMemory:
             if len(page) < 1000:
                 break
             after = int(page[-1].id or 0)
-        return note_gate.pointed_material(events, typed)
+        async with self._lock:
+            active = await self.stores()[0].active_entries()
+        own = [
+            place
+            for entry in active
+            if records.by_person(entry)
+            for place in note_gate.typed_places(entry.text)
+        ]
+        return note_gate.pointed_material(events, typed, own)
 
     async def keep_changes(self, info: TurnInfo) -> list[records.Written]:
         """After the chat turn *info* ran: when no note of the turn was kept, keep

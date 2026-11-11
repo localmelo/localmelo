@@ -1287,6 +1287,19 @@ def _near(vector: Sequence[float] | None, model: str, entry: StoredEntry) -> boo
     return mine.shape == theirs.shape and float(np.dot(mine, theirs)) >= NEAR_COSINE
 
 
+# What ``admitted_by`` is for a record the person's own words made: their message
+# asked for it (``user_request``) or stated it (``user_statement``). Any other
+# signal (a note from a page, a file or a result is ``outcome``) is not their words.
+OWN_WORDS: Final = ("user_statement", "user_request")
+
+
+def by_person(entry: StoredEntry) -> bool:
+    """Whether the person's own words made *entry*: its signal is one of
+    :data:`OWN_WORDS` and its provenance names no other source (a note kept from a
+    page, a file or a result says so there, whatever signal it carries)."""
+    return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
+
+
 def decide(
     text: str,
     active: Sequence[StoredEntry],

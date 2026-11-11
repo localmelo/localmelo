@@ -12,8 +12,11 @@ inference), which no level writes now and recall still reads.
   (:func:`records.unsupported`). A page or file the user pointed to is one the chat
   fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
   address or file name the user typed, or that the user's words in that turn call
-  theirs (:data:`THEIRS`). A page the user did not point to is no source at any level,
-  and a page the user called someone else's supports no note about the user.
+  theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
+  whose address one of the user's own notes holds, since the phrase alone never
+  points to a page the model chose. A page the user did not point to is no source at
+  any level, and a page the user called someone else's supports no note about the
+  user.
 - ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
   numbers, dates, addresses, e-mail addresses, names) must be found in a source, and
   the rest of it may say the same in other words or another language, judged by the
@@ -487,23 +490,30 @@ def _assembled(reads: Sequence[_Read], limit: int = MAX_MATERIAL) -> list[Materi
 
 
 def pointed_material(
-    events: Iterable[tuple[int | None, Mapping[str, Any]]], typed: Mapping[int, str]
+    events: Iterable[tuple[int | None, Mapping[str, Any]]],
+    typed: Mapping[int, str],
+    own: Sequence[Place],
 ) -> list[Material]:
     """The pages and files this chat read that the user pointed to, newest last.
 
     *events* are the chat's stored events, oldest first, as ``(turn, event)``;
     *typed* maps each turn the user began (not an undone one, not a task's
-    question) to what they typed in it, the turn under way included. A tool call
-    counts when it finished with a result and the user pointed to its page or file:
+    question) to what they typed in it, the turn under way included; *own* are the
+    places (:func:`typed_places`) that the user's own notes name. A tool call counts
+    when it finished with a result and the user pointed to its page or file:
 
     - a page, when the user typed its address (:func:`typed_places`) in some turn up
       to now: a host alone points to every page of it, an address with a path to that
       page and what is below it (``github.com/jane`` is not ``github.com/evil``);
     - a file, when its name is in the typed words of some turn up to now;
-    - the first page or file a turn read, when the typed words of that turn call it
-      theirs (:data:`THEIRS`) without saying which: "my profile at github.com/jane"
-      means that address and no other. A later read of that turn is the user's only
-      if it is the same page or file again, or the user typed its address or name.
+    - a page, when the typed words of its turn call it theirs (:data:`THEIRS`)
+      without saying which and its place is one of *own*: the phrase alone points
+      only to a place the user gave, never to a page the model chose;
+    - the first page or file a turn read, when that is a file and the typed words of
+      that turn call it theirs without saying which: "my resume" means the file the
+      turn read first, and "my profile at github.com/jane" that address and no other.
+      A later read of that turn is the user's only if it is the same file again, or
+      the user typed its name.
 
     It is someone else's (``other``) when the words of that turn, or of a turn that
     names it, say so. A page or file the user did not point to is left out, as is
@@ -573,11 +583,16 @@ def pointed_material(
             continue
         opener = first.setdefault(began, seen)
         # "My site at example.com": the address typed is what the phrase means, so
-        # no other page is "my site".
+        # no other page is "my site". Otherwise the phrase stands for a file the
+        # turn read first, or for a page at a place the user gave in a note.
         theirs = (
             _THEIRS.search(folded[began]) is not None
             and _BOUND.search(folded[began]) is None
-            and _again(opener, seen)
+            and (
+                any(_covers(p, landing[0]) for p in own)
+                if landing is not None
+                else _again(opener, seen)
+            )
         )
         if not named and not theirs:
             continue
