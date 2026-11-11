@@ -71,7 +71,9 @@ async def test_an_act_on_the_same_page_returns_what_changed_and_keeps_the_other_
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)  # e1 Like, e2 Done
     out = await run(tools, "browser_click", ref="e1")
-    body = out.text.split(">>\n", 1)[1]
+    # Between the markers only: the end marker holds the block's random nonce, eight
+    # hex digits that can spell a short ref such as "e2" by chance.
+    body = out.text.split(">>\n", 1)[1].rsplit("\n<<end page", 1)[0]
     assert "Liked by you" in body and "Welcome." not in body
     assert '[e4 button "Undo"]' in body and "e2" not in body
     # The element acted on is never carried: it has a new ref, and its old one is gone.
