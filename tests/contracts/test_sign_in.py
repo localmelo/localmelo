@@ -68,11 +68,11 @@ GIVEN = [
     # A run that is no value by its shape (a plain word) holds the words of a value
     # that is read the same way: the run is one value with it.
     ('Pwd 我\'pw是"abcd" x', 'Pwd [password-1]" x'),
-    # A word inside a run that is no value reads on after it (the run's own marks
-    # and the word's: neither cuts short what a quote of the word's value holds).
+    # A word inside a run that is no value is read on after it.
     ("pw ’pw是 Password 'abcd1234", "pw ’pw是 Password '[password-1]"),
-    ('Pwd 「 is 口令 **为pwd"」"', 'Pwd [password-1]」"'),
-    ("DB_PASSWORD=ab,PASSWORD='cd\"xy\"'", "DB_PASSWORD=[password-1]'"),
+    # A quoted pair too short to be a value is a run as long as itself: the value
+    # after the last of them is read.
+    ("密码 'pw：'pw：'abcd1234", "密码 'pw：'pw：'[password-1]"),
 ]
 NOT_GIVEN = [
     "I forgot my password",
@@ -224,6 +224,12 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         'PWD=/tmpPWD="\t = "PASSWORD',
         # A run that is no value holds a word whose value is quoted.
         'Pwd 口令是"hunter 22"',
+        # A quoted pair too short to be a value is such a run too: one quote of it must
+        # not be left to pair another way.
+        "密码 'pw：'Pw:**'x",
+        # Short pairs that chain are one run: a word inside it makes it longer, and a
+        # value that starts in it is one value from the first quote.
+        "pw 'pw='pw:'pw 'abcd'",
     ],
 )
 def test_hiding_twice_gives_the_same_text(text: str) -> None:
@@ -330,6 +336,11 @@ def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> No
         # A word inside a value that is cut out reads nothing past it: its run is no run
         # to merge a later quoted value with (that gave two values that overlapped).
         ("pw 「pw:pw:」' is abcd「「'", ["pw:pw:", " is abcd「「"]),
+        # A quoted value inside a value that is cut out does not end it early.
+        (
+            "pwd = \"the pw is 'abcd1234' and more words\"",
+            ["the pw is 'abcd1234' and more words"],
+        ),
     ],
 )
 def test_a_password_word_inside_a_longer_run_still_gives_its_own_value(

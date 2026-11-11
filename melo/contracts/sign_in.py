@@ -247,9 +247,10 @@ def _values(text: str) -> list[tuple[int, int]]:
     A password word inside a run (or a quoted value) is read for what follows it. A
     value that starts inside the last run and reaches past it is one value with it,
     from the run's first character (a quoted run starts at its quote, so no quote is
-    left to pair another way) to the end of the run that holds its end. So is a
-    quoted value inside a run that is no value by its shape (a plain word): read
-    again with a handle in the quote, such a run would look like a value.
+    left to pair another way) to the end of the run that holds its end. So is one
+    inside a run that is no value by its shape (a plain word, or a quoted pair too
+    short to count): read again with a handle in the quote, such a run would look
+    like a value, or leave a quote with nothing to pair with.
     """
     found: list[tuple[int, int]] = []
     memo: dict[re.Pattern[str], int] = {}
@@ -276,14 +277,11 @@ def _values(text: str) -> list[tuple[int, int]]:
         first = start - quoted  # a quoted value is read from its quote
         inside = first < covered  # it starts in the last run
         if quoted:
-            if closing - start < MIN_CHARS:
-                continue
             if hidden and inside and closing < covered:
-                if found and found[-1][0] >= run:  # cut out with the value it is in
-                    found[-1] = (found[-1][0], max(found[-1][1], closing))
-                continue
+                continue  # in a value that is cut out
             end, stop, after = closing, closing + 1, start
-            if inside:
+            no_value = closing - start < MIN_CHARS
+            if inside and not no_value:
                 stop = _next(text, _RUN_END, closing, memo)
                 end = _trim(text, closing, stop)
         else:
@@ -303,19 +301,20 @@ def _values(text: str) -> list[tuple[int, int]]:
                 else stop
             )
             # A bare word after "is" or a space is no password by its shape.
-            if end - start < MIN_CHARS or (
+            no_value = end - start < MIN_CHARS or (
                 match.group("strong") is None and _plain(text, start, end)
-            ):
-                # A word inside the last run reads nothing past it, and none of a
-                # value cut out is read again once the value has its handle.
-                within = match.start("cue") < covered
-                if not (hidden and within):
-                    run, covered, hidden = start, stop, False
-                    pos = pos if within else after
-                continue
+            )
+        if no_value:
+            # Still a run: a word outside the last one starts a new one, a word inside
+            # makes that one longer unless it is cut out; a value may start in it.
+            if match.start("cue") >= covered:
+                run, covered, hidden, pos = first, stop, False, after
+            elif not hidden:
+                covered = max(covered, stop)
+            continue
         if inside:
             if found and found[-1][0] >= run:
-                end = max(end, found.pop()[1])
+                found.pop()
             start = run
         else:
             run = first
