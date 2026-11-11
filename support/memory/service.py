@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
@@ -162,6 +163,7 @@ from localmelo.support.memory.recall import (
     unit,
     whole_turn,
 )
+from localmelo.support.sessions.attachments import is_stand_in
 from localmelo.support.sessions.store import typed_words
 
 if TYPE_CHECKING:
@@ -199,10 +201,8 @@ ADDED_MARK: Final = "(added while melo worked)"
 # The line a console chat puts before a note in the request the run reads (so also
 # in the ``inbox.accepted`` text); memory leaves it out, :data:`ADDED_MARK` says it.
 _NOTE_LEAD: Final = "[The user added this while you were working]"
-# What the console adds to a note that carries pictures and no words (a stand-in,
-# ``[2 pictures]``), and after the words of a note whose pictures a text-only
-# model was not sent (a line to the model). Neither is the person's.
-_PICTURE_STANDIN: Final = re.compile(r"\[\d+ pictures?\]")
+# What the console adds after the words of a note whose pictures a text-only model
+# was not sent (a line to the model): not the person's.
 _PICTURES_WITHHELD: Final = re.compile(
     r"\s*\[You cannot see (?:this picture|these pictures) "
     r"\(this model is not sent pictures\); [^\]]*\]\s*$"
@@ -753,12 +753,13 @@ async def window_start(
 
 def _note_words(note: str) -> str:
     """The words of a note the person added while melo worked, as the run read it:
-    after the console's own lead (:data:`_NOTE_LEAD`), without the stand-in for its
-    pictures or the console's line about pictures a model was not sent (neither is
-    words); ``""`` when none are left."""
-    words = note.strip().removeprefix(_NOTE_LEAD).strip()
+    after the console's own lead (:data:`_NOTE_LEAD`) and before the first file sent
+    with it (a message sent on to a running task can carry one), without the
+    console's line about pictures a model was not sent; ``""`` when none are left
+    or they are only the stand-in for pictures or files."""
+    words = words_before_files(note.strip().removeprefix(_NOTE_LEAD).strip())
     words = _PICTURES_WITHHELD.sub("", words).strip()
-    return "" if _PICTURE_STANDIN.fullmatch(words) else words
+    return "" if is_stand_in(words) else words
 
 
 def with_read_notes(typed: str, notes: Sequence[str]) -> str:

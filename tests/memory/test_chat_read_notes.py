@@ -23,8 +23,17 @@ from localmelo.support.memory.service import (
     turn_words,
     with_read_notes,
 )
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
-from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    stand_in,
+)
+from localmelo.support.sessions.store import (
+    NewSession,
+    SessionStore,
+    TurnInfo,
+    typed_words,
+)
 from localmelo.tests.sessions.helpers import core_event
 
 HOLDER = "test-host:1:notes"
@@ -218,9 +227,22 @@ def test_the_picture_lines_of_a_note_are_not_the_persons_words() -> None:
         assert with_read_notes("", [f"{LEAD}{words}"]) == f"{ADDED_MARK}\n{words}"
 
 
-async def test_the_picture_lines_memory_drops_are_the_ones_the_console_writes() -> None:
-    from localmelo.support.sessions.attachments import stand_in
+def test_a_file_sent_with_a_note_is_not_the_persons_words() -> None:
+    # A message sent on to a running task can carry a file: the words before it
+    # count, its name and text do not.
+    file = TextAttachment("plan-notes.txt", "Beds: three rows of tomatoes.")
+    for lead in ("", LEAD):
+        note = lead + compose_user_text("Also use the second folder.", (file,))
+        words = with_read_notes("typed", [note])
+        assert words == f"typed\n\n{ADDED_MARK}\nAlso use the second folder."
+        # Files and no words: nothing the person said.
+        for only in (stand_in(0, 1), stand_in(2, 1), ""):
+            assert with_read_notes(
+                "typed", [lead + compose_user_text(only, (file,))]
+            ) == ("typed")
 
+
+async def test_the_picture_lines_memory_drops_are_the_ones_the_console_writes() -> None:
     notes = pytest.importorskip("localmelo.support.gateway.console.notes")
     for count in (1, 2, 4):
         assert with_read_notes("", [f"{LEAD}{stand_in(count, 0)}"]) == ""
@@ -289,9 +311,7 @@ async def test_the_live_index_and_a_rebuild_give_the_same_documents(
         (resumed, "Seat changed."),
     ):
         # As the runner hands the run's typed text to memory.
-        typed = info.typed_text if info.attachments else info.user_text
-        typed = "" if info.composed else typed
-        memory.after_turn(store, info, typed, answer)
+        memory.after_turn(store, info, typed_words(info), answer)
     await memory.drain()
     live = await _documents(memory)
     assert len(live) > 4  # the long turn has several chunks
