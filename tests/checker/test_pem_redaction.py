@@ -67,6 +67,60 @@ def test_count_is_one_per_block_and_second_call_changes_nothing() -> None:
     assert (count, redaction.redact_secrets(cut)) == (1, (cut, 0))
 
 
+BEGIN = "-----BEGIN PRIVATE KEY-----"
+END = "-----END PRIVATE KEY-----"
+SHAPE = f"{BEGIN}\n[redacted]\n{END}"
+# (text, result, count): a block runs to the last of a run of END lines; the
+# text after the last one stays.
+RUNS = [
+    # a second BEGIN line is body, and so is the text between two END lines
+    (
+        f"{BEGIN}\nbody-a\n{BEGIN}\nbody-b\n{END}\nbody-c\n{END}\nafter",
+        f"{SHAPE}\nafter",
+        1,
+    ),
+    (f"{BEGIN}\nbody-a\n{END}\nbody-b\n{END}\nafter", f"{SHAPE}\nafter", 1),
+    (
+        "-----BEGIN RSA PRIVATE KEY-----\nbody-a\n-----END EC PRIVATE KEY-----\n"
+        "body-b\n-----END RSA PRIVATE KEY-----\nafter",
+        "-----BEGIN RSA PRIVATE KEY-----\n[redacted]\n"
+        "-----END RSA PRIVATE KEY-----\nafter",
+        1,
+    ),
+    # two complete blocks one after the other stay two
+    (
+        f"{BEGIN}\nbody-a\n{END}\n{BEGIN}\nbody-b\n{END}\nafter",
+        f"{SHAPE}\n{SHAPE}\nafter",
+        2,
+    ),
+    # an END line that shares its dashes with the BEGIN line before it is not a
+    # line of its own: the block has no END line, and nothing of it stays
+    (f"{BEGIN}END PRIVATE KEY-----\nbody-a", f"{BEGIN}\n[redacted]", 1),
+    # a block already in its shape, with nothing after it, is left alone
+    (SHAPE, SHAPE, 0),
+]
+
+
+@pytest.mark.parametrize(("text", "result", "count"), RUNS)
+def test_a_block_runs_to_the_last_of_a_run_of_end_lines(
+    text: str, result: str, count: int
+) -> None:
+    assert redaction.redact_secrets(f"before\n{text}") == (f"before\n{result}", count)
+    assert redaction.redact_secrets(result) == (result, 0)
+
+
+@pytest.mark.parametrize(("text", "result", "count"), RUNS)
+def test_a_key_blocks_place_is_read_by_the_same_rule_for_a_reader_of_places(
+    text: str, result: str, count: int
+) -> None:
+    spans = redaction.secret_spans(text)
+    assert bool(spans) == (count > 0)
+    kept = text
+    for start, end in reversed(spans):
+        kept = kept[:start] + kept[end:]
+    assert not any(f"body-{name}" in kept for name in "abc")
+
+
 def test_other_passes_still_run_around_a_block() -> None:
     text = f"sk-{'a' * 30}\n{block('PRIVATE KEY')}\nOTP 123456"
     assert redaction.redact_secrets(text) == (
