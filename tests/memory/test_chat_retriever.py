@@ -39,6 +39,7 @@ NEEDLES = {
     "who has the robotics lab keys?": "robotics",
     "how did we fix the failing CI test?": "fixture",
     "do you remember the dentist appointment?": "dentist",
+    "when do I see the dentist?": "dentist",
 }
 PARAPHRASE = "remind me of my weekly sync day"
 KEYS = {
@@ -345,7 +346,8 @@ async def test_a_failing_embedding_is_named_in_the_recall(
     try:
         recall = Recall()
         items = await memory.search("when is my group meeting?", recall=recall)
-        assert [item.key for item in items] == [keys["meeting"]]
+        # The slides turn holds one of the question's two content words.
+        assert [item.key for item in items] == [keys["meeting"], keys["slides"]]
         assert (recall.retriever, recall.fallback) == ("embedding", fallback)
     finally:
         await memory.aclose()
@@ -365,7 +367,7 @@ async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
             # Every turn says whether the message asks to count, total or compare, and
             # the bar it searched with.
             assert data is not None and set(data["recall"]) == KEYS | GATHER_KEYS
-            assert data["recall"]["gather"] is False and data["recall"]["floor"] == 0.55
+            assert data["recall"]["gather"] is False and data["recall"]["floor"] == 0.45
             assert data["recall"]["retriever"] == "llm"
             assert data["recall"]["used"] == len(data["used"])
             assert data["recall"]["block_chars"] == len(found.block)
@@ -393,7 +395,8 @@ async def test_a_failed_query_embedding_is_not_tried_again_within_the_turn(
         turn = await _turn(store, "Ask")
         found = await memory.before_turn(store, turn, "when is my group meeting?")
         assert len(embedding.calls) == 1
-        assert [item.key for item in found.used] == [keys["meeting"]]
+        # The slides turn holds one of the question's two content words.
+        assert [item.key for item in found.used] == [keys["meeting"], keys["slides"]]
         assert found.recall is not None and found.recall.fallback == "error"
     finally:
         await memory.aclose()

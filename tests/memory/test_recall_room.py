@@ -88,7 +88,7 @@ def user_words(shown: str) -> str:
 def test_the_shipped_defaults_are_900_and_4000_and_the_head_stays_234() -> None:
     assert (ITEM_CHARS, BLOCK_CHARS) == (900, 4000)
     assert TURN_CHARS == 234
-    assert RecallSettings().shown(QUESTION).chars == 900
+    assert RecallSettings().shown().chars == 900
 
 
 async def test_with_no_config_a_turn_takes_900_characters(
@@ -128,7 +128,7 @@ async def test_the_block_holds_turns_up_to_4000_characters(
     try:
         hits = await memory.search(QUESTION, records_k=0, docs_k=8)
         assert len(hits) == 6
-        show = RecallSettings().shown(QUESTION)
+        show = RecallSettings().shown()
         text, used = block(hits, show=show)
         # As many 900-character turns as fit in 4000, the best first, and no more.
         assert 3 <= len(used) < 6

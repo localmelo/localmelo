@@ -95,6 +95,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A chat no longer stalls when the model sends again a note it has just saved: the note tool closes for that turn and melo goes on with its answer.
 - A file you send, and the "[1 file]" or "[1 picture]" mark for a message with no words, no longer count as something you said when melo searches your chats or checks a note.
 - A note that restates your fact with another form of your word ("kept" for "keep", "fluently" for "fluent") or a joining word you did not use is no longer refused.
+- melo recalls an earlier chat on a looser match than before; on a public long-memory benchmark it answered 10 more of every 100 questions whose answer was in the chats, and refused as well when it was not.
+- Three comparison settings are removed: `[memory] recall_min_cosine`, `recall_min_coverage` and `recall_excerpt`. A config file that still holds them loads with a note.
 - The line under a message says "Recalled 2 memories", not "Used": it lists what melo put before the model, whether or not the answer used it.
 
 ### App and web console

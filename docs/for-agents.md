@@ -164,9 +164,6 @@ it; the option shown still works. A comparison names the issue that decides it.
   memory.retriever             auto
   memory.sleep                 off          (#363)
   memory.sleep_lock            ""           (#363)
-  memory.recall_min_cosine     0.55         (#349)
-  memory.recall_min_coverage   0.6          (#349)
-  memory.recall_excerpt        head         (#349)
   memory.recall_form           excerpt      (#428)
   memory.recall_list_max       20           (#428)
   memory.recall_open_chars     4000         (#428)

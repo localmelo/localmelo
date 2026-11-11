@@ -2,8 +2,7 @@
 
 Each entry of ``used[]`` (the recall block's items) and ``searched[]`` (what
 ``search_memory`` returned) has a ``shown`` key: the line as the block or the
-search result worded it, without a list number, whatever ``recall_excerpt`` and
-``recall_form`` made of it. ``text`` stays the stored text.
+search result worded it, without a list number, whatever ``recall_form`` made of it. ``text`` stays the stored text.
 Synthetic notes and turns, words only, no model.
 """
 
@@ -108,7 +107,6 @@ def numbered(entries: list[dict[str, Any]], listing: bool) -> list[str]:
 
 SETTINGS = [
     pytest.param({}, id="defaults"),
-    pytest.param({"recall_excerpt": "match"}, id="match"),
     pytest.param({"recall_form": "list"}, id="list"),
 ]
 
@@ -135,8 +133,6 @@ async def test_used_entries_carry_the_line_the_block_holds(
             assert entry["shown"] == item.shown
         chats = [e for e in entries if e["kind"] == "chat"]
         assert all(TARGET not in e["text"] for e in chats)
-        if settings.get("recall_excerpt") == "match":
-            assert all(TARGET in e["shown"] for e in chats)
     finally:
         await memory.aclose()
 
@@ -170,26 +166,16 @@ async def test_searched_entries_carry_the_line_the_search_returned(
         await memory.aclose()
 
 
-async def test_the_event_shows_a_turns_head_and_under_match_its_matching_sentences(
+async def test_the_event_shows_a_turns_head(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await build(tmp_path, store, cfg)
+    memory = await build(tmp_path, store, config())
     try:
-
-        async def chats() -> list[dict[str, Any]]:
-            found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
-            data = found.event()
-            assert data is not None
-            return [e for e in data["used"] if e["kind"] == "chat"]
-
-        head = await chats()
-        assert head and all(TARGET not in e["shown"] for e in head)
-        cfg.memory.recall_excerpt = "match"
-        match = await chats()
-        assert all(TARGET in e["shown"] and "…" in e["shown"] for e in match)
-        # What the page and the JSON keep does not follow the settings.
-        assert [e["text"] for e in head] == [e["text"] for e in match]
+        found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
+        data = found.event()
+        assert data is not None
+        chats = [e for e in data["used"] if e["kind"] == "chat"]
+        assert chats and all(TARGET not in e["shown"] for e in chats)
     finally:
         await memory.aclose()
 
@@ -209,7 +195,7 @@ async def test_an_item_found_again_keeps_the_line_of_its_first_search(
         tools = MemoryTools(memory)
         await tools.search(query=QUESTION)
         first = list(emitted[-1]["searched"])
-        cfg.memory.recall_excerpt = "match"
+        cfg.memory.recall_form = "list"  # the same items read as another line
         await tools.search(query=QUESTION)
         assert emitted[-1]["searched"] == first
     finally:

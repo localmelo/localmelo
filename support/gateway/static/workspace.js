@@ -1812,7 +1812,7 @@ async function allowOnce(view, facts) {
   syncUI();
 }
 
-// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo",
+// What memory recalled and kept for the message: "Recalled 1 memory ▾", "Remembered: … · Undo",
 // "From your other chats (last 30 min) ▾".
 function memoryOf(turn) {
   return memoryNodes({

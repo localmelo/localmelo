@@ -1,10 +1,10 @@
 """How much of a recalled chat turn is shown, and which part of it.
 
 The room one turn takes in the block and in the search tool's list is 900
-characters, and ``[memory] recall_excerpt`` is ``head`` (the start of each part) or
-``match`` (the sentences of each part that hold most of the question's content
-words). The head at the floor room, :data:`HEADS`, reads exactly as a turn always
-did. Synthetic turns, words only, no model.
+characters, and each part shows its start (the head). The head at the floor room,
+:data:`HEADS`, reads exactly as a turn always did. A :class:`Shown` with terms shows
+the sentences of each part that hold most of them instead (a task's hand-over line
+uses it). Synthetic turns, words only, no model.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import (
     HEADS,
-    ITEM_CHARS,
     TURN_CHARS,
     Item,
     Shown,
@@ -342,46 +341,28 @@ async def memory_with(
     return memory
 
 
-async def test_the_recall_block_follows_the_excerpt_setting(
+async def test_the_recall_block_shows_the_head_of_a_turn(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, english())
+    memory = await memory_with(tmp_path, store, config(), english())
     try:
-
-        async def ask() -> str:
-            found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
-            assert len(found.used) == 1
-            return found.block
-
-        head = await ask()
-        assert "tomato harvest peaks" not in head
-        cfg.memory.recall_excerpt = "match"
-        match = await ask()
-        assert "tomato harvest peaks" in match and "…" in match
-        assert TYPED in match and len(match) < ITEM_CHARS + 400
-        # The setting is read again each turn.
-        cfg.memory.recall_excerpt = "head"
-        assert await ask() == head
+        found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
+        assert len(found.used) == 1
+        assert "tomato harvest peaks" not in found.block
+        assert TYPED in found.block
     finally:
         await memory.aclose()
 
 
-async def test_the_search_tool_follows_the_excerpt_setting_too(
+async def test_the_search_tool_shows_the_head_of_a_turn(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, english())
+    memory = await memory_with(tmp_path, store, config(), english())
     tools = MemoryTools(memory)
     try:
         head = await tools.search(query=QUESTION)
         assert head.startswith("1. ") and "tomato harvest peaks" not in head
-        cfg.memory.recall_excerpt = "match"
-        match = await tools.search(query=QUESTION)
-        assert "tomato harvest peaks" in match and "…" in match
-        cfg.memory.recall_excerpt = "head"
-        assert await tools.search(query=QUESTION) == head
-        # The items found and the page's text are the same whatever the settings.
+        # The items found and the page's text are the same whatever is shown.
         found = await memory.search(QUESTION)
         assert [item.to_json()["text"] for item in found] == [
             snippet(item.text) for item in found
