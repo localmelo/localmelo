@@ -113,6 +113,7 @@ from localmelo.support.memory.index import (
     Document,
     ItemState,
     MemoryItem,
+    cleaned,
     document_chunks,
     loses_source,
     plain_text,
@@ -1580,7 +1581,9 @@ class ChatMemory:
     async def _source(self, store: SessionStore, info: TurnInfo) -> dict[str, Any]:
         session = await store.get_session(info.session_id)
         kind = session.kind if session is not None else "chat"
-        title = session.title if session is not None else ""
+        # The title is cleaned as a turn's text is: a note's provenance keeps it
+        # and recall shows the label to the model.
+        title = cleaned(session.title) if session is not None else ""
         folder = session.workspace if session is not None else None
         return {
             "session_id": info.session_id,

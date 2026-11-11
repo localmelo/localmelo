@@ -275,22 +275,28 @@ _ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])"
 # A card number is 13 to 19 digits that pass the checksum. Read plainly, one space or
 # hyphen may stand between two digits.
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
-# Read as it is really written: between two digits one hyphen, dot, tab or Unicode
-# space (no-break, thin, ideographic ...), or one to three spaces, or a line break
-# with a few spaces around it (a wrapped line). A match may hold more than one
-# line break; :func:`_card_like` allows one. Every count is bounded (12 to 18
-# digits, 3 spaces, 8 spaces around a break), so no repetition is nested
-# unbounded and a match takes time in proportion to the text.
-_FILL = (
-    "\N{NO-BREAK SPACE}\N{OGHAM SPACE MARK}\N{EN QUAD}-\N{HAIR SPACE}"
-    "\N{NARROW NO-BREAK SPACE}\N{MEDIUM MATHEMATICAL SPACE}\N{IDEOGRAPHIC SPACE}"
-)
-_BETWEEN = (
-    rf"(?:[-.\t{_FILL}]| {{1,3}}"
-    rf"|[ \t{_FILL}]{{0,8}}(?:\r\n|[\r\n])[ \t{_FILL}]{{0,8}})?"
-)
-_CARD_WRITTEN = re.compile(rf"(?<!\d)(?:\d{_BETWEEN}){{12,18}}\d(?!\d)")
+# Read as it is written: between two digits at most one separator, a space, hyphen
+# or dot, one Unicode space or invisible character (no-break, thin, ideographic,
+# zero-width ...), or a line break with a few spaces around it (a wrapped line). A
+# tab or a run of spaces is not one: they set out a table. A match may hold more than
+# one line break; :func:`_card_like` allows one. Every count is bounded (12 to 18
+# digits, 8 spaces around a break), so no repetition is nested unbounded and a match
+# takes time in proportion to the text.
+_SPACES: Final = 8
+_FILL = r"\u00a0\u1680\u2000-\u200d\u202f\u205f\u2060\u3000\ufeff"
+_GAP = rf"(?:[-.{_FILL}]| )"
+_BREAK = rf"[ {_FILL}]{{0,{_SPACES}}}(?:\r\n|[\r\n])[ {_FILL}]{{0,{_SPACES}}}"
+_CARD_WRITTEN = re.compile(rf"(?<!\d)(?:\d(?:{_GAP}|{_BREAK})?){{12,18}}\d(?!\d)")
 _LINE_BREAK = re.compile(r"\r\n|[\r\n]")
+# A digit joined to a number through a separator or a line break, on either side.
+_JOINED_BEFORE = re.compile(rf"\d(?:{_GAP}|{_BREAK})\Z")
+_JOINED_AFTER = re.compile(rf"(?:{_GAP}|{_BREAK})\d")
+# How far back a digit can be joined to a number: the digit and the longest break
+# (CRLF with :data:`_SPACES` spaces on each side).
+_JOIN_REACH: Final = 1 + 2 + 2 * _SPACES
+# The digit groups of a card match that fails the checks, for the retry without its
+# first or last group.
+_DIGITS = re.compile(r"\d+")
 
 # A plain statement: the user's own words about themselves, at most this long
 # once a lead-in ("By the way, …", "对了，…") is set aside.
@@ -433,10 +439,25 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _card_like(match: str) -> bool:
-    """Whether *match* of a card pattern is a card number: at most one line break in
-    it, and the checksum passes."""
-    return len(_LINE_BREAK.findall(match)) <= 1 and _luhn(re.sub(r"\D", "", match))
+def _card_like(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]``, a match of a card pattern, is a card number: a dot
+    is a separator only when every separator is a dot, there is at most one line
+    break, and with one the number is the whole run (no digit joined to it before or
+    after, so the rows of a table are never one wrapped number), and the checksum
+    passes."""
+    part = text[start:end]
+    separators = re.sub(r"\d", "", part)
+    if "." in separators and separators.strip("."):
+        return False
+    breaks = len(_LINE_BREAK.findall(part))
+    if breaks > 1:
+        return False
+    if breaks and (
+        _JOINED_BEFORE.search(text[max(0, start - _JOIN_REACH) : start])
+        or _JOINED_AFTER.match(text, end)
+    ):
+        return False
+    return _luhn(re.sub(r"\D", "", part))
 
 
 def number_spans(text: str) -> list[tuple[int, int]]:
@@ -444,16 +465,41 @@ def number_spans(text: str) -> list[tuple[int, int]]:
     sorted, in *text* as given.
 
     An ID number is ``123-45-6789`` or 17 digits and a check character. A card number
-    is read both ways (:data:`_CARD`, :data:`_CARD_WRITTEN`): the written reading
-    can join a card to the digits next to it (an expiry after two spaces, the line
-    above) into one longer number that fails the checksum, and the plain reading
-    then still finds the card. It is for a reader that takes text out by its place,
-    as :func:`~localmelo.melo.checker.redaction.secret_spans` is: a number alone on
-    a line, or one that crosses a line, belongs to no sentence.
+    is 13 to 19 digits that pass the checksum, read both ways (:data:`_CARD`,
+    :data:`_CARD_WRITTEN`) and checked by :func:`_card_like`. When a match fails the
+    checks, it is read again without its first group of digits, without its last, and
+    without both: an expiry date, a security code or an order number may stand next to
+    a card. The part kept holds 13 to 19 digits and no line break, and with more than
+    one group starts with a group of four or more digits. It is for a reader that
+    takes text out by its place, as :func:`~localmelo.melo.checker.redaction.secret_spans`
+    is: a number alone on a line, or one that crosses a line, belongs to no sentence.
+
+    Not found: a card inside a longer run of four-digit numbers on one line, a card
+    written with tabs or wide gaps between its groups, and a card wrapped over two
+    lines with another number joined to it on either side.
     """
     places = [match.span(1) for match in _ID_NUMBER.finditer(text)]
     for pattern in (_CARD, _CARD_WRITTEN):
-        places += [m.span() for m in pattern.finditer(text) if _card_like(m.group())]
+        for match in pattern.finditer(text):
+            if _card_like(text, *match.span()):
+                places.append(match.span())
+                continue
+            groups = [
+                (match.start() + group.start(), match.start() + group.end())
+                for group in _DIGITS.finditer(match.group())
+            ]
+            last = len(groups) - 1
+            for first, final in ((0, last - 1), (1, last), (1, last - 1)):
+                if first > final:
+                    continue
+                start, end = groups[first][0], groups[final][1]
+                digits = sum(b - a for a, b in groups[first : final + 1])
+                if not 13 <= digits <= 19 or _LINE_BREAK.search(text[start:end]):
+                    continue
+                if first != final and groups[first][1] - groups[first][0] < 4:
+                    continue
+                if _card_like(text, start, end):
+                    places.append((start, end))
     return sorted(set(places))
 
 

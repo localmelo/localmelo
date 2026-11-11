@@ -253,5 +253,95 @@
   "kind": "numbers",
   "text": "Seats 12 14 16 18 20 22 24 26",
   "before": false
+ },
+ {
+  "kind": "decimals",
+  "text": "0.8387 0.7794 0.3050 0.1542",
+  "before": false
+ },
+ {
+  "kind": "decimals",
+  "text": "0.4970 0.2323 0.1485 0.8825 0.0686 0.9755",
+  "before": false
+ },
+ {
+  "kind": "prices",
+  "text": "904.61 619.10 432.06 107.13 40.65 986.32",
+  "before": false
+ },
+ {
+  "kind": "prices",
+  "text": "289.47 544.73 997.16 95.46",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "2286 7905 1776\n2701 2786 1634",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "1238 7264 7212\n1203 2183 2314",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "7151 7511 7877\n2196 4252 5420\n6519 2427 6098\n6449 1248 7718",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "2933 3205 5036\n2655 1179 1981\n8617 8976 3911\n4086 8330 9337",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "2002.02.07 18.40.15",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "2012.03.21 04.19.58",
+  "before": false
+ },
+ {
+  "kind": "tabs",
+  "text": "249\t665\t311\t521\n14\t688\t97\t478\n680\t294\t426\t574",
+  "before": false
+ },
+ {
+  "kind": "tabs",
+  "text": "964\t870\t95\t734\n270\t332\t786\t245\n535\t305\t40\t81",
+  "before": false
+ },
+ {
+  "kind": "addresses",
+  "text": "192.168.32.16 192.168.18.49 192.168.123.154",
+  "before": false
+ },
+ {
+  "kind": "addresses",
+  "text": "192.168.44.80 192.168.170.4 192.168.209.195",
+  "before": false
+ },
+ {
+  "kind": "versions",
+  "text": "3.19.42 1.26.97 30.7.17 8.6.1",
+  "before": false
+ },
+ {
+  "kind": "versions",
+  "text": "2.32.32 8.25.32 14.38.62 10.33.22",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "020 7462 8320\n020 7875 9623",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "020 7638 0245\n020 7851 8656",
+  "before": false
  }
 ]

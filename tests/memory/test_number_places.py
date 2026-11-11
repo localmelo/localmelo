@@ -4,9 +4,10 @@ What memory keeps across chats never holds a card or an ID number: not in the
 recall index's text, not in a title. ``records.number_spans`` finds the places of
 the numbers in a text as given, so the index cuts a number that no sentence holds
 (alone on a line, or wrapped over two lines), and a card is read the ways it is
-written (unusual spaces, dots, tabs, one line break). A stored title goes through
-the function a text does. Constructed numbers only (the test card 4111 1111 1111
-1111, made-up ID numbers).
+written (unusual spaces, dots, one line break) or sits beside a short number (an
+expiry date, a security code). A stored title, and the title a note's source
+names its chat by, go through the function a text does. Constructed numbers only
+(the test card 4111 1111 1111 1111, made-up ID numbers).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from localmelo.support.memory.index import (
     document_text,
 )
 from localmelo.support.memory.recall import chat_label
+from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.support.web import search_tool
 from localmelo.tests.linear import assert_linear
 
@@ -42,6 +44,17 @@ NBSP = "\N{NO-BREAK SPACE}"
 THIN = "\N{THIN SPACE}"
 NARROW = "\N{NARROW NO-BREAK SPACE}"
 IDEOGRAPHIC = "\N{IDEOGRAPHIC SPACE}"
+ZERO_WIDTH = "\N{ZERO WIDTH SPACE}"
+# The Unicode spaces and invisible characters that may stand between two digits.
+UNICODE_GAPS = [
+    "\u00a0",
+    "\u1680",
+    "\u202f",
+    "\u205f",
+    "\u2060",
+    "\u3000",
+    "\ufeff",
+] + [chr(code) for code in range(0x2000, 0x200E)]
 
 
 # ── The three gaps ──
@@ -66,13 +79,11 @@ def test_a_card_wrapped_over_two_lines_is_a_secret_and_is_cut() -> None:
         CARD,
         "4111-1111-1111-1111",
         "4111.1111.1111.1111",
-        "4111\t1111\t1111\t1111",
-        "4111  1111  1111  1111",
-        "4111   1111   1111   1111",
         NBSP.join(["4111", "1111", "1111", "1111"]),
         THIN.join(["4111", "1111", "1111", "1111"]),
         NARROW.join(["4111", "1111", "1111", "1111"]),
         IDEOGRAPHIC.join(["4111", "1111", "1111", "1111"]),
+        ZERO_WIDTH.join("4111111111111111"),
         "4111 1111\n1111 1111",
         "4111 1111  \n  1111 1111",
         "4111 1111\r\n1111 1111",
@@ -90,12 +101,23 @@ def test_the_ways_a_card_number_is_written_are_secrets(number: str) -> None:
     assert records.number_spans(f"pay {number} now") == [(4, 4 + len(number))]
 
 
+def test_each_unicode_space_or_invisible_character_may_stand_between_groups() -> None:
+    for gap in UNICODE_GAPS:
+        number = gap.join(["4111", "1111", "1111", "1111"])
+        assert records.number_spans(f"pay {number} now") == [(4, 4 + len(number))], gap
+
+
 @pytest.mark.parametrize(
     "text",
     [
         "4111\n1111\n1111\n1111",  # a column of groups: two or more line breaks
         "4111 1111\n\n1111 1111",  # a blank line between
+        "4111\t1111\t1111\t1111",  # tabs set out a table
+        "4111  1111  1111  1111",  # two spaces
+        "4111   1111   1111   1111",  # three spaces
         "4111    1111    1111    1111",  # four spaces
+        "4111.1111 1111 1111",  # a dot beside another separator
+        "4111-1111.1111-1111",
         "4111 1111 1111 1112",  # the checksum fails
         "4111 1111 1111",  # 12 digits
         "41111111111111111111",  # 20 digits in one run
@@ -139,12 +161,93 @@ def test_a_card_the_plain_reading_finds_is_still_found_beside_other_digits(
     assert "4111" not in cleaned(text)
 
 
+# A wrapped number is a number only when it is the whole run: the rows of a table
+# are not one wrapped number, whatever the checksum says.
+TABLE = "Totals\n1500 2500 3500\n4500 5500 6500"
+LONG_TABLE = "7151 7511 7877\n2196 4252 5420\n6519 2427 6098\n6449 1248 7718"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        TABLE,
+        LONG_TABLE,
+        "12 4111 1111\n1111 1111",  # a number joined before a wrapped card: not found
+    ],
+)
+def test_a_line_break_joins_a_number_only_when_it_is_the_whole_run(text: str) -> None:
+    assert records.number_spans(text) == []
+    assert not records.sensitive(text)
+    assert cleaned(text) == text
+
+
+def test_a_wrapped_card_that_is_the_whole_run_is_found() -> None:
+    text = "My card is 4111 1111\n1111 1111."
+    assert records.number_spans(text) == [(11, 30)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"My card is {CARD} 12/27.",
+        f"{CARD} 12 27 123",
+        f"Card {CARD} 123",
+        f"Order 87 {CARD}",
+        "4111111111111111 12/27",
+        "3400 000000 00009 12/30",
+        f"{CARD}.50",
+    ],
+)
+def test_a_card_beside_a_short_number_is_found_without_it(text: str) -> None:
+    # An expiry date, a security code or an order number joins the card into one
+    # longer number that fails the checksum; the card alone is found again.
+    card = next(
+        found
+        for found in ("3400 000000 00009", "4111111111111111", CARD)
+        if found in text
+    )
+    start = text.index(card)
+    assert records.number_spans(text) == [(start, start + len(card))]
+    assert card[:4] not in cleaned(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fibonacci: 1 1 2 3 5 8 13 21 34 55 89 144",
+        "Pages 101 102 103 104 105 106 107",
+    ],
+)
+def test_the_retry_beside_a_short_number_adds_no_place_to_a_row_of_numbers(
+    text: str,
+) -> None:
+    # The second has the one place the plain reading gives it by the checksum alone;
+    # the retry gives neither a place it did not have.
+    plain = [
+        match.span()
+        for match in records._CARD.finditer(text)
+        if records._luhn(re.sub(r"\D", "", match.group()))
+    ]
+    assert records.number_spans(text) == plain
+
+
 def _repeated(unit: str) -> Callable[[int], str]:
     return lambda size: unit * (size // len(unit))
 
 
 @pytest.mark.parametrize(
-    "unit", ["1 ", "1234 ", "12 \n  34\t5.6-", "1" + " " * 7, "1" * 40 + " "]
+    "unit",
+    [
+        "1 ",
+        "1234 ",
+        "12 \n  34\t5.6-",
+        "1" + " " * 7,
+        "1" * 40 + " ",
+        "1\u200b",
+        "1.2",
+        "4111 1111 1111 1112 12\n",
+        "1" + " " * 8 + "\r\n" + " " * 8,
+    ],
 )
 def test_finding_the_numbers_takes_time_in_proportion_to_the_text(unit: str) -> None:
     assert_linear(_repeated(unit), records.number_spans)
@@ -227,25 +330,22 @@ def _plain_reading(text: str) -> bool:
     )
 
 
-def test_ordinary_digit_runs_are_refused_as_they_were_except_two() -> None:
+def test_ordinary_digit_runs_are_refused_as_they_were_except_one() -> None:
     rows = json.loads((DATA / "number_precision.json").read_text("utf-8"))
-    assert len(rows) >= 40
+    assert len(rows) == 69
     texts = [row["text"] for row in rows]
     # "before" is the plain reading's answer, here as the code gives it.
     assert [row["before"] for row in rows] == [_plain_reading(t) for t in texts]
     after = [records.sensitive(t) for t in texts]
     assert sum(row["before"] for row in rows) == 5
-    assert sum(after) == 7
+    assert sum(after) == 6
     changed = [
         t
         for t, now, row in zip(texts, after, rows, strict=True)
         if now != row["before"]
     ]
-    # A dot joins the years of a row; two rows of amounts are one wrapped number.
-    assert changed == [
-        "Seasons 2010.2011.2012.2013",
-        "Totals\n1500 2500 3500\n4500 5500 6500",
-    ]
+    # A dot joins the years of a row, and the checksum passes.
+    assert changed == ["Seasons 2010.2011.2012.2013"]
     assert all(now for now, row in zip(after, rows, strict=True) if row["before"])
 
 
@@ -350,6 +450,37 @@ async def test_the_documents_a_turn_is_indexed_as_keep_a_cleaned_title(
         await memory.aclose()
 
 
+@pytest.mark.parametrize("title", [CARD_TITLE, PASSWORD_TITLE])
+async def test_a_notes_source_names_its_chat_by_a_cleaned_title(
+    tmp_path: Path, title: str
+) -> None:
+    store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
+    await store.open()
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    try:
+        typed = "Remember that I prefer short answers."
+        turn = await store.begin_turn(
+            None,
+            typed,
+            holder="test-host:1:memory",
+            title=title,
+            new_session=NewSession(),
+        )
+        turns = await store.list_turns(turn.session_id)
+        found = await memory.before_turn(store, turns[-1], typed)
+        assert [w.text for w in found.remembered] == ["You prefer short answers."]
+        (entry,) = await memory.records()
+        assert entry.provenance["title"] == "[left out]"
+        assert entry.provenance["chat"] == "chat “[left out]”"
+        stored = json.dumps(entry.provenance, ensure_ascii=False)
+        assert CARD not in stored and "hunter2" not in stored
+        items = await memory.search("short answers", docs_k=0, records_k=4)
+        assert [item.where.split(",")[0] for item in items] == ["chat “[left out]”"]
+    finally:
+        await memory.aclose()
+        await store.aclose()
+
+
 # ── Rows already in an index ──
 
 
@@ -427,8 +558,7 @@ async def test_an_index_made_before_titles_were_cleaned_is_cleaned_once(
         f"is {NBSP.join(['4111', '1111', '1111', '1111'])} valid",
         "is 4111 1111\n1111 1111 valid",
         "is 4111.1111.1111.1111 valid",
-        "is 4111\t1111\t1111\t1111 valid",
-        "is 4111  1111  1111  1111 valid",
+        f"is {CARD} 12/27 valid",
     ],
 )
 def test_a_search_query_with_a_card_written_in_another_way_asks_as_a_secret(
@@ -438,7 +568,14 @@ def test_a_search_query_with_a_card_written_in_another_way_asks_as_a_secret(
 
 
 @pytest.mark.parametrize(
-    "query", ["tomato blight 2019 2020 2021 2022", "isbn 978 0 306 40615 7"]
+    "query",
+    [
+        "tomato blight 2019 2020 2021 2022",
+        "isbn 978 0 306 40615 7",
+        "scores 0.8387 0.7794 0.3050 0.1542",
+        "is 4111\t1111\t1111\t1111 valid",
+        "is 4111  1111  1111  1111 valid",
+    ],
 )
 def test_an_ordinary_search_query_with_digits_does_not_ask(query: str) -> None:
     assert search_tool._doubt(query) == ""
