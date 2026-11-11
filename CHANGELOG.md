@@ -82,7 +82,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - With no embedding model set up, melo now finds a note you ask about in other words: the chat model picks among the notes that share a word with your message, within 4 seconds.
 - The Memory tab, `melo memory status`, Settings and setup say how melo searches from the models you have set up, not from a fixed guess.
 - A note from a page, a file or a task's result is never shown to the model as your words.
-- What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused. A saved `note_gate = "typed"` reads as `pointed`.
+- What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused.
+- The note gate has one rule: `[memory] note_gate` and `note_min_cosine` are removed. A config file that still holds them loads with a note; nothing else changes for a default setup.
 - A note melo takes from a page, a file or a task's result now replaces only an older note of that kind: one you typed, reworded or imported, or that sleep wrote, is kept beside it with its source, and your own words are listed first.
 - An ask that points at something elsewhere ("remember her email and where she works") no longer leaves a note that only repeats the ask, and a note from "remember that …" no longer starts with those words.
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
@@ -90,6 +91,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 - A note melo cannot keep no longer costs you the answer: after its last refused try the note tool is not offered again in that turn, and melo answers the rest of what you asked.
 - A file you send, and the "[1 file]" or "[1 picture]" mark for a message with no words, no longer count as something you said when melo searches your chats or checks a note.
+- A note that restates your fact with another form of your word ("kept" for "keep", "fluently" for "fluent") or a joining word you did not use is no longer refused.
 
 ### App and web console
 

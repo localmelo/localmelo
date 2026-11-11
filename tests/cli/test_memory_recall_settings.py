@@ -1,10 +1,10 @@
 """``[memory]`` recall settings: developer settings with their shipped defaults.
 
 ``recall_min_cosine``, ``recall_min_coverage``, ``recall_excerpt``, ``recall_form``,
-``recall_list_max``, ``recall_open_chars``, ``recall_source``, ``compress_parallel``,
-``compress_cache``, ``note_gate`` and ``note_min_cosine`` are checked against their
-bounds and values, set for one run with ``-X``, and listed by the developer help
-only, each with the issue that decides it.
+``recall_list_max``, ``recall_open_chars``, ``recall_source``, ``compress_parallel``
+and ``compress_cache`` are checked against their bounds and values, set for one run
+with ``-X``, and listed by the developer help only, each with the issue that decides
+it.
 """
 
 from __future__ import annotations
@@ -28,8 +28,6 @@ CHANGED = {
     "recall_source": "items",
     "compress_parallel": 4,
     "compress_cache": "cache/compress.jsonl",
-    "note_gate": "meaning",
-    "note_min_cosine": 0.65,
 }
 # The issue that decides each setting that is still a comparison, as the developer
 # help names it; ``compress_parallel`` and ``compress_cache`` are ordinary advanced
@@ -39,8 +37,6 @@ ISSUE = {name: "#349" for name in CHANGED if not name.startswith("compress_")} |
     "recall_list_max": "#428",
     "recall_open_chars": "#428",
     "recall_source": "#428",
-    "note_gate": "#442",
-    "note_min_cosine": "#442",
 }
 
 
@@ -77,11 +73,6 @@ def errors(**memory: object) -> list[str]:
         ("compress_parallel", 4),
         ("compress_cache", ""),
         ("compress_cache", "~/runs/compress_cache.jsonl"),
-        ("note_gate", "pointed"),
-        ("note_gate", "meaning"),
-        ("note_min_cosine", 0.2),
-        ("note_min_cosine", 0.95),
-        ("note_min_cosine", 0.55),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -175,22 +166,6 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] compress_cache must be a path string without NUL",
         ),
         (
-            "note_gate",
-            "typing",
-            "[memory] note_gate 'typing' is not recognised. "
-            "Must be one of ('pointed', 'meaning').",
-        ),
-        (
-            "note_min_cosine",
-            0.19,
-            "[memory] note_min_cosine must be from 0.2 to 0.95, got 0.19",
-        ),
-        (
-            "note_min_cosine",
-            0.96,
-            "[memory] note_min_cosine must be from 0.2 to 0.95, got 0.96",
-        ),
-        (
             "recall_min_coverage",
             float("nan"),
             "[memory] recall_min_coverage must be from 0.1 to 1.0, got nan",
@@ -248,10 +223,6 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.compress_parallel=0",
         "memory.compress_parallel=9",
         "memory.compress_parallel=many",
-        "memory.note_gate=typing",
-        "memory.note_gate=model",
-        "memory.note_min_cosine=0.1",
-        "memory.note_min_cosine=high",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(
@@ -261,52 +232,6 @@ def test_x_refuses_a_bad_value_with_a_clear_message(
         cli._parse(["-X", setting, "--base-url", "http://127.0.0.1:1/v1", "q"])
     assert exit_.value.code == 2
     assert setting.partition("=")[0] in capsys.readouterr().err
-
-
-def test_the_model_level_of_the_note_gate_is_gone(tmp_path: Path) -> None:
-    left = "Must be one of ('pointed', 'meaning')."
-    assert errors(note_gate="model") == [
-        f"[memory] note_gate 'model' is not recognised. {left}"
-    ]
-    # A config file that still says it loads, and fails validation with the same words.
-    path = tmp_path / "config.toml"
-    path.write_text('chat_backend = "vllm"\n[memory]\nnote_gate = "model"\n')
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        cfg = config.load()
-    assert cfg.memory.note_gate == "model"
-    assert f"[memory] note_gate 'model' is not recognised. {left}" in cfg.validate()
-
-
-def test_typed_in_the_file_reads_as_pointed_and_is_not_saved_back(
-    tmp_path: Path,
-) -> None:
-    assert MemoryConfig().note_gate == "pointed"
-    path = tmp_path / "config.toml"
-    path.write_text('chat_backend = "vllm"\n[memory]\nnote_gate = "typed"\n')
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        cfg = config.load()
-        assert cfg.memory.note_gate == "pointed"
-        assert not [e for e in cfg.validate() if "[memory]" in e]
-        save(cfg)
-    assert "note_gate" not in path.read_text()
-
-
-def test_x_reads_typed_as_pointed(tmp_path: Path) -> None:
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(tmp_path / "config.toml")),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        cli._parse(
-            ["-X", "memory.note_gate=typed", "--base-url", "http://127.0.0.1:1/v1", "q"]
-        )
-        assert config.overrides() == {"memory.note_gate": "pointed"}
-        assert config.load().memory.note_gate == "pointed"
 
 
 def test_a_whole_number_bar_is_saved_and_read_back_and_x_reads_it_as_a_number(

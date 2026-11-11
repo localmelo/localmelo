@@ -77,8 +77,6 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_PARALLEL,
-    MEMORY_NOTE_GATE,
-    MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_LIST_MAX,
     MEMORY_RECALL_MIN_COSINE,
     MEMORY_RECALL_MIN_COVERAGE,
@@ -237,8 +235,6 @@ NO_MORE_TRIES: Final = (
     "in one sentence what you could not keep."
 )
 _BATCH: Final = 16
-# Longest the embedding of a note and the windows of its sources may take: one call.
-NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
 # The size of the window a chat is encoded in, and the file in the memory folder
 # where the encoder's replies are kept when ``[memory] compress_cache`` is empty.
 COMPRESS_AT_CHARS: Final = 12_000
@@ -381,15 +377,6 @@ def _guide(gathers: bool, lines: Iterable[Item]) -> str:
         parts.append(GATHER_GUIDE)
     parts.append(PREMISE_GUIDE)
     return " ".join(parts)
-
-
-class NoteSettings(NamedTuple):
-    """The ``[memory]`` settings of the note gate (:mod:`.note_gate`): its *level*,
-    ``pointed`` or ``meaning``, and *min_cosine*, the least similarity of meaning
-    that counts as a source's support."""
-
-    level: str = note_gate.POINTED
-    min_cosine: float = note_gate.MIN_COSINE
 
 
 class Admission(NamedTuple):
@@ -1072,22 +1059,6 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             items,
             auto,
-        )
-
-    def note_settings(self) -> NoteSettings:
-        """The note gate's settings of the settings now: ``[memory] note_gate`` and
-        ``note_min_cosine``. A value out of its bounds or of the wrong type reads as
-        its default (``pointed``, 0.55), as :meth:`recall_settings` reads its own."""
-        cfg = self._settings()
-        if cfg is None:
-            return NoteSettings()
-        level = getattr(cfg.memory, "note_gate", note_gate.POINTED)
-        bar = getattr(cfg.memory, "note_min_cosine", note_gate.MIN_COSINE)
-        low, high = MEMORY_NOTE_MIN_COSINE
-        fits = isinstance(bar, int | float) and not isinstance(bar, bool)
-        return NoteSettings(
-            level if level in MEMORY_NOTE_GATE else note_gate.POINTED,
-            float(bar) if fits and low <= bar <= high else note_gate.MIN_COSINE,
         )
 
     def chat_provider(self) -> BaseLLMProvider | None:
@@ -1818,7 +1789,7 @@ class ChatMemory:
             ):
                 return WRITE_IN_YOU
             note = records.second_person(note, protect=True, keep=typed)
-        admission = await self._admit(turn, note, said, self.note_settings())
+        admission = await self._admit(turn, note, said)
         if isinstance(admission, str):
             return admission
         admitted = (
@@ -1889,24 +1860,22 @@ class ChatMemory:
         return confirmed
 
     async def _admit(
-        self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
+        self, turn: ChatTurn, note: str, said: list[str]
     ) -> Admission | str:
-        """Where the support of *note* is, at the note gate's level, or why it is
-        refused (a message for the model). At the default level a note that needs a
-        page and a result together stays tagged ``result``, the least trusted source
-        it needs.
+        """Where the support of *note* is, or why it is refused (a message for the
+        model). A note that needs a page and a result together stays tagged
+        ``result``, the least trusted source it needs.
 
         An instruction to the assistant is refused first. Then the sources, most
         trusted first: what the user typed (its words), a page or file the user
-        pointed to, a finished task's result shown in the chat. With ``meaning``, a
-        note whose key tokens are all found may also say the same in other words or
-        another language (:meth:`_by_meaning`). A page or file the user did not
-        point to supports nothing, and one the user called someone else's supports
-        no note about the user. A page read in the browser supports nothing either;
-        the refusal says so (:data:`note_gate.NOT_BROWSER`). What a page or a file
-        supports is what it states (:func:`note_gate.material_text`): its hidden text
-        and its paragraphs that order the assistant are left out; of a result only
-        the paragraphs aimed at an assistant (:func:`note_gate.result_text`).
+        pointed to, a finished task's result shown in the chat. A page or file the
+        user did not point to supports nothing, and one the user called someone
+        else's supports no note about the user. A page read in the browser supports
+        nothing either; the refusal says so (:data:`note_gate.NOT_BROWSER`). What a
+        page or a file supports is what it states (:func:`note_gate.material_text`):
+        its hidden text and its paragraphs that order the assistant are left out; of
+        a result only the paragraphs aimed at an assistant
+        (:func:`note_gate.result_text`).
 
         A note no source supports, and that only Chinese or Japanese wording keeps
         from the typed words, goes once to the chat's model (:meth:`_judged`), which
@@ -1939,10 +1908,6 @@ class ChatMemory:
             note, evidence + [m.text for m in browsed]
         ):
             return note_gate.NOT_BROWSER
-        if gate.level == "meaning":
-            meant = await self._by_meaning(note, said, usable, results, gate)
-            if meant is not None:
-                return meant
         if await self._judged(note, said):
             return Admission(note_gate.TYPED, judged=True)
         missing = records.unsupported(note, evidence)
@@ -1955,53 +1920,6 @@ class ChatMemory:
                 else ""
             )
         )
-
-    async def _by_meaning(
-        self,
-        note: str,
-        said: list[str],
-        usable: list[note_gate.Material],
-        results: list[str],
-        gate: NoteSettings,
-    ) -> Admission | str | None:
-        """The note gate's judgement of *note* by meaning, at ``meaning`` and above.
-
-        A key token (:func:`note_gate.key_tokens`) that no source holds refuses the
-        note, named. Then the embedding of the note is compared with each source's
-        windows (:func:`note_gate.windows`): the first source, most trusted first, whose
-        best window is at least ``note_min_cosine`` close is the note's source.
-        ``None`` when meaning cannot be judged (no embedding model, a failure, nothing
-        to compare): the words check stands.
-        """
-        pages = [m.text for m in usable]
-        keys = note_gate.unsupported_keys(note, [*said, *pages, *results])
-        if keys:
-            return f"Not remembered: {', '.join(keys[:3])}: {note_gate.NOT_FOUND}"
-        wanted = note_gate.keys_of(note)
-        typed = note_gate.recent_windows(said, note_gate.TYPED_WINDOWS)
-        pointed = note_gate.keyed_windows(usable, wanted, note_gate.POINTED_WINDOWS)
-        shown = note_gate.recent_windows(results, note_gate.RESULT_WINDOWS)
-        texts = [*typed, *(w for _, w in pointed), *shown]
-        if not texts:
-            return None
-        embedded = await self._embed([note, *texts], NOTE_EMBED_TIMEOUT_S, query=False)
-        if embedded.vectors is None:
-            return None
-        mine, rest = embedded.vectors[0], embedded.vectors[1:]
-        close = [note_gate.cosine(mine, vector) for vector in rest]
-        split = len(typed), len(typed) + len(pointed)
-        nearest = {
-            note_gate.TYPED: max(close[: split[0]], default=0.0),
-            note_gate.POINTED: max(close[split[0] : split[1]], default=0.0),
-            note_gate.RESULT: max(close[split[1] :], default=0.0),
-        }
-        for source in (note_gate.TYPED, note_gate.POINTED, note_gate.RESULT):
-            if nearest[source] >= gate.min_cosine:
-                if source != note_gate.POINTED:
-                    return Admission(source)
-                scores = close[split[0] : split[1]]
-                return Admission(source, pointed[scores.index(max(scores))][0])
-        return note_gate.TOO_FAR
 
     async def _pointed(self, turn: ChatTurn) -> list[note_gate.Material]:
         """The pages and files this chat read that the user pointed to, from the
