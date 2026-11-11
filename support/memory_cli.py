@@ -21,25 +21,34 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
+from functools import partial
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import command_words, config, onboard
-from localmelo.support.memory import ChatMemory, ingest, records
-from localmelo.support.memory.recall import origin
+from localmelo.support.memory import ChatMemory, ingest, note_gate, records
+from localmelo.support.memory.recall import day, origin
 from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
     StoreOwnedError,
     default_path,
 )
+from localmelo.support.words import t_in
 
 VERBS = ("list", "forget", "status", "reindex", "import", "sleep", "ingest")
 DEVELOPER_VERBS = ("sleep", "ingest")
 
 
 def note_origin(entry: StoredEntry) -> str:
-    """Where a note came from, as the chat named it when the note was written."""
-    label = str(entry.provenance.get("chat") or "a chat")
+    """Where a note came from, as the notes page says it: the page or file or the
+    finished task's result a note was kept from, melo's inference, or else the chat
+    named when the note was written."""
+    provenance, on = entry.provenance, day(entry.created_at)
+    if material := note_gate.where_from(provenance, partial(t_in, "en"), on):
+        return material
+    label = str(provenance.get("chat") or "a chat")
+    if provenance.get("source") == note_gate.INFERRED:
+        return t_in("en", "memoryRows.inferred", chat=label, day=on)
     return origin(label, False, entry.created_at)
 
 

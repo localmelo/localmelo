@@ -56,6 +56,10 @@ A fact shows once, where it is used.
 Spacing steps: `--space-1` 4 px, `--space-2` 8 px, `--space-3` 12 px, `--space-4` 16 px, `--space-5` 20 px,
 `--space-6` 24 px, `--space-7` 32 px, `--space-8` 48 px. Colours are the page's own tokens; a screen adds none.
 
+A space is a step, written `var(--space-N)`; one between two steps goes to the nearer, a tie to the larger. Three things keep
+their own value: a hairline under 4 px (a border's width, a line's own leading), a hit area or a negative margin that
+grows a target around a glyph, and a position that follows another element's size (the thread under a face, a text column).
+
 ## Cards in the chat
 
 | Card | What it shows | Weight |

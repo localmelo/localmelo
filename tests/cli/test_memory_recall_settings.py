@@ -77,7 +77,6 @@ def errors(**memory: object) -> list[str]:
         ("compress_parallel", 4),
         ("compress_cache", ""),
         ("compress_cache", "~/runs/compress_cache.jsonl"),
-        ("note_gate", "typed"),
         ("note_gate", "pointed"),
         ("note_gate", "meaning"),
         ("note_min_cosine", 0.2),
@@ -179,7 +178,7 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "note_gate",
             "typing",
             "[memory] note_gate 'typing' is not recognised. "
-            "Must be one of ('typed', 'pointed', 'meaning').",
+            "Must be one of ('pointed', 'meaning').",
         ),
         (
             "note_min_cosine",
@@ -265,7 +264,7 @@ def test_x_refuses_a_bad_value_with_a_clear_message(
 
 
 def test_the_model_level_of_the_note_gate_is_gone(tmp_path: Path) -> None:
-    left = "Must be one of ('typed', 'pointed', 'meaning')."
+    left = "Must be one of ('pointed', 'meaning')."
     assert errors(note_gate="model") == [
         f"[memory] note_gate 'model' is not recognised. {left}"
     ]
@@ -279,6 +278,35 @@ def test_the_model_level_of_the_note_gate_is_gone(tmp_path: Path) -> None:
         cfg = config.load()
     assert cfg.memory.note_gate == "model"
     assert f"[memory] note_gate 'model' is not recognised. {left}" in cfg.validate()
+
+
+def test_typed_in_the_file_reads_as_pointed_and_is_not_saved_back(
+    tmp_path: Path,
+) -> None:
+    assert MemoryConfig().note_gate == "pointed"
+    path = tmp_path / "config.toml"
+    path.write_text('chat_backend = "vllm"\n[memory]\nnote_gate = "typed"\n')
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        cfg = config.load()
+        assert cfg.memory.note_gate == "pointed"
+        assert not [e for e in cfg.validate() if "[memory]" in e]
+        save(cfg)
+    assert "note_gate" not in path.read_text()
+
+
+def test_x_reads_typed_as_pointed(tmp_path: Path) -> None:
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(tmp_path / "config.toml")),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        cli._parse(
+            ["-X", "memory.note_gate=typed", "--base-url", "http://127.0.0.1:1/v1", "q"]
+        )
+        assert config.overrides() == {"memory.note_gate": "pointed"}
+        assert config.load().memory.note_gate == "pointed"
 
 
 def test_a_whole_number_bar_is_saved_and_read_back_and_x_reads_it_as_a_number(

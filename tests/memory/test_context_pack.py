@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory import ChatMemory, note_gate, records
 from localmelo.support.memory.service import (
     ASK_OWNER,
     CHAT_TURN,
@@ -276,6 +276,39 @@ async def test_the_budget_drops_the_last_lines_whole(
     assert lines(short) == body[:2]
     assert len(short) <= budget
     assert await memory.context_pack("x", "c", 10, workspace=str(tmp_path)) == ""
+
+
+async def test_a_newer_note_from_a_page_does_not_push_out_the_persons_own_note(
+    memory: ChatMemory,
+) -> None:
+    await note(memory, "Your manager is Bob.", "My manager is Bob.", "about")
+    (page,) = await records.write(
+        memory.stores()[0],
+        [records.Candidate("Your manager is Alice Wu.", "", "about", "outcome")],
+        [None],
+        source={
+            "session_id": "s2",
+            "turn": 1,
+            "chat": "Main chat",
+            "source": "pointed",
+            "from": "https://jane.example.com/team",
+        },
+        embed_model="",
+    )
+    assert page.replaced is None
+    typed, other = lines(await memory.context_pack("x", "c"))
+    assert "Bob" in typed and "Alice Wu" in other and "from jane.example.com" in other
+    assert "older" not in typed and "older" not in other
+    # A budget for one line keeps the person's own note, not the newer page note.
+    budget = len(PACK_HEADER) + len(typed) + 1
+    assert lines(await memory.context_pack("x", "c", budget)) == [typed]
+    # Nor the page note once the person reworded it.
+    assert await memory.edit_record(page.id, "Your manager is Alice Wu-Reyes.")
+    typed, other = lines(await memory.context_pack("x", "c"))
+    assert "Bob" in typed and "Alice Wu-Reyes" in other
+    assert "older" not in typed and "older" not in other
+    budget = len(PACK_HEADER) + len(typed) + 1
+    assert lines(await memory.context_pack("x", "c", budget)) == [typed]
 
 
 async def test_a_note_the_task_has_already_is_left_out(
@@ -538,7 +571,7 @@ async def test_a_task_question_is_not_indexed_and_not_evidence(
     third = await turn(store, "What next?", first.session_id)
     await memory.before_turn(store, third, "What next?")
     reply = await memory.remember("Your gate for Faro is 9.", "about")
-    assert reply.startswith("Not remembered: not something the user said.")
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
     assert await memory.records() == []
     # The normal turn still keeps a note of its own words.
     fourth = await turn(store, "I use gate 9 for Faro.", first.session_id)
