@@ -379,17 +379,25 @@ test('a form send and typing show what goes, say when the page decides, and offe
   assert.deepEqual(focuses(typing).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on typing');
   // A text that stands for a password the person gave (the question says `field: "password"`) says what is typed;
   // every other text reads as it always did, in both browsers' words.
-  const sentence = (browser, field, id) => findNode(c.draw({request_id: id, tool_name: 'browser-type:https://example.com',
-    arguments: {site: 'example.com', access: 'type', how: 'type', text: '[password-482913075]', browser, field},
-    workspace_label: '~/w'}), (node) => node.className === 'approval-note').textContent;
+  const drawn = (browser, field, id, on) => c.draw({request_id: id, tool_name: 'browser-type:https://example.com',
+    arguments: {site: 'example.com', access: 'type', how: 'type', text: '[password-482913075]', browser, field, on},
+    workspace_label: '~/w'});
+  const sentence = (browser, field, id) => findNode(drawn(browser, field, id), (node) => node.className === 'approval-note').textContent;
+  const titled = (field, id, on) => findNode(drawn('chrome', field, id, on), (node) => node.className === 'approval-title').textContent;
   const send = 'Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.';
   const never = 'It never types passwords, card numbers or one-time codes.';
-  const gave = 'That text stands for the password you gave for this site, and melo types that password. It never types card numbers or one-time codes.';
+  const gave = 'The text below stands for that password. It never types card numbers or one-time codes.';
   assert.equal(sentence(undefined, undefined, 't1'), `melo wants to type the text below on example.com in Safari's automation window. ${never} ${send}`);
   assert.equal(sentence('chrome', undefined, 't2'), `melo wants to type the text below on example.com in melo's browser, which runs in the background. ${never} ${send}`);
   assert.equal(sentence('chrome', 'search', 't3'), sentence('chrome', undefined, 't2'), 'a search box changes no word');
   assert.equal(sentence('chrome', 'password', 't4'), `melo wants to type the text below on example.com in melo's browser, which runs in the background. ${gave} ${send}`);
   assert.equal(sentence(undefined, 'password', 't5'), `melo wants to type the text below on example.com in Safari's automation window. ${gave} ${send}`);
+  // The title is the question itself for a password the person gave; any other text keeps the title it had.
+  assert.equal(titled(undefined, 't6'), 'Let melo type on example.com?');
+  assert.equal(titled('search', 't7'), 'Let melo type on example.com?');
+  assert.equal(titled('password', 't8'), 'Type the password you gave on example.com?');
+  assert.equal(titled('password', 't9', 'a textbox "Password"'), 'Type the password you gave on example.com?');
+  assert.equal(titled(undefined, 't10', 'a textbox "Email"'), 'Type into “Email” on example.com?');
   // A click or a choice keeps its chat-wide answer, and says typing still asks.
   request = {request_id: 'clicking', tool_name: 'browser-act:https://example.com',
     arguments: {site: 'example.com', access: 'act', how: 'click'}, workspace_label: '~/w', offers_chat: true};

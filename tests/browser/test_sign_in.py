@@ -147,7 +147,9 @@ async def test_the_refusal_of_a_password_box_names_the_one_live_handle_else_its_
     first = hide_passwords("sign in to example.com, my password is old-Secret1")
     [handle] = HANDLE.findall(first)
     reviewer.user_message(first)
-    assert f"type its handle ({handle}) here" in await refusal(Reading(reviewer))
+    text = await refusal(Reading(reviewer))
+    assert f"type its handle ({handle}) here" in text
+    assert "(none was given" not in text, "the handle sentence says the opposite"
     # Two live handles: the shape, never a guess between them (#626).
     reviewer.user_message(hide_passwords("and my other password is new-Secret2"))
     text = await refusal(Reading(reviewer))
@@ -157,7 +159,8 @@ async def test_the_refusal_of_a_password_box_names_the_one_live_handle_else_its_
     # Words that name another site: the box's refusal holds no handle at all.
     elsewhere = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     elsewhere.user_message(first.replace("example.com", "other.org"))
-    assert not HANDLE.search(await refusal(Reading(elsewhere)))
+    text = await refusal(Reading(elsewhere))
+    assert not HANDLE.search(text) and "(none was given" in text
 
 
 async def test_a_handle_goes_only_into_a_password_box_and_only_on_https() -> None:

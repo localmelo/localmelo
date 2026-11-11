@@ -41,7 +41,6 @@ import unicodedata
 from collections.abc import Iterable
 
 from localmelo.support.browser.driver import (
-    BrowserError,
     Element,
     FieldAttrs,
     Sensitive,
@@ -144,16 +143,6 @@ def sensitive_kind(attrs: FieldAttrs | None) -> Sensitive:
     if not _NAMED.search(words) and 4 <= attrs.maxlength <= 8 and kind in _BOX_TYPES:
         return "code"  # a short box that names nothing: shaped like a code
     return ""
-
-
-def refuse_typing(attrs: FieldAttrs | None) -> None:
-    """Raise :class:`BrowserError`, in plain words, when melo must not type in the field."""
-    kind = sensitive_kind(attrs)
-    if kind:
-        raise BrowserError(
-            f"That is {REASONS[kind]}: melo never types into passwords, payment "
-            "cards or one-time codes. Ask the person to fill it in themselves."
-        )
 
 
 # New lines, tabs and the two joiners (emoji and a few scripts need them) show or join.
@@ -344,6 +333,5 @@ __all__ = [
     "form_pairs",
     "REASONS",
     "normalized",
-    "refuse_typing",
     "sensitive_kind",
 ]

@@ -6,7 +6,7 @@ In the web console and the app, today:
 
 - melo keeps a note about you when you ask it to, or when it judges one worth keeping; a line under your message says `Remembered: … · Undo`.
 - The **Memory** tab lists the notes, and you can reword or forget any of them.
-- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Used … memory` under your message shows each source.
+- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Recalled … memory` under your message shows each source.
 
 ## What localmelo remembers
 

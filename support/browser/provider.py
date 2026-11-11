@@ -1772,18 +1772,23 @@ class BrowserToolProvider(BaseToolProvider):
         refusal = (
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "payment cards or one-time codes, nor a password it does not hold from the "
-            "user (none was given for this site, or it was too long to keep)."
+            "user"
         )
         origin = _box_origin(snap, item)
         if kind == "password" and self._signs_in(origin):
             handle = self._sign_in_handle(origin)
-            refusal += (
-                " The user gave a sign-in password in their message or a file: "
+            raise BrowserError(
+                f"{refusal}. The user gave a sign-in password in their message or a file: "
                 f"type its handle ({handle or '[password-…], copied from their message'}) "
                 "here, not a value."
             )
-            raise BrowserError(refusal)
-        return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
+        return await self._persons_step(
+            tab,
+            snap.origin,
+            kind,
+            f"{refusal} (none was given for this site, or it was too long to keep).",
+            "fill it in",
+        )
 
     def _given_password(
         self, snap: render.Snapshot, item: Element, text: str

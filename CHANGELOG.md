@@ -71,7 +71,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A human check from a known provider asks you once per chat, in Chrome, in Ask and in Auto: Always in this chat covers such checks in that chat, its tasks and its chores (in the main chat, every chat). Other boxes and Safari ask as before.
 - The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
 - A password in a file you attach is typed on a site your message names when the message says to sign in and the files hold only one password; otherwise the page is handed to you.
-- The card for typing a password you gave says that melo types that password, and the refusal at a password box now covers a password too long to keep.
+- The card for typing a password you gave is titled "Type the password you gave on …?" and says its text stands for that password; the refusal at a password box now covers a password too long to keep.
 
 ### Memory
 
@@ -134,6 +134,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `melo` no longer starts tool servers it will not use when the gateway is already running.
 - `melo task` says Did not finish where it said Failed, and Continued in a newer task (with no hint to continue it) for a run whose work went on.
 - In the terminal, the sentence melo words itself for Allow once never lands in your input box or ↑ history, and `/retry` says what it tries again.
+- The terminal's question panel breaks its own sentences at a space, not in the middle of a word.
 
 ### Setup
 

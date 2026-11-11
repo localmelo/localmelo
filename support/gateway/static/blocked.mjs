@@ -111,9 +111,10 @@ export function pageText(tool, args = {}) {
   const a = isObject(args) ? args : {};
   const site = String(a.site || name.slice(name.indexOf(':') + 1));
   if (name.startsWith('browser-type:')) {
-    // The box it types into, when melo named it.
+    // The box it types into, when melo named it; a password the person gave is the question itself.
     const control = controlOf(a.on);
-    const title = control ? actionTitle('typeInto', control, site) : t('approval.typeSite', {site});
+    const title = a.field === 'password' ? t('approval.typeGivenTitle', {site})
+      : control ? actionTitle('typeInto', control, site) : t('approval.typeSite', {site});
     return {title, what: t('approval.actTyped'), text: String(a.text ?? '')};
   }
   if (!name.startsWith('browser-submit:')) return null;
