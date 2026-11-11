@@ -442,6 +442,17 @@ def _read_notes(
     return taken, shown
 
 
+def _melos(inbox: InboxSource | None, offset: int) -> bool:
+    """Whether note *offset* of *inbox* is melo's own wording (Allow once's go-ahead).
+
+    An inbox says so with ``melos(offset)``, as one that carries pictures says so
+    with ``pictures(offset)``. The run sends such a note to the model but counts
+    none of it as the person's words.
+    """
+    ask = getattr(inbox, "melos", None)
+    return callable(ask) and bool(ask(offset))
+
+
 def _tool_message_content(
     text: str, images: Sequence[ImagePart], unseen: str = ""
 ) -> str:
@@ -3340,8 +3351,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         )
         self.hippo.working.append(inserted)
         run.pinned.append(inserted)
-        for _, text in pending:
-            self._reviewer.user_message(text)
+        for offset, text in pending:
+            self._reviewer.user_message("" if _melos(run.inbox, offset) else text)
         return inserted, pending
 
     @staticmethod
@@ -3363,8 +3374,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             ):
                 raise ContextFitError("Inbox instructions do not fit the request")
             for offset, text in pending:
+                by = "melo" if _melos(run.inbox, offset) else ""
                 run.inbox.accept(offset)
-                run.events.inbox_accepted(offset, text, run.steps, run.attempts)
+                run.events.inbox_accepted(offset, text, run.steps, run.attempts, by)
 
         return on_ready
 

@@ -149,7 +149,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
 | `/title [text]` | Show or set a 1–200-character title. |
 | `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
-| `/retry` | Re-run the newest finished turn with its stored typed text. |
+| `/retry` | Re-run the newest finished turn with its stored typed text; a turn melo itself worded (the go-ahead of **Allow once**) is sent again as melo's own, with no words of yours. |
 | `/copy [turn]` | Copy a stored answer's Markdown; without a number, the latest finished, non-undone turn. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals; `?` means not recorded. |
 | `/status [all]` | Five rows that say whether melo is ready: the model and its server (`✓ answers`, or why not), the folder, the session, what the approvals do, and how full the context is. `/status all`, and `/status` in developer mode, print every row. |
@@ -473,12 +473,12 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-melo remembers across chats by words only; melo setup adds search by meaning.
+melo remembers across chats by words; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
-- Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
+- Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, without it`).
 - With no server running, a supported Apple-silicon Mac prints `Checking what this Mac can run…` and [one list](model-servers.md#first-run-setup): the Mac, the recommended model, each item with its size and where it goes, and the total to download. The menu starts on `Set up <model> (<size>)`; nothing installs until you choose it. `Choose what to install` skips items one by one, `Choose another model` plans another pick, and `Use a server I already run`, `Use a hosted service` and `Quit` leave. A step that fails or is stopped with Ctrl-C returns to the menu, and what was downloaded is kept. Piped answers keep their original prompt and are told `Run melo in a terminal to set this up.`; a pipe never starts a setup. Other systems print the manual way.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
@@ -510,7 +510,7 @@ On a terminal every question with a fixed set of answers is a list, as the tool 
 ```
 
 - ↑ ↓ move, Enter confirms the selected row, and a number key (1 to 9) chooses that row at once.
-- The safe or recommended answer is selected first, and Esc gives the answer named at the end of the key line (`esc cancel` ends the setup; `esc not now`, `esc no, by words only` and `esc don't attach it` decline).
+- The safe or recommended answer is selected first, and Esc gives the answer named at the end of the key line (`esc cancel` ends the setup; `esc not now`, `esc no, without it` and `esc don't attach it` decline).
 - There is no filter field: the lists are short, and letters typed in them do nothing.
 - Ctrl+C prints `Setup cancelled.` and exits with 130, Ctrl+D exits with 0.
 - Without a terminal (answers piped in, a script, a test) no list is drawn and each question reads the typed answer it always did (`Use it? [Y/n]:`, a number for a backend, Enter for the default); a direct run (`melo "task"`) never asks a question.

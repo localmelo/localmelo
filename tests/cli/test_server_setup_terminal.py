@@ -87,7 +87,7 @@ def test_the_list_says_what_is_here_what_was_left_out_and_what_that_leads_to() -
         "  Start at login        melo_serve                skipped",
         "  Start at login        the gateway               the same notice",
         "Download about 1.6 GB. 83 GB free.",
-        "Without Qwen3 Embedding 0.6B, memory goes by words only.",
+        "Without Qwen3 Embedding 0.6B, memory goes by words.",
         "Without the login item, melo serve starts melo_serve when needed.",
     ]
     assert consent_lines(plan, {CHAT}, "")[-1] == (

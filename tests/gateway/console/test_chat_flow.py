@@ -24,6 +24,7 @@ from localmelo.support.gateway.console.front import (
     TASK_TOOLS,
     whole_answer,
 )
+from localmelo.support.memory import note_gate
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import HOLDER, core_event, run_result
@@ -41,11 +42,7 @@ CAREER = "你去我的网站看一下我的简历 然后告诉我什么工作适
 IS_IT_DONE = "跑完了吗"
 DIDNT_IT = "之前worker不是已经跑完了吗"
 JUST_TELL_ME = "直接和我说就行了"
-NOT_SAID = (
-    "Not remembered: not something the user said. 简历: not in what the user "
-    "typed in this chat or in a finished task's result shown here. Keep only "
-    "what the user told you, in their words."
-)
+NOT_SAID = f"{note_gate.NOT_SUPPORTED}简历."
 
 
 class RefusingMemory(BaseToolProvider):

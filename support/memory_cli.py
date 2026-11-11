@@ -21,25 +21,34 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
+from functools import partial
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import command_words, config, onboard
-from localmelo.support.memory import ChatMemory, ingest, records
-from localmelo.support.memory.recall import origin
+from localmelo.support.memory import ChatMemory, ingest, note_gate, records
+from localmelo.support.memory.recall import day, origin
 from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
     StoreOwnedError,
     default_path,
 )
+from localmelo.support.words import t_in
 
 VERBS = ("list", "forget", "status", "reindex", "import", "sleep", "ingest")
 DEVELOPER_VERBS = ("sleep", "ingest")
 
 
 def note_origin(entry: StoredEntry) -> str:
-    """Where a note came from, as the chat named it when the note was written."""
-    label = str(entry.provenance.get("chat") or "a chat")
+    """Where a note came from, as the notes page says it: the page or file or the
+    finished task's result a note was kept from, melo's inference, or else the chat
+    named when the note was written."""
+    provenance, on = entry.provenance, day(entry.created_at)
+    if material := note_gate.where_from(provenance, partial(t_in, "en"), on):
+        return material
+    label = str(provenance.get("chat") or "a chat")
+    if provenance.get("source") == note_gate.INFERRED:
+        return t_in("en", "memoryRows.inferred", chat=label, day=on)
     return origin(label, False, entry.created_at)
 
 
@@ -124,14 +133,18 @@ async def _status() -> int:
     finally:
         await memory.aclose()
     model = status["embedding_model"]
+    # The way that answers now, not the setting: `auto` follows the models set up.
+    if status["answering"] == "embedding" and model:
+        search = f"by meaning with {model}, and by words"
+    elif status["answering"] == "llm":
+        search = "by words, and the chat model picks the notes that matter"
+    else:
+        search = "by words only"
     rows = [
         ("memory", "on, across chats" if status["on"] else "off"),
         ("notes", str(status["records"])),
         ("chats", f"{status['documents']} turns indexed"),
-        (
-            "search",
-            f"by meaning with {model}, and by words" if model else "by words only",
-        ),
+        ("search", search),
         ("folder", onboard._home_path(memory.directory)),
     ]
     if status["last_error"]:
