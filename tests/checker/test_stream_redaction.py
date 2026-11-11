@@ -145,12 +145,16 @@ def test_only_the_two_rules_the_stream_holds_can_match_across_lines() -> None:
     assert spanning == SPANNING_BY_DESIGN
 
 
-# Where redaction.py matches: each rule at one call, and nowhere else.
+# Where redaction.py matches: each rule at the call that replaces, three of them
+# once more where ``secret_spans`` reads the same places, and nowhere else.
 RULE_SITES = [
+    ("_BEARER", "finditer"),
     ("_BEARER", "subn"),
     ("_CODE", "finditer"),
     ("_CODE_KEYWORD", "finditer"),
+    ("_KEY", "finditer"),
     ("_KEY", "subn"),
+    ("_PEM", "finditer"),
     ("_PEM", "sub"),
 ]
 MATCH_METHODS = {
@@ -199,7 +203,7 @@ def test_redaction_matches_with_no_regex_the_walk_above_cannot_see() -> None:
     every = {id(call) for call in ast.walk(tree) if _is_re_call(call)}
     assert every == {id(call) for call in top.values()}
     assert all(call.func.attr == "compile" for call in top.values())  # type: ignore[attr-defined]
-    # Each rule is used once, as the receiver of its one match call, and no
+    # Each rule is used only as the receiver of the match calls listed, and no
     # other match call is made on anything (a call on a non-name included).
     uses = sorted(
         node.id

@@ -37,7 +37,8 @@ from typing import Any, Final, NamedTuple
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.redaction import redact_secrets, secret_spans
+from localmelo.melo.contracts.sign_in import password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
     create_private_file,
@@ -255,17 +256,64 @@ def _item(row: Sequence[Any]) -> MemoryItem:
 
 
 def _kept(text: str) -> str:
-    """*text* without the sentences a note would refuse (a password, a card number)."""
-    for _, sentence in reversed(split_sentences(text)):
+    """*text* without its secrets' sentences: each sentence a note would refuse (a
+    password, a card number), each sentence a secret's place reaches into, and the
+    place itself.
+
+    A secret's place is a password's value or what the redaction replaces. It can
+    lie outside the sentence that makes it one, or cross a sentence's end: a quoted
+    value with a full stop in it, a value or a token on the line after its word, a
+    code in the sentence before its keyword. Neither sentence then reads as a
+    secret by itself. So everything is found in the text as given and taken out in
+    one pass at the end. A cut made first hides what is left of a secret from every
+    later test: the rest of a key after a password word, a code once its keyword's
+    sentence is gone, a long sentence once a shorter one inside it was replaced.
+    """
+    places = _merged([*password_spans(text), *secret_spans(text)])
+    # By its place too: a piece the splitter gives no sentence for. An empty place
+    # (a key block with no body) holds nothing to cut.
+    out = [place for place in places if place[0] < place[1]]
+    refused: dict[str, None] = {}
+    at = 0
+    for start, sentence in split_sentences(text):
+        end = start + len(sentence)
+        while at < len(places) and places[at][1] <= start:
+            at += 1
         if sensitive(sentence):
-            text = text.replace(sentence, "[left out]")
-    return text
+            refused[sentence] = None
+        elif at < len(places) and places[at][0] < end:
+            out.append((start, end))
+    # A refused sentence wherever its words stand: its own place, a repeat, and
+    # inside a sentence that reads as none.
+    for sentence in refused:
+        found = text.find(sentence)
+        while found >= 0:
+            out.append((found, found + len(sentence)))
+            found = text.find(sentence, found + 1)
+    parts: list[str] = []
+    kept_from = 0
+    for start, end in _merged(out):
+        parts += [text[kept_from:start], "[left out]"]
+        kept_from = end
+    parts.append(text[kept_from:])
+    return "".join(parts)
+
+
+def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """*spans* in order, each run of overlapping ones as one span."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def _clean(text: str) -> str:
-    """*text* without its secrets: a sentence a note would refuse is left out, the
-    rest redacted. A private key block is redacted whole first: left out line by
-    line, its header would go and its body stay."""
+    """*text* without its secrets: a sentence that holds one is left out
+    (:func:`_kept`), the rest redacted. A private key block is redacted whole
+    first: left out line by line, its header would go and its body stay."""
     text = text.strip()
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
