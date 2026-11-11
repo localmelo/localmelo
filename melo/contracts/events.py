@@ -23,7 +23,7 @@ EVENT_SCHEMA_VERSION: Final = 1
 EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "run.started": frozenset({"query", "max_steps", "workspace_root", "approval"}),
-        "inbox.accepted": frozenset({"offset", "text", "step", "attempt"}),
+        "inbox.accepted": frozenset({"offset", "text", "step", "attempt", "by"}),
         "step.started": frozenset({"step", "attempt"}),
         "assistant.message": frozenset(
             {
@@ -157,6 +157,8 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "assistant.message": frozenset({"prefix"}),
+        # Who worded a note melo itself sent (Allow once's go-ahead): only then.
+        "inbox.accepted": frozenset({"by"}),
         # A run's reviews (#339): only a run with an approval policy has it.
         "run.finished": frozenset({"reviews"}),
         # The questions the call's tool asked and was refused (#431): a site

@@ -30,7 +30,7 @@ from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, typed_words
 
 Reply = Callable[[list[Message]], Awaitable[Message]]
 
@@ -135,17 +135,23 @@ async def _settled(pool: TaskWorkers, task_id: str, turns: int, state: str) -> N
             await asyncio.sleep(0.01)
 
 
-async def test_a_done_task_continues_to_a_second_turn(workers: Setup) -> None:
+@pytest.mark.parametrize(("by", "said"), [("person", "commit it"), ("melo", "")])
+async def test_a_done_task_continues_to_a_second_turn(
+    workers: Setup, by: str, said: str
+) -> None:
     pool, llm, workspace = workers
     llm.replies = [lists_files(), says("Fixed; not committed."), says("Committed.")]
     row, _ = await pool.create({"prompt": "Fix it", "workspace": str(workspace)})
     task_id = row["task_id"]
     await _settled(pool, task_id, 1, "done")
-    _, how = await pool.message(task_id, "commit it")
+    _, how = await pool.message(task_id, "commit it", by=by)
     assert how == "continued"
     await _settled(pool, task_id, 2, "done")
     turns = await pool.store.list_turns(task_id, limit=10)
     assert [t.answer for t in turns][-1] == "Committed."
+    # The text is what the model got; the words are the person's only, none for melo's.
+    assert turns[-1].user_text == "commit it"
+    assert typed_words(turns[-1]) == said and turns[-1].composed is (by == "melo")
 
 
 async def test_a_task_out_of_steps_continues_to_a_second_turn(workers: Setup) -> None:

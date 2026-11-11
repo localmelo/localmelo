@@ -202,7 +202,9 @@ class _Emitter:
         if self._sink is not None:
             self._emit("context_budget", lambda: json_safe_payload(record))
 
-    def inbox_accepted(self, offset: int, text: str, step: int, attempt: int) -> None:
+    def inbox_accepted(
+        self, offset: int, text: str, step: int, attempt: int, by: str = ""
+    ) -> None:
         if self._sink is not None:
             self._emit(
                 "inbox.accepted",
@@ -212,6 +214,7 @@ class _Emitter:
                         "text": redact_secrets(text)[0],
                         "step": step,
                         "attempt": attempt,
+                        **({"by": by} if by else {}),
                     }
                 ),
             )

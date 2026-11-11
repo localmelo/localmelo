@@ -14,7 +14,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A finished task's answer comes back to the chat that started it.
 - Auto mode: choose Ask or Auto for each chat. In Auto, the steps the goal plainly needs run, risky ones ask with the reason, and Allow once lets one through.
 - In Auto, a card waits only while someone can see it, and your earlier words in the chat still count.
-- Allow once in a chat shows melo's go-ahead as a folded "Not typed by you" line, and it is no longer kept or remembered as words you typed.
+- The go-ahead Allow once sends is melo's own sentence: a chat shows it as a folded "Not typed by you" line, and a chat or a task no longer keeps it as words you typed, unless it answers a question a task waits on.
 - Text in a file or a paste that imitates the heading of melo's memory is not taken for recalled notes when a step is reviewed in Auto, and a password typed after such a line is hidden like any other.
 - In Auto, a long task that goes well no longer runs out of reviews (a review that lets a high-impact step run on your words still counts), and a tool you allowed for the chat runs its routine calls without one.
 - Approval cards say in one plain sentence what the step will do and why melo asks, and follow your chat's mode.

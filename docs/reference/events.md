@@ -160,7 +160,7 @@ asyncio.run(main())
 | Type | When | `data` keys |
 |---|---|---|
 | `run.started` | First, once the arguments of `run_task` are checked. | `query`, `max_steps`, `workspace_root`, `approval` |
-| `inbox.accepted` | After request fitting and before sending the planning request. | `offset`, `text`, `step`, `attempt` |
+| `inbox.accepted` | After request fitting and before sending the planning request. | `offset`, `text`, `step`, `attempt`, `by` (only when melo worded the note) |
 | `step.started` | At the start of each planning step. | `step`, `attempt` |
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
@@ -192,6 +192,9 @@ asyncio.run(main())
 - `step`, `attempt`: the planning step and its attempt. Acceptance
   follows `step.started` and request fitting, but does not prove model receipt
   or execution.
+- `by`: `"melo"` when melo worded the note itself (the go-ahead Allow once sends to a
+  task): the run reads it but counts none of it as words the person added. Absent
+  for every note the person typed.
 
 ### step.started
 

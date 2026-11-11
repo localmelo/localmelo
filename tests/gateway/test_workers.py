@@ -531,7 +531,9 @@ def test_a_task_s_turn_reads_the_person_s_words_not_the_objective() -> None:
     from localmelo.support.gateway.workers import _turn_text
 
     def record(card: str, **spec: str) -> Any:
-        return SimpleNamespace(card=card, spec={"objective": "Install x", **spec})
+        return SimpleNamespace(
+            card=card, card_by="", spec={"objective": "Install x", **spec}
+        )
 
     assert _turn_text(record("")) == ("Install x", None)
     assert _turn_text(record("", user_words="chart it")) == ("Install x", "chart it")
@@ -557,7 +559,9 @@ def test_a_site_only_the_chats_reading_names_is_not_named_by_the_person() -> Non
     request = with_reading("retry today's task", reading, name="Retry the check")
     # With the person's words kept, and with none kept (words before the reading).
     for spec in ({"user_words": "retry today's task"}, {}):
-        record = SimpleNamespace(card="", spec={"objective": request, **spec})
+        record = SimpleNamespace(
+            card="", card_by="", spec={"objective": request, **spec}
+        )
         _, words = _turn_text(cast(Any, record))
         assert words == "retry today's task"
         reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
@@ -565,7 +569,7 @@ def test_a_site_only_the_chats_reading_names_is_not_named_by_the_person() -> Non
         assert not reviewer.names_host("only-in-the-reading.example")
     # A site the person's own words name is still named.
     named = with_reading("retry the check on named.example", reading)
-    record = SimpleNamespace(card="", spec={"objective": named})
+    record = SimpleNamespace(card="", card_by="", spec={"objective": named})
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.user_message(_turn_text(cast(Any, record))[1] or "")
     assert reviewer.names_host("named.example")
@@ -595,7 +599,7 @@ def test_a_site_only_a_file_names_is_not_named_by_the_person(
     request = with_reading(compose_user_text(typed, (file,)), "the chat's reading")
     # No words kept (a retried turn has none typed): the words before the reading
     # and before the file, never the file's text.
-    record = SimpleNamespace(card="", spec={"objective": request})
+    record = SimpleNamespace(card="", card_by="", spec={"objective": request})
     _, words = _turn_text(cast(Any, record))
     assert words == typed
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]

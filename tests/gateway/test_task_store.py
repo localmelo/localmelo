@@ -210,6 +210,7 @@ async def test_open_creates_eight_tables_and_leaves_user_version_alone(
             "ending",
             "work_base",
             "finishing",
+            "card_by",
         },
         "task_deps": {"task_id", "waits_on", "created_by", "confirmed"},
         "priority_events": {

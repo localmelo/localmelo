@@ -1231,8 +1231,9 @@ async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor
         assert "also add a short summary" in fresh.spec["objective"]
 
 
+@pytest.mark.parametrize("by", ["person", "melo"])
 async def test_an_allow_once_still_unread_at_the_end_goes_on_as_the_allowance(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by: str
 ) -> None:
     """Allow once on a running worker queues melo's go-ahead (``allow_once``); when
     the run ends without reading it, the successor runs the allowed step on that
@@ -1264,12 +1265,14 @@ async def test_an_allow_once_still_unread_at_the_end_goes_on_as_the_allowance(
             ["install"],
             "python_exec",
         )
-        _, how = await workers.message(task_id, "Go ahead.", same_job=True)
+        _, how = await workers.message(task_id, "Go ahead.", same_job=True, by=by)
         assert how == "queued"
         release.set()
         fresh = await _went_on(console, task_id)
         await until(lambda: _is(console, fresh.task_id, "done"), timeout=15.0)
         assert ran.codes == [INSTALL]
+        # The successor keeps the person's words only: melo's go-ahead is data there.
+        assert ("Go ahead." in fresh.spec["user_words"]) is (by == "person")
 
 
 async def test_a_message_whose_successor_cannot_start_is_said_in_the_chat(
