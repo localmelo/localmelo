@@ -16,6 +16,10 @@ from typing import Final
 
 # Where a file's block starts in a composed text; the note line comes after it.
 FILE_OPENER: Final = "\n\n<attachment name="
+# The line that ends a block.
+FILE_CLOSER: Final = "</attachment>"
+# The first run (no blank in it) of the block's opening tag.
+_OPENING_TAG: Final = FILE_OPENER.split()[0]
 
 
 def words_before_files(text: str) -> str:
@@ -32,3 +36,15 @@ def words_before_files(text: str) -> str:
     if cut < 0:
         return "" if text.lstrip().startswith(FILE_OPENER.lstrip()) else text
     return text[:cut]
+
+
+def is_file_tag(text: str, start: int, stop: int) -> bool:
+    """Whether ``text[start:stop]``, a run with no blank in it, is a block's tag: the
+    first run of an opening tag, or a run that begins with a closing tag.
+
+    A tag is never a value a password word takes (a line that ends in one, then
+    the block). It reads the text in place: a caller asks this of runs of any length.
+    """
+    return text.startswith(FILE_CLOSER, start, stop) or (
+        stop - start == len(_OPENING_TAG) and text.startswith(_OPENING_TAG, start)
+    )
