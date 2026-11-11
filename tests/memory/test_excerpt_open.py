@@ -116,8 +116,8 @@ def test_excerpts_open_but_the_list_form_and_items_do_not() -> None:
     assert not RecallSettings(listing=True).opens_excerpts
     assert not RecallSettings(items=True).opens_excerpts
     assert Shown.of(300, None, True).ids and not Shown.of(300).ids
-    assert RecallSettings().shown("tomato").ids
-    assert not RecallSettings(listing=True).shown("tomato").ids
+    assert RecallSettings().shown().ids
+    assert not RecallSettings(listing=True).shown().ids
 
 
 def test_turn_excerpt_says_whether_it_shows_less_than_the_whole_text() -> None:
@@ -699,6 +699,6 @@ async def test_with_memory_items_it_changes_nothing(tmp_path: Path) -> None:
         tools = await MemoryTools(memory).start()
         assert [t.definition.name for t in tools] == ["search_memory", "remember"]
         assert tools[0].definition is SEARCH_MEMORY
-        assert not memory.recall_settings().shown("tomato").ids
+        assert not memory.recall_settings().shown().ids
     finally:
         await memory.aclose()

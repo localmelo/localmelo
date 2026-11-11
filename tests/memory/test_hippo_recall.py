@@ -851,8 +851,10 @@ async def test_an_item_whose_turns_a_note_replaced_is_left_out_unless_asked_abou
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         now = time.time()
+        # The turn shares no word with the questions below: a turn that did would
+        # take one of the two turn places of the block from the item the past needs.
         a, _ = await add_turn(
-            memory, store, "Sync?", "Noted.", at=now - 5 * DAY, title="A"
+            memory, store, "Planning?", "Noted.", at=now - 5 * DAY, title="A"
         )
         c, _ = await add_turn(
             memory, store, "Moved?", "Noted.", at=now - 2 * DAY, title="C"

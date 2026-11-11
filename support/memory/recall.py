@@ -5,10 +5,11 @@ model, cosine similarity over the vectors joins it, and reciprocal rank fusion
 (k = :data:`RRF_K`) merges the two lists (:func:`ranked`; :func:`pick` keeps the
 best few). The ``llm`` retriever asks :func:`ranked` for loose BM25 candidates
 and lets the chat model choose among them. An item takes part in a list only
-above that list's bar: most of the question's content words for BM25
-(:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors, so most turns recall
-nothing; both bars are developer settings. Documents (not
-records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
+above that list's bar: a share of the question's content words for BM25
+(:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors. The bars are loose on
+purpose (a missed chat costs an answer, an unrelated one a few lines the model
+passes over), so a message about something else can still recall an item.
+Documents (not records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
 A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
 one chunk of a turn, the best, whatever the chats' cap.
@@ -56,8 +57,11 @@ from localmelo.melo.memory.hippo.policy import STOPWORDS, normalise
 from localmelo.melo.memory.notes import split_sentences
 
 RRF_K: Final = 60
-MIN_COVERAGE: Final = 0.6
-MIN_COSINE: Final = 0.55
+# The two bars an item passes to join a list. A comparison of these values against
+# stricter ones (0.55 and 0.6) answered ten more of every hundred questions whose
+# answer was in memory, and refused as well when it was not.
+MIN_COVERAGE: Final = 0.4
+MIN_COSINE: Final = 0.45
 # The vector bar of a question that counts, totals or compares: a category question
 # sits further from each item that answers it than a single-fact one does.
 GATHER_COSINE: Final = 0.40
@@ -99,8 +103,8 @@ _LINE_CHARS: Final = 240
 TURN_CHARS: Final = _LINE_CHARS - len("User: ")
 _REPLY_CHARS: Final = 60
 _REPLY_MIN: Final = 20
-# With ``recall_excerpt = "match"``, the share of a turn's room the user's words
-# keep when they are long; the rest is melo's reply's.
+# With :attr:`Shown.terms`, the share of a turn's room the user's words keep when
+# they are long; the rest is melo's reply's.
 _USER_SHARE: Final = 0.4
 _TITLE_CHARS: Final = 40
 # The list form (``[memory] recall_form = "list"``): the most turns it lists and the
@@ -183,9 +187,10 @@ class Shown(NamedTuple):
     *chars* is the room one turn takes (:data:`TURN_CHARS`), in the recall block
     and in the memory search tool's list; text that is no turn takes *chars* plus
     the 6 characters of ``User: `` (240 by default, the plain head it always
-    had). With *terms*, the question's content
-    terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
-    sentences that hold most of them rather than its head (:func:`turn_said`).
+    had). With *terms* (content terms), each part of a turn shows the sentences that
+    hold most of them rather than its head (:func:`turn_said`); a recall line never
+    sets them, a task's hand-over line does (it finds again what the chat's line
+    showed).
     With *ids* (the excerpt form of turns) a turn's line that shows less than
     the whole turn starts with the turn's id (:meth:`Item.excerpt`), the id counted
     in the room. The defaults are the head of every turn, as it always was.
