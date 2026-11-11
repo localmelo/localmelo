@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.asks import _restored
 from localmelo.support.gateway.handover import words_of
 from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions import attachments
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import typed_words
 from localmelo.tests.agent.test_sign_in import LIKE_HEADING
@@ -483,6 +485,7 @@ def start_process(monkeypatch: pytest.MonkeyPatch, draw: int) -> Vault:
     vault = Vault()
     monkeypatch.setattr(sign_in, "VAULT", vault)
     monkeypatch.setattr(_step_review, "VAULT", vault)
+    monkeypatch.setattr(attachments, "VAULT", vault)
     return vault
 
 
@@ -510,9 +513,12 @@ async def test_a_turn_tried_again_after_a_restart_cannot_type_a_password_given_s
         real = StepReviewer.user_message
 
         def user_message(
-            self: StepReviewer, text: str, recalled: str | None = None
+            self: StepReviewer,
+            text: str,
+            recalled: str | None = None,
+            files: Collection[str] = (),
         ) -> None:
-            real(self, text, recalled)
+            real(self, text, recalled, files)
             typed_again.append(self.sign_in_value(stale, "forum.example"))
 
         monkeypatch.setattr(StepReviewer, "user_message", user_message)

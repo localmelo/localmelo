@@ -211,7 +211,7 @@ _PAGE_NOTE = (
     "or the only one in a file they attached when they asked to sign in, reads "
     "like [password-…] there (melo keeps "
     "the real one out of your sight): "
-    "browser_type that text, copied from the message, into the password box "
+    "browser_type that text, copied from their message, into the password box "
     "(the list says melo never "
     "types there: that holds for any other password) and melo types the real "
     "one on a site they named. Never type any other password, a card number or "
@@ -1778,7 +1778,7 @@ class BrowserToolProvider(BaseToolProvider):
             handle = self._sign_in_handle(origin)
             refusal += (
                 " The user gave a sign-in password in their message or a file: "
-                f"type its handle ({handle or '[password-…], copied from the message'}) "
+                f"type its handle ({handle or '[password-…], copied from their message'}) "
                 "here, not a value."
             )
             raise BrowserError(refusal)
