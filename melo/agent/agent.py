@@ -60,6 +60,7 @@ from localmelo.melo.agent._chat import (
     PREFIX_RUN,
     PREFIX_VERSION,
     RETRY_HOOK,
+    TOOL_OVER_ANSWER_NOTE,
     CallTelemetry,
     Chat,
     RequestStats,
@@ -554,6 +555,19 @@ HAND_OFF_ALONE = (
     "Not run: handing the rest of the work on must be the only call of its step. "
     "Nothing in this step ran; call it again alone, or keep working here."
 )
+# What a call to a tool that takes no more calls in this run reads (see
+# ToolResult.no_more_calls): the call did not run. The first line is the one the
+# person sees beside the step; the model reads both.
+TOOL_OVER = (
+    "This tool takes no more calls in this turn, so this call did not run.\n"
+    "Do not call it again: answer the user now, and say in one sentence what you "
+    "could not do."
+)
+# The answer of such a run when the request for its answer gives none.
+TOOL_OVER_ANSWER = (
+    "I stopped here: a step I needed takes no more tries in this turn, so I could "
+    "not do all of what you asked."
+)
 
 # The line a brief run adds to the window when an attempt boundary finds the
 # workspace unchanged since the run started.
@@ -737,6 +751,10 @@ class _RunState:
     fixed_tools: list[ToolDef] | None = None
     # run_task(hide_tools=): the tools this run is not offered.
     hidden: frozenset[str] = frozenset()
+    # The tools whose result said they take no more calls in this run
+    # (ToolResult.no_more_calls): not offered from the next step on, and a call
+    # to one does not run. Empty at the start of every run, never stored.
+    withdrawn: set[str] = dataclasses.field(default_factory=set)
     # Whether the run's one non-novel continue is spent.
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
@@ -1862,6 +1880,12 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         built-in, sorted by name, then the other tools that the model's
         tool calls and BM25 resolve among themselves, also sorted by name;
         with ``"all"`` they are every registered tool, sorted by name.
+        Either way, a tool the run's caller hides (``hide_tools``) and a tool
+        whose result said it takes no more calls in this run
+        (``ToolResult.no_more_calls``, the run's ``withdrawn`` set) are left
+        out. The second changes the tools part of the request once, at the
+        first step after the result: the prefix a server caches ends before it
+        from then on, which is accepted.
 
         The window is returned whole: the planning request is fitted on a
         copy when it is sent (see :class:`Chat`).
@@ -1890,7 +1914,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         tool_hints: list[str] = []
         if self.options.tool_exposure == "all":
             # The same list on every step, so the tools part of the request
-            # stays byte-stable for prefix caching.
+            # stays byte-stable for prefix caching; a withdrawn tool leaves it
+            # once, below (see the docstring).
             if run is not None:
                 if run.fixed_tools is None:
                     run.fixed_tools = copy.deepcopy(
@@ -1930,8 +1955,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 self.hippo.resolve_tools(query, hints=tool_hints, exclude=offered),
                 key=lambda t: t.name,
             )
-        if run is not None and run.hidden:
-            tools = [t for t in tools if t.name not in run.hidden]
+        if run is not None and (gone := run.hidden | run.withdrawn):
+            tools = [t for t in tools if t.name not in gone]
         if run is not None and not run.acts:
             # What the step offers is what the executor runs (TOOL_NOT_OFFERED).
             tools = [t for t in tools if changes_nothing(t)]
@@ -2186,6 +2211,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                     error=sp.error,
                     duration_ms=sp.duration_ms,
                     images=list(sp.images),
+                    no_more_calls=outcome.no_more_calls,
                 )
                 # The model reads the error of a failed call, which the check
                 # never cuts, and the output otherwise.
@@ -2232,6 +2258,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run.call_refused = self._refused_free(
             call, result, outcome, gate, refusals, refused, run
         )
+        if result.no_more_calls:
+            run.withdrawn.add(call.tool_name)
         exported = (
             preview_result(captured[0], notes)[0] if captured is not None else result
         )
@@ -2273,13 +2301,26 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         name = self._hand_off_args.get(call.tool_name)
         return name is not None and call.arguments.get(name) is True
 
-    def _not_run(self, call: ToolCall, run: _RunState, why: str) -> ToolResult:
-        """*call*, refused before it ran: its events and an error result saying *why*."""
+    def _not_run(
+        self,
+        call: ToolCall,
+        run: _RunState,
+        why: str,
+        *,
+        status: ExecutionStatus = ExecutionStatus.ERROR,
+        category: ErrorCategory = ErrorCategory.INVALID_ARGUMENTS,
+    ) -> ToolResult:
+        """*call*, refused before it ran: its events and an error result saying *why*.
+
+        The event carries *status* and *category*; a refusal that is no failure
+        of the call (a tool that takes no more calls) is ``blocked``, which
+        every surface shows as refused, not as an error.
+        """
         outcome = ExecutionOutcome(
             tool_name=call.tool_name,
-            status=ExecutionStatus.ERROR,
+            status=status,
             error=why,
-            error_category=ErrorCategory.INVALID_ARGUMENTS,
+            error_category=category,
         )
         result = outcome.to_tool_result()
         run.call_refused = False
@@ -3192,6 +3233,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             mixed = bool(handing) and len(calls) > 1
             handed: list[str] = []
             handed_slot = CALL_HANDS_OFF.set(handed if handing and not mixed else None)
+            over_again = False
             try:
                 for call in calls:
                     # Counted when handed over, so a call that timeout_s cuts
@@ -3199,6 +3241,17 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                     run.n_tool += 1
                     if mixed:
                         result, cut = self._not_run(call, run, HAND_OFF_ALONE), 0
+                    elif call.tool_name in run.withdrawn:
+                        # The tool said it takes no more calls in this run: this
+                        # one does not run, and the next request is the answer.
+                        result = self._not_run(
+                            call,
+                            run,
+                            TOOL_OVER,
+                            status=ExecutionStatus.BLOCKED,
+                            category=ErrorCategory.TOOL_NOT_OFFERED,
+                        )
+                        cut, over_again = 0, True
                     else:
                         result, cut = await self._do_execute(
                             call, allowed=allowed, run=run
@@ -3218,7 +3271,17 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             if run.reviews.stop:
                 # Auto mode blocked the same kind of step twice: the run
                 # answers with the explanation instead of trying again.
-                await self._answer_on_block(task, run)
+                await self._end_with_answer(task, run)
+                return step + 1, ""
+            if over_again:
+                # The model called a tool that takes no more calls in this run:
+                # its next request offers no tool and asks for the answer.
+                await self._end_with_answer(
+                    task,
+                    run,
+                    note=TOOL_OVER_ANSWER_NOTE,
+                    fallback=TOOL_OVER_ANSWER,
+                )
                 return step + 1, ""
 
             if refused_all and run.free_steps < self.options.refused_steps:
@@ -4850,14 +4913,22 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             return None
         return _split_inline_reasoning(reply)
 
-    async def _answer_on_block(self, task: TaskRecord, run: _RunState) -> None:
-        """End a run that auto mode stopped, its answer the explanation (#339).
+    async def _end_with_answer(
+        self,
+        task: TaskRecord,
+        run: _RunState,
+        *,
+        note: str = BLOCKED_ANSWER_NOTE,
+        fallback: str = "",
+    ) -> None:
+        """End a run that cannot go on, its answer one request without tools (#339).
 
-        One request without tools (:meth:`Chat.final_answer` with
-        :data:`BLOCKED_ANSWER_NOTE`) over the working window, whose last tool
-        message is the block's note. A request that fails, or a blank reply,
-        leaves a fixed answer that names the blocked step. The run ends
-        ``completed``.
+        The request is :meth:`Chat.final_answer` with *note*
+        (:data:`BLOCKED_ANSWER_NOTE`, for a run auto mode stopped; the
+        default) over the working window, whose last tool message says why the
+        run stops. A request that fails, or a blank reply, leaves *fallback*,
+        or, for a block, a fixed answer that names the blocked step. The run
+        ends ``completed``.
         """
         window = list(self.hippo.working.get_window())
         answer, thinking = "", ""
@@ -4866,10 +4937,10 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 window,
                 task.query,
                 None,
-                note=BLOCKED_ANSWER_NOTE,
+                note=note,
                 earlier=run.earlier_block,
             ),
-            "the explanation of a block",
+            "the answer of a run that cannot go on",
             task.task_id,
         )
         if reply is not None:
@@ -4878,7 +4949,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 answer, thinking = "", ""
         if not answer:
             blocked = run.reviews.blocked
-            answer = answer_on_block(blocked[-1]["title"] if blocked else "")
+            answer = fallback or answer_on_block(
+                blocked[-1]["title"] if blocked else ""
+            )
         run.answer_thinking = thinking
         run.end("completed", result=answer)
 

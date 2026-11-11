@@ -578,8 +578,10 @@ class Executor:
                     images=list(output.images),
                 )
             text, images = output.text, list(output.images)
+            no_more_calls = output.no_more_calls
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
+            no_more_calls = False
 
         # 12. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
@@ -593,6 +595,7 @@ class Executor:
             duration_ms=duration,
             artifacts=artifacts,
             images=images,
+            no_more_calls=no_more_calls,
         )
 
     # ── Internals ──
