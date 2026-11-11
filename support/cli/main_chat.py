@@ -42,7 +42,7 @@ from rich.text import Text
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.folders import Access, OutsideAccess
 from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS, MAX_NOTES
-from localmelo.melo.contracts.review import ActionReview
+from localmelo.melo.contracts.review import WORDS_CAN_ALLOW, ActionReview
 from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
@@ -587,6 +587,46 @@ class GatewayClient:
 # ── Lines ──
 
 
+def _takes_a_reply(card: Mapping[str, Any]) -> bool:
+    """Whether the gateway takes the person's next typed message for this card's task (#617).
+
+    Only a task's end that needs the person: the run finished and its ending is
+    ``blocked`` (it asked a question, or stopped on a step Auto blocked). The
+    server reads the same facts (``task_stage``: a finished task that ended
+    ``blocked`` needs a ``review``); a ``waiting`` approval, an out-of-steps
+    stop, a failure, a finished task and a chat card take no reply.
+    """
+    ending = card.get("ending")
+    return (
+        card.get("source_kind") == "task"
+        and card.get("state") == "done"
+        and isinstance(ending, Mapping)
+        and ending.get("state") == "blocked"
+    )
+
+
+def _reply_hint(card: Mapping[str, Any]) -> str:
+    """What a reply to :func:`_takes_a_reply`'s card does, in a few words.
+
+    ``yes`` is named only when the card itself offers one blocked step a plain
+    yes may allow: the gateway's ``yes_step`` reads the same ``block`` (a
+    request id, and every kind of its review one the person's words may allow).
+    Any other card gets the general words. It is a hint: the server decides.
+    """
+    block = card.get("block")
+    review = block.get("review") if isinstance(block, Mapping) else None
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    if (
+        isinstance(block, Mapping)
+        and block.get("request_id")
+        and isinstance(kinds, list)
+        and kinds
+        and all(kind in WORDS_CAN_ALLOW for kind in kinds)
+    ):
+        return "yes allows once"
+    return "reply here"
+
+
 def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
     """A card as one coloured line: what came back, its title, how to open it."""
     symbol, style, word = _CARD_WORDS.get(
@@ -604,6 +644,8 @@ def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
         how = "/chats opens it"
     elif card.get("state") == "waiting":
         how = "answer it in the web console: melo console"
+    elif _takes_a_reply(card):
+        how = f"{_reply_hint(card)} {symbols.dot} melo task show {source}"
     else:
         how = f"melo task show {source}"
     head = f"{getattr(symbols, symbol)} {word}: {title}"

@@ -36,7 +36,7 @@ from localmelo.support.cli.main_chat import (
     card_line,
     echo_line,
 )
-from localmelo.support.cli.theme import UNICODE
+from localmelo.support.cli.theme import ASCII, UNICODE
 from localmelo.tests.fixtures.http_stub import HttpStub
 
 from .test_session import Setup, _until
@@ -1582,6 +1582,89 @@ def test_a_done_task_card_says_how_code_found_it_ended() -> None:
         {**card, "ending": {"state": "ready", "reasons": []}}, UNICODE, 120
     )
     assert ready.plain.startswith("✓ Ready: Fix it · Fixed it.")
+
+
+_ONE_STEP = {"request_id": "r1", "step_key": "k1", "name": "shell", "preview": "pip install x",
+             "review": {"verdict": "high", "categories": ["install"], "reasons": []}}  # fmt: skip
+_NEEDS_YOU = {"state": "blocked", "reasons": ["question"], "question": "Which one?"}
+
+
+def _card(state: str, **more: Any) -> dict[str, Any]:
+    return {"state": state, "source_id": "t1", "source_kind": "task",
+            "title": "Fix CI", "line": "Which one?", **more}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("card", "hint"),
+    [
+        # A run that ended needing the person: the next message is its answer.
+        (_card("done", ending=_NEEDS_YOU), "reply here · melo task show t1"),
+        # The card offers one step a plain yes allows once: it says so.
+        (
+            _card("done", ending=_NEEDS_YOU, block=_ONE_STEP),
+            "yes allows once · melo task show t1",
+        ),
+        # A step a click alone may allow, a card with no request id or no kinds:
+        # the card does not say a yes allows it, so the general words.
+        (
+            _card("done", ending=_NEEDS_YOU,
+                  block={**_ONE_STEP, "review": {"categories": ["system"]}}),
+            "reply here · melo task show t1",
+        ),
+        (
+            _card("done", ending=_NEEDS_YOU, block={**_ONE_STEP, "request_id": ""}),
+            "reply here · melo task show t1",
+        ),
+        (
+            _card("done", ending=_NEEDS_YOU, block={**_ONE_STEP, "review": {"categories": []}}),
+            "reply here · melo task show t1",
+        ),
+        (
+            _card("done", ending=_NEEDS_YOU, block={**_ONE_STEP, "review": None}),
+            "reply here · melo task show t1",
+        ),
+        # Shapes the gateway takes no reply for keep their hint as it was.
+        (_card("waiting"), "answer it in the web console: melo console"),
+        (_card("stopped"), "melo task show t1"),
+        (_card("failed"), "melo task show t1"),
+        (_card("done"), "melo task show t1"),
+        (_card("done", ending={"state": "ready", "reasons": []}), "melo task show t1"),
+        (_card("done", ending={"state": "draft", "reasons": ["commit_missing"]}), "melo task show t1"),
+        (_card("done", ending=_NEEDS_YOU, source_kind="chat"), "/chats opens it"),
+        (_card("done", ending={**_NEEDS_YOU}, source_kind=""), "melo task show t1"),
+    ],
+)  # fmt: skip
+def test_a_card_says_a_reply_here_answers_only_where_the_gateway_takes_it(
+    card: dict[str, Any], hint: str
+) -> None:
+    for width in (80, 120):
+        # The same words at any width: they are cut to, never by, the width.
+        assert card_line(card, UNICODE, width).plain.endswith(f"  {hint}")
+
+
+def test_the_reply_hint_leaves_the_title_room_at_80_and_120_columns() -> None:
+    for block, hint in ((None, "reply here"), (_ONE_STEP, "yes allows once")):
+        more = {"block": block} if block else {}
+        end = f"  {hint} · melo task show t1"
+        # 120: the longest title a task has (48 cells) reads in full, then what it said.
+        longest = "T" * 48
+        card = _card(
+            "done", title=longest, ending=_NEEDS_YOU, line="Which one? " * 9, **more
+        )
+        wide = card_line(card, UNICODE, 120)
+        assert wide.plain.startswith(f"⚠ Needs you: {longest} · Which one?")
+        assert wide.plain.endswith(end) and wide.cell_len <= 120
+        # 80: a title of 19 cells reads in full; only what the task said is cut.
+        title = "Fix the CI pipeline"
+        card = _card(
+            "done", title=title, ending=_NEEDS_YOU, line="Which one? " * 9, **more
+        )
+        narrow = card_line(card, UNICODE, 80)
+        assert narrow.plain.startswith(f"⚠ Needs you: {title}")
+        assert narrow.plain.endswith(end) and narrow.cell_len <= 80
+    # The ASCII symbols keep the same words.
+    plain = card_line(_card("done", ending=_NEEDS_YOU, block=_ONE_STEP), ASCII, 120)
+    assert plain.plain.endswith("  yes allows once - melo task show t1")
 
 
 def test_an_approval_request_from_the_gateways_list() -> None:
