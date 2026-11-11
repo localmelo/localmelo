@@ -78,6 +78,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Tidying notes while you are away is built and off by default while it is tested; one tap undoes a tidy.
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
+- With no embedding model set up, melo now finds a note you ask about in other words: the chat model picks among the notes that share a word with your message, within 4 seconds.
+- The Memory tab, `melo memory status`, Settings and setup say how melo searches from the models you have set up, not from a fixed guess.
 - A note from a page, a file or a task's result is never shown to the model as your words.
 - What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused. A saved `note_gate = "typed"` reads as `pointed`.
 - A note melo takes from a page, a file or a task's result now replaces only an older note of that kind: one you typed, reworded or imported, or that sleep wrote, is kept beside it with its source, and your own words are listed first.

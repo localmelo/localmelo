@@ -34,12 +34,16 @@ export function matches(row, query) {
   return words.every((word) => hay.includes(word));
 }
 
-/** What melo says about how it searches: by meaning with the embedding model, else by words only. */
-export function searchLine(on, model, retriever = 'auto') {
+/**
+ * What melo says about how it searches. The line follows the way that answers now (`answering`), and says why
+ * when that is not what the `retriever` setting names: no embedding model sends `auto` to the chat model's
+ * choice, or to words alone when no chat model is set up either.
+ */
+export function searchLine(on, model, retriever = 'auto', answering = 'bm25') {
   if (!on) return t('memoryTab.search.off');
-  if (retriever === 'bm25') return t('memoryTab.search.words');
-  if (retriever === 'llm') return t('memoryTab.search.model');
-  return model ? t('memoryTab.search.meaning', {model}) : t('memoryTab.search.wordsOnly');
+  if (answering === 'llm') return t(retriever === 'llm' ? 'memoryTab.search.model' : 'memoryTab.search.noEmbedding');
+  if (answering === 'embedding' && model) return t('memoryTab.search.meaning', {model});
+  return t(retriever === 'bm25' ? 'memoryTab.search.words' : 'memoryTab.search.wordsOnly');
 }
 
 /** What "Forget everything" will remove, in the confirm's words. */
@@ -52,7 +56,7 @@ export function forgetLine(notes, turns, items = 0) {
 }
 
 export function setupMemoryTab({doc, api, developer = () => false, clock = Date.now}) {
-  const state = {loaded: false, error: '', on: true, rows: [], items: [], removed: [], documents: 0, model: '', retriever: 'auto', query: '', edit: null,
+  const state = {loaded: false, error: '', on: true, rows: [], items: [], removed: [], documents: 0, model: '', retriever: 'auto', answering: 'bm25', query: '', edit: null,
     draft: '', fault: '', ask: null, forgetting: false, notice: '', busy: false, focus: false};
   let reads = 0;
   const {node, button} = maker(doc);
@@ -76,7 +80,7 @@ export function setupMemoryTab({doc, api, developer = () => false, clock = Date.
       const [page, written] = await Promise.all([api('/memory/records'), api('/memory/items')]);
       if (mine !== reads) return;
       Object.assign(state, {rows: page.records ?? [], items: written.items ?? [], on: page.on !== false, documents: page.documents ?? 0,
-        model: page.embedding_model ?? '', retriever: page.retriever ?? 'auto', loaded: true, error: ''});
+        model: page.embedding_model ?? '', retriever: page.retriever ?? 'auto', answering: page.answering ?? 'bm25', loaded: true, error: ''});
     } catch (error) {
       if (mine !== reads || quiet) return;
       state.error = error?.message || t('memoryTab.readFailed');
@@ -112,7 +116,7 @@ export function setupMemoryTab({doc, api, developer = () => false, clock = Date.
       draw();
     });
     row.append(node('strong', '', t('memoryTab.switch')), toggle);
-    head.replaceChildren(row, node('p', 'memory-line', searchLine(state.on, state.model, state.retriever)));
+    head.replaceChildren(row, node('p', 'memory-line', searchLine(state.on, state.model, state.retriever, state.answering)));
   }
   function noteNode(row) {
     const item = node('li', 'memory-note');

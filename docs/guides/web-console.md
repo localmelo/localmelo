@@ -454,8 +454,9 @@ its handle closes it (Esc first leaves a task shown in it). The [macOS app](maco
 (see [Memory across chats](../concepts/memory.md#memory-across-chats)).
 
 - The switch **Remember across chats** turns memory on or off, and a line under it says how melo searches: `Searching
-  by meaning with Qwen3-Embedding-0.6B, and by words.` or `Searching by words only.` Settings asks `Remember across chats
-  with <model>?` once the model list finds an embedding model on your server.
+  by meaning with Qwen3-Embedding-0.6B, and by words.` or `Searching by words, and your chat model picks the notes that
+  matter.` Settings asks `Remember across chats with <model>?` once the model list finds an embedding model on your
+  server.
 - The notes come newest first, each with its topic (About you, Preferences, People, Projects, Decisions) and where it
   came from: `From chat “Planning”, Oct 30`, or `From a deleted chat, Oct 30`, since a note outlives its chat. The search
   box filters them.

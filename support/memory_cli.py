@@ -133,14 +133,18 @@ async def _status() -> int:
     finally:
         await memory.aclose()
     model = status["embedding_model"]
+    # The way that answers now, not the setting: `auto` follows the models set up.
+    if status["answering"] == "embedding" and model:
+        search = f"by meaning with {model}, and by words"
+    elif status["answering"] == "llm":
+        search = "by words, and the chat model picks the notes that matter"
+    else:
+        search = "by words only"
     rows = [
         ("memory", "on, across chats" if status["on"] else "off"),
         ("notes", str(status["records"])),
         ("chats", f"{status['documents']} turns indexed"),
-        (
-            "search",
-            f"by meaning with {model}, and by words" if model else "by words only",
-        ),
+        ("search", search),
         ("folder", onboard._home_path(memory.directory)),
     ]
     if status["last_error"]:

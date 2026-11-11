@@ -83,7 +83,7 @@ SETUP_CHOICES: list[tuple[str, str]] = [
 
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
     *[(server.key, server.menu) for server in LOCAL_SERVERS],
-    ("none", "None (search by words only)"),
+    ("none", "None (no search by meaning)"),
 ]
 
 
@@ -451,7 +451,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         if selected_emb_key != "none":
             _onboard_embedding_local(cfg, selected_emb_key)
         else:
-            print("\n  No embedding: melo remembers across chats by words only.")
+            print("\n  No embedding: melo remembers across chats by words.")
 
     cfg.embedding_backend = selected_emb_key
 
@@ -471,19 +471,19 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
 
 _SAVING_EMBEDDING_OFF = (
     "Saving without the embedding model: melo remembers across chats by words "
-    "only (melo setup sets it again)."
+    "(melo setup sets it again)."
 )
 _EMBEDDING_OFF = (
-    "melo remembers across chats by words only; melo setup adds search by meaning."
+    "melo remembers across chats by words; melo setup adds search by meaning."
 )
 _NO_EMBEDDING_OLLAMA = (
     "This server lists no embedding model, so melo remembers across chats by "
-    "words only. For search by meaning: ollama pull qwen3-embedding:0.6b, then "
+    "words. For search by meaning: ollama pull qwen3-embedding:0.6b, then "
     "melo setup."
 )
 _NO_EMBEDDING_LOCAL = (
     "This server lists no embedding model, so melo remembers across chats by "
-    "words only. For search by meaning, serve Qwen3-Embedding-0.6B on it, then "
+    "words. For search by meaning, serve Qwen3-Embedding-0.6B on it, then "
     "melo setup."
 )
 
@@ -1136,7 +1136,7 @@ def _offer_embedding(
         "yn",
         "y",
         title=f"Remember across chats with {candidate}?",
-        rows=["Yes, with it", "No, by words only"],
+        rows=["Yes, with it", "No, without it"],
         escape="n",
     )
     if answer == "n":

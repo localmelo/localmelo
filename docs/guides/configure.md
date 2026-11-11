@@ -29,7 +29,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 If the server also lists an embedding model, one more question asks `Remember across chats with <model>?`:
 
 - `Yes, with it` sends one `POST /v1/embeddings` probe and saves the chat backend's key, its URL and that model as the embedding backend.
-- `No, by words only` (or Esc), a failed probe or no candidate saves `embedding_backend = "none"`.
+- `No, without it` (or Esc), a failed probe or no candidate saves `embedding_backend = "none"`.
 
 What it saves, with no embedding model:
 
@@ -96,7 +96,7 @@ When something fails:
 
 - A failed check of the chat server prints `Probe failed: …` and asks `The check failed. What now?`: `Try again`, `Save anyway` or `Cancel setup` (selected first; Esc also saves nothing). Piped, the question is `[r]etry, [s]ave anyway, [N]o [N]:`.
 - An HTTP 401 or 403 from a local server adds a note that localmelo sends no API key to local servers; in oMLX, turn on **Allow inference without API key**.
-- A failed check of the embedding server saves `embedding_backend = "none"` (search by words only) and says so.
+- A failed check of the embedding server saves `embedding_backend = "none"` (no search by meaning) and says so.
 
 More about the wizard:
 
