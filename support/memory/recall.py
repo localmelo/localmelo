@@ -269,7 +269,9 @@ class Item:
     conflicts: tuple[int, ...] = ()
     # Where a note came from when it is not the user's own words: ``pointed`` (a
     # page or file the user pointed to; ``where`` then reads ``from example.com,
-    # Oct 30``) or ``inferred`` (the model's own conclusion). ``""`` for the rest.
+    # Oct 30``), ``result`` (a finished task's result; ``where`` reads ``from a
+    # finished task's result, Oct 30``) or ``inferred`` (the model's own
+    # conclusion). ``""`` for the rest.
     how: str = ""
     shown: str = field(default="", compare=False)
 
@@ -300,7 +302,7 @@ class Item:
 
     @property
     def source(self) -> str:
-        if self.is_record and self.how == "pointed":
+        if self.is_record and self.how in ("pointed", "result"):
             said = self.where
         elif self.is_record and self.how == "inferred":
             said = f"melo inferred it · {self.where}"
@@ -323,8 +325,9 @@ class Item:
         are never shown as the user's, quote or not); without, a note in the second
         person says it is written to the user ("you" is the user), and one in the
         first person says it is the user's own; a note a page or file gave reads so
-        with that host or file name as its place (``from example.com, Oct 30``), and
-        one the model inferred says ``melo inferred``.
+        with that host or file name as its place (``from example.com, Oct 30``), one
+        a finished task's result gave reads ``from a finished task's result, Oct
+        30``, and one the model inferred says ``melo inferred``.
         A turn says who spoke (:func:`turn_said`). The date has the year when it is not *now*'s
         (the pinned or real time by default), and the time of day with *timed*
         (:func:`times`). *show* says how much of a turn is shown (:class:`Shown`).

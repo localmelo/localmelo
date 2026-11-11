@@ -617,15 +617,19 @@ def _same_folder(a: object, b: object) -> bool:
 
 def _record_item(entry: StoredEntry) -> Item:
     provenance = entry.provenance
-    # A note the note gate kept from a page or file, or inferred, says so; a note
-    # from the user's own words, an import or sleep reads as it always did.
+    # A note the note gate kept from a page or file, from a finished task's result,
+    # or inferred, says so; a note from the user's own words, an import or sleep
+    # reads as it always did.
     how = str(provenance.get("source") or "")
-    how = how if how in (note_gate.POINTED, note_gate.INFERRED) else ""
-    place = (
-        f"from {note_gate.name_of(str(provenance['from']))}"
-        if how == note_gate.POINTED and provenance.get("from")
-        else str(provenance.get("chat") or "a chat")
+    how = (
+        how if how in (note_gate.POINTED, note_gate.RESULT, note_gate.INFERRED) else ""
     )
+    if how == note_gate.POINTED and provenance.get("from"):
+        place = f"from {note_gate.name_of(str(provenance['from']))}"
+    elif how == note_gate.RESULT:
+        place = "from a finished task's result"
+    else:
+        place = str(provenance.get("chat") or "a chat")
     return Item(
         key=f"r:{entry.id}",
         text=entry.text,
@@ -1743,8 +1747,8 @@ class ChatMemory:
         (:func:`records.second_person`), as the user's own words are; a sentence
         the user typed that the note copies exactly stays as typed and is not read
         for "I" (:func:`records.typed_spans`). A note a page, a file or a result
-        supports says where it came from, in the reply and in the turn's event
-        (``source``).
+        supports says where it came from, in the stored note (recall and the notes
+        page read it there), the reply and the turn's event (``source``).
 
         A turn gets :data:`MAX_REFUSALS` refusals. The first says the model may try
         once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
@@ -1801,8 +1805,9 @@ class ChatMemory:
         source = await self._source(turn.store, turn.info)
         if admission.judged:
             source["judged"] = True
-        if admission.source == note_gate.POINTED:
-            # Where the note came from stays with it: recall says so.
+        if admission.source != note_gate.TYPED:
+            # Where the note came from stays with it: recall and the notes page say
+            # so. Only a page or file has an address to show.
             source = {**source, "source": admission.source}
             if admission.ref:
                 source["from"] = admission.ref
@@ -1858,7 +1863,8 @@ class ChatMemory:
         self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
     ) -> Admission | str:
         """Where the support of *note* is, at the note gate's level, or why it is
-        refused (a message for the model).
+        refused (a message for the model). A note that needs a page and a result
+        together stays tagged ``result``, the least trusted source it needs.
 
         An instruction to the assistant is refused first. Then the sources, most
         trusted first: what the user typed (its words), a page or file the user

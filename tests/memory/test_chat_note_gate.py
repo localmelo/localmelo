@@ -311,6 +311,8 @@ async def test_a_note_the_users_own_words_support_reads_as_it_always_did(
     assert "from" not in entry.provenance and "source" not in entry.provenance
     assert entry.provenance["quote"] == "I prefer short answers."
     assert _record_item(entry).line().startswith("the user said “I prefer short")
+    assert _record_item(entry).how == ""
+    assert _record_item(entry).source.startswith("you said it · ")
     chat = CHAT_TURN.get()
     assert chat is not None
     assert [w.source for w in chat.kept] == [""]
@@ -685,6 +687,9 @@ async def test_a_chinese_wording_refusal_asks_the_chat_model_with_the_typed_word
     assert entry.admitted_by == "user_statement" and entry.provenance["judged"] is True
     assert entry.provenance["quote"] == "我喜欢跑步。"
     assert "source" not in entry.provenance and entry.text == note
+    judged = _record_item(entry)
+    assert judged.how == "" and judged.source.startswith("you said it · ")
+    assert judged.line().startswith("the user said “我喜欢跑步。”")
 
 
 @pytest.mark.parametrize("level", LEVELS)
@@ -1472,6 +1477,44 @@ async def test_a_finished_task_s_result_is_never_evidence_for_the_judge(
     assert sent["typed_texts"] == ["我喜欢跑步。"]
     assert "租约" not in messages[-1].content and info.turn == 1
     assert await gate.notes() == []
+
+
+async def test_a_note_a_result_supports_says_so_wherever_notes_are_read(
+    make: Any, store: SessionStore
+) -> None:
+    gate = make("pointed")
+    await add_task_result(gate, RESULT)
+    await gate.turn("Where did the lease dates task put the lease dates?")
+    note = "Your lease for the Boston flat ends June 30."
+    reply = await gate.remember(note, "projects")
+    assert reply == (
+        f"Remembered (source: result): {note} The user sees it and can undo it."
+    )
+    # The stored note says it came from a result, and names no page.
+    (entry,) = await gate.notes()
+    assert entry.admitted_by == "outcome" and entry.provenance["quote"] == ""
+    assert entry.provenance["source"] == "result" and "from" not in entry.provenance
+    chat = CHAT_TURN.get()
+    assert chat is not None
+    data = chat.event()
+    assert data is not None and data["remembered"][0]["source"] == "result"
+    # Recall reads it as a note from a finished task's result, never as the
+    # user's own words.
+    item = _record_item(entry)
+    place = f"from a finished task's result, {day(entry.created_at)}"
+    assert item.how == "result" and item.source == place
+    assert item.line() == f"a note to the user “{note}” ({place})"
+    second = await gate.store.begin_turn(
+        None, "q", holder=HOLDER, title="q", new_session=NewSession()
+    )
+    found = await gate.memory.before_turn(
+        store, second, "When does the lease for my Boston flat end?"
+    )
+    # (The block also times a line that shares its day with another.)
+    assert (
+        f"- a note to the user “{note}” (from a finished task's result, " in found.block
+    )
+    assert [u.to_json()["source"] for u in found.used if u.is_record] == [place]
 
 
 @pytest.mark.parametrize("level", LEVELS)

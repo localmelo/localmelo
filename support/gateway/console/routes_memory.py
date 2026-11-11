@@ -165,8 +165,8 @@ def _row(
         label = chat_label(info.kind, info.title, surface)
     imported = prov.get("source") == "import"
     # A note the note gate kept says where it came from (``[memory] note_gate``): a page
-    # or file the user pointed to, or the model's own inference; a note of the user's
-    # own words reads as it always did.
+    # or file the user pointed to, a finished task's result, or the model's own
+    # inference; a note of the user's own words reads as it always did.
     how = str(prov.get("source") or "")
     pointed = how == note_gate.POINTED and bool(prov.get("from"))
     inferred = how == note_gate.INFERRED
@@ -174,6 +174,9 @@ def _row(
     if pointed:
         source = f"from {note_gate.name_of(str(prov['from']))}, {when}"
         origin = _from_page(prov, entry.created_at)
+    elif how == note_gate.RESULT:
+        source = f"from a finished task's result, {when}"
+        origin = t("memoryRows.fromResult", day=_on(entry.created_at))
     elif inferred:
         source = f"melo inferred it · {label}, {when}"
         origin = _inferred_words(info, label, gone, entry.created_at, surface)

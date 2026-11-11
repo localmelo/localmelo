@@ -1224,6 +1224,7 @@
   "memoryRows.fromDeleted": "来自已删除的对话，{day}",
   "memoryRows.fromFile": "来自文件 {name}，{day}",
   "memoryRows.fromPage": "来自 {name}，{day}",
+  "memoryRows.fromResult": "来自已完成任务的结果，{day}",
   "memoryRows.inferred": "melo 根据{chat}推断，{day}",
   "memoryRows.inferredDeleted": "melo 根据已删除的对话推断，{day}",
   "memoryTab.ask.about": "笔记是 melo 在那里了解到的关于你的事实，对话删除后它们可以保留。",
