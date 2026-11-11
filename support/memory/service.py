@@ -3238,8 +3238,10 @@ class ChatMemory:
     async def pinned_quotes(self) -> str:
         """About you and Preferences in the user's words, newest first, bounded.
 
-        Notes brought in from other assistants and notes sleep wrote are recall
-        only: they never ride in every prompt.
+        Only a note the person's own words made rides in every prompt
+        (:func:`records.by_person`); one they reworded still does. Notes brought in
+        from other assistants, notes sleep wrote and notes from a page, a file or a
+        result (a rewording of one gives it a quote) are recall only.
         """
         if not self.enabled:
             return ""
@@ -3247,13 +3249,10 @@ class ChatMemory:
         size = 0
         for entry in await self.records():
             quote = str(entry.provenance.get("quote") or "")
-            origin = str(entry.provenance.get("source") or "")
             if (
                 entry.provenance.get("topic") not in ("about", "preferences")
-                or origin == "import"
-                or entry.admitted_by == "sleep"
-                or origin.split(":")[0] == "sleep"
                 or not quote
+                or not records.by_person(entry)
             ):
                 continue
             if size + len(quote) + 5 > PINNED_CHARS:

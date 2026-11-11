@@ -724,6 +724,28 @@ async def test_recall_lists_a_page_note_the_person_edited_first_and_unmarked(
     assert HOST in mine and HOST in newer  # each still says where it came from
 
 
+async def test_the_notes_in_every_prompt_are_the_persons_own_words_not_an_edited_page_note(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn("My editor is vim. My cat is Tom.")
+    await gate.remember("Your editor is vim.")
+    await gate.remember("Your cat is Tom.")
+    cat = next(n for n in await gate.notes() if "cat" in n.text)
+    await gate.memory.edit_record(cat.id, "Your cat is Tom the Great.")
+    await gate.finish(first)
+    second = await gate.turn(f"Read {URL} and tell me where the lab is.")
+    await gate.fetch(second, URL, "Lab: Leeds. Robotics.")
+    reply = await gate.remember("Your lab is in Leeds.")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST})")
+    page = next(n for n in await gate.notes() if "lab" in n.text)
+    assert "Leeds" not in await gate.memory.pinned_quotes()  # a page note has no quote
+    edited = await gate.memory.edit_record(page.id, "Your lab is in Leeds, UK.")
+    assert edited is not None and edited.provenance["quote"] == edited.text
+    pinned = await gate.memory.pinned_quotes()
+    assert pinned == "- “Your cat is Tom the Great.”\n- “My editor is vim.”"
+
+
 @pytest.mark.parametrize("level", LEVELS)
 async def test_a_page_the_user_called_someone_else_s_supports_no_note_about_them(
     make: Any, level: str
