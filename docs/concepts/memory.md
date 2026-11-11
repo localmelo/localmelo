@@ -24,7 +24,7 @@ In the web console and the app, today:
 
 ## Memory across chats
 
-![A chat that asks "when is my group meeting?": under the message, "Used 1 memory" opens the earlier exchange it used and the chat it came from.](../assets/img/memory-across.webp)
+![A chat that asks "when is my group meeting?": under the message, "Recalled 1 memory" opens the earlier exchange it recalled and the chat it came from.](../assets/img/memory-across.webp)
 
 In the web console and the app, melo remembers across chats.
 
@@ -93,7 +93,7 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 ```
 
 - If part of the message looked like a password or key, another line says it was not kept and must not be written anywhere; the secret itself is never quoted.
-- Under your message the page shows `Used 1 memory ▾`; open it to see each item and its source, such as `you said it · chat “Planning”, Oct 30`.
+- Under your message the page shows `Recalled 1 memory ▾`; open it to see each item and its source, such as `you said it · chat “Planning”, Oct 30`.
 - Most messages recall nothing: an item must share most of the message's content words (a plural, `-ing` or `-ed` ending does not matter: "meet" finds "meets"), or be close in meaning by the embedding model.
 - When the embedding model takes over 1.5 seconds or fails, that message is searched by words alone, and the log says so once.
 - The chat's own earlier turns are recalled once they have left the model's window of recent messages (see [Working-memory window](../reference/memory.md#working-memory-window)), like turns of other chats, and read `this chat, Oct 30`; a turn the window still shows is not recalled, because the model has it. A note is not recalled again as the turn it came from, and older turns count for less (a 30-day half-life).

@@ -410,9 +410,16 @@ def _tool_panel(
         elif typing:
             said = f"melo wants to type this text on {site} {window}:"
             note = (
-                "It never types passwords, card numbers or one-time codes. Once the "
-                "text is in the page, the page may send it on its own; melo asks "
-                "before it presses send, but cannot stop every send the page makes."
+                (
+                    "That text stands for the password you gave for this site, and "
+                    "melo types that password. It never types card numbers or "
+                    "one-time codes."
+                    if arguments.get("field") == "password"
+                    else "It never types passwords, card numbers or one-time codes."
+                )
+                + " Once the text is in the page, the page may send it on its own; "
+                "melo asks before it presses send, but cannot stop every send the "
+                "page makes."
             )
         else:
             said = f"melo does this on {site} {window}, as you would."

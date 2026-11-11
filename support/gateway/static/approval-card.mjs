@@ -179,9 +179,11 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     if (sending || typing) rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce");
     else keptRule = t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
     const chrome = args.browser === "chrome";
+    // Only the browser tool says `field: "password"`: the text shown is the placeholder of a password the person gave.
+    const never = t(args.field === "password" ? "approval.typeGiven" : "approval.typeNever");
     content = t(sending ? "approval.submitContent"
       : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
-      : chrome ? "approval.actContentChrome" : "approval.actContent", { site });
+      : chrome ? "approval.actContentChrome" : "approval.actContent", { site, never });
     if (!sending && !typing) {
       // A click or a choice: the sentence is plain text, and a control in another site's box says so.
       why = control?.frame ? `${content} ${t("approval.inBox", { host: control.frame })}` : content;

@@ -538,6 +538,37 @@ def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> No
     assert "".join(text.split()) in "".join(words.split()), "none of the text is cut"
     assert "never types passwords" in words
     assert "the page may send it on its own" in words
+    # A text that stands for a password the person gave says what is typed; the
+    # rest of the note stays.
+    password = _request(
+        "browser-type:https://example.com",
+        site="example.com",
+        access="type",
+        how="type",
+        text="[password-1]",
+        field="password",
+    )
+    plain = panel_text(
+        _request(
+            "browser-type:https://example.com",
+            site="example.com",
+            access="type",
+            how="type",
+            text="hi",
+        ),
+        width=300,
+    )
+    assert plain.body[-1] == (
+        "muted",
+        "It never types passwords, card numbers or one-time codes. Once the text is "
+        "in the page, the page may send it on its own; melo asks before it presses "
+        "send, but cannot stop every send the page makes.",
+    )
+    given = " ".join(line for _, line in panel_text(password, width=300).body)
+    assert "That text stands for the password you gave for this site" in given
+    assert "never types card numbers or one-time codes" in given
+    assert "never types passwords" not in given
+    assert "the page may send it on its own" in given
 
 
 def test_the_chat_wide_answer_names_what_it_allows() -> None:

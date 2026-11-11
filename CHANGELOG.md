@@ -71,6 +71,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A human check from a known provider asks you once per chat, in Chrome, in Ask and in Auto: Always in this chat covers such checks in that chat, its tasks and its chores (in the main chat, every chat). Other boxes and Safari ask as before.
 - The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
 - A password in a file you attach is typed on a site your message names when the message says to sign in and the files hold only one password; otherwise the page is handed to you.
+- The card for typing a password you gave says that melo types that password, and the refusal at a password box now covers a password too long to keep.
 
 ### Memory
 
@@ -94,6 +95,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A chat no longer stalls when the model sends again a note it has just saved: the note tool closes for that turn and melo goes on with its answer.
 - A file you send, and the "[1 file]" or "[1 picture]" mark for a message with no words, no longer count as something you said when melo searches your chats or checks a note.
 - A note that restates your fact with another form of your word ("kept" for "keep", "fluently" for "fluent") or a joining word you did not use is no longer refused.
+- The line under a message says "Recalled 2 memories", not "Used": it lists what melo put before the model, whether or not the answer used it.
 
 ### App and web console
 

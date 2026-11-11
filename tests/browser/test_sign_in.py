@@ -63,12 +63,18 @@ async def test_the_password_the_person_gave_is_typed_into_a_password_box_and_sho
     asks = Gave()
     with asking(asks):
         await run(tools, "browser_open", url=HOME)
-        out = await run(tools, "browser_type", ref="e2", text="[password-1]")
+        await run(tools, "browser_type", ref="e1", text="me@example.com")
+        # The type's own result is a new reading: the password box is e5 in it.
+        out = await run(tools, "browser_type", ref="e5", text="[password-1]")
     assert not out.is_error, out.text
-    assert [act.text for act in driver.acts] == [VALUE]
+    assert [act.text for act in driver.acts] == ["me@example.com", VALUE]
     assert "Typed the password the user gave" in out.text and VALUE not in out.text
     assert VALUE not in repr(asks.asked), "no question carries the value"
-    assert "[password-1]" in repr(asks.asked), "the question shows the handle"
+    # The question says once that its text stands for a password the person gave
+    # (what the cards read to word themselves); an ordinary text says nothing.
+    plain, given = [q for name, q, _ in asks.asked if name.startswith("browser-type:")]
+    assert "field" not in plain and plain["text"] == "me@example.com"
+    assert given["field"] == "password" and given["text"] == "[password-1]"
 
 
 REFUSED: dict[str, tuple[Element, str, Gave | Asks | None]] = {

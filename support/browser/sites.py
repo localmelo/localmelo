@@ -278,9 +278,7 @@ async def require_act(origin: str, what: str, on: str = "") -> None:
         )
 
 
-async def require_type(
-    origin: str, text: str, on: str = "", search: bool = False
-) -> None:
+async def require_type(origin: str, text: str, on: str = "", field: str = "") -> None:
     """Ask about typing *text* on *origin*'s page; :class:`BrowserError` if refused.
 
     Asked for every text, whatever was allowed before, and never kept for the
@@ -289,10 +287,12 @@ async def require_type(
     show): it is the model's own words, a person or a reviewer must see what
     goes into the page. *on* is the box in words (``a textbox "Comment"``),
     so the review sees where it goes (#465). Like a click's question it has
-    no ``origin`` argument. *search*: the box is a search box
-    (:func:`~localmelo.support.browser.fields.searches`), which the question
-    says as ``field: "search"``: with the person's words asking to search, a
-    query of any length is no message.
+    no ``origin`` argument. *field* is the kind of box, said as ``field`` in the
+    question: ``search`` for a search box
+    (:func:`~localmelo.support.browser.fields.searches`), where, with the
+    person's words asking to search, a query of any length is no message, and
+    ``password`` when *text* stands for a password the person gave. Only the
+    cards' words read ``password``; no decision does.
     """
     ask = TOOL_ASK.get()
     if ask is None:
@@ -301,8 +301,8 @@ async def require_type(
     arguments = {"site": host, "access": "type", "how": "type", "text": text}
     if on:
         arguments["on"] = on
-    if search:
-        arguments["field"] = "search"
+    if field:
+        arguments["field"] = field
     into = f" into {on}" if on else ""
     decision = await ask(
         TYPE_PREFIX + origin,

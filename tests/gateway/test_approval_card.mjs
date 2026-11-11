@@ -377,6 +377,19 @@ test('a form send and typing show what goes, say when the page decides, and offe
   assert.match(findNode(typing, (node) => node.className === 'approval-note').textContent, /the page may send it on its own/);
   assert.match(findNode(typing, (node) => node.className === 'approval-warning').textContent, /Typing always asks/);
   assert.deepEqual(focuses(typing).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on typing');
+  // A text that stands for a password the person gave (the question says `field: "password"`) says what is typed;
+  // every other text reads as it always did, in both browsers' words.
+  const sentence = (browser, field, id) => findNode(c.draw({request_id: id, tool_name: 'browser-type:https://example.com',
+    arguments: {site: 'example.com', access: 'type', how: 'type', text: '[password-482913075]', browser, field},
+    workspace_label: '~/w'}), (node) => node.className === 'approval-note').textContent;
+  const send = 'Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.';
+  const never = 'It never types passwords, card numbers or one-time codes.';
+  const gave = 'That text stands for the password you gave for this site, and melo types that password. It never types card numbers or one-time codes.';
+  assert.equal(sentence(undefined, undefined, 't1'), `melo wants to type the text below on example.com in Safari's automation window. ${never} ${send}`);
+  assert.equal(sentence('chrome', undefined, 't2'), `melo wants to type the text below on example.com in melo's browser, which runs in the background. ${never} ${send}`);
+  assert.equal(sentence('chrome', 'search', 't3'), sentence('chrome', undefined, 't2'), 'a search box changes no word');
+  assert.equal(sentence('chrome', 'password', 't4'), `melo wants to type the text below on example.com in melo's browser, which runs in the background. ${gave} ${send}`);
+  assert.equal(sentence(undefined, 'password', 't5'), `melo wants to type the text below on example.com in Safari's automation window. ${gave} ${send}`);
   // A click or a choice keeps its chat-wide answer, and says typing still asks.
   request = {request_id: 'clicking', tool_name: 'browser-act:https://example.com',
     arguments: {site: 'example.com', access: 'act', how: 'click'}, workspace_label: '~/w', offers_chat: true};
