@@ -130,7 +130,8 @@ _CLOCK_ZH = re.compile(
     rf"(?P<h>{_N})\s*[点時时]钟?\s*(?:(?P<half>半)|(?P<m>{_N})\s*分?|整)?"
 )
 _LEAD = re.compile(
-    r"^(?:[\s,;:.，；：。、!！?？-]|please\b|to\b|that\b|about\b|of\b|and\b|then\b|的)+", _I
+    r"^(?:[\s,;:.，；：。、!！?？-]|please\b|to\b|that\b|about\b|of\b|and\b|then\b|的)+",
+    _I,
 )
 _TRAIL = re.compile(r"[\s,;:.，；：。、!！?？-]+$")
 
