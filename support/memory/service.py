@@ -113,7 +113,7 @@ from localmelo.support.memory.index import (
     Document,
     ItemState,
     MemoryItem,
-    cleaned,
+    cleaned_title,
     document_chunks,
     loses_source,
     plain_text,
@@ -625,10 +625,22 @@ def _record_item(entry: StoredEntry) -> Item:
     # from the user's own words, an import or sleep reads as it always did.
     how = str(provenance.get("source") or "")
     how = how if how in (note_gate.POINTED, note_gate.INFERRED) else ""
+    # The label is made from the cleaned title: a note stored with the title as the
+    # chat had it reads clean too.
+    title = str(provenance.get("title") or "")
+    chat = (
+        chat_label(
+            str(provenance.get("kind") or "chat"),
+            cleaned_title(title),
+            str(provenance.get("surface") or ""),
+        )
+        if title.strip()
+        else str(provenance.get("chat") or "a chat")
+    )
     place = (
         f"from {note_gate.name_of(str(provenance['from']))}"
         if how == note_gate.POINTED and provenance.get("from")
-        else str(provenance.get("chat") or "a chat")
+        else chat
     )
     return Item(
         key=f"r:{entry.id}",
@@ -1581,9 +1593,9 @@ class ChatMemory:
     async def _source(self, store: SessionStore, info: TurnInfo) -> dict[str, Any]:
         session = await store.get_session(info.session_id)
         kind = session.kind if session is not None else "chat"
-        # The title is cleaned as a turn's text is: a note's provenance keeps it
-        # and recall shows the label to the model.
-        title = cleaned(session.title) if session is not None else ""
+        # A note's provenance keeps the title and recall shows its label to the
+        # model, so a title that holds a secret's place is stored without it.
+        title = cleaned_title(session.title) if session is not None else ""
         folder = session.workspace if session is not None else None
         return {
             "session_id": info.session_id,

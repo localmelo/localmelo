@@ -2,9 +2,9 @@
 
 A turn's text is the user's typed words and the answer without its thinking,
 cleaned of secrets (:func:`cleaned`: a sentence a note would refuse is left out, the
-rest redacted); a task's carries its title too, and the stored title is cleaned
-the same way. A turn that
-fits in :data:`DOC_CHARS` is one document. A longer one becomes up to
+rest redacted); a task's carries its title too, and the stored title is cleaned of
+the places of secrets (:func:`cleaned_title`; its words stay). A turn that fits in
+:data:`DOC_CHARS` is one document. A longer one becomes up to
 :data:`MAX_CHUNKS` documents of the same session and turn (:func:`document_chunks`):
 chunk 0 is its head, each later chunk repeats a short head of what the user
 typed and then the next window of the text, overlapping the one before; what is
@@ -32,7 +32,7 @@ import dataclasses
 import json
 import re
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 
@@ -272,7 +272,7 @@ def _kept(text: str) -> str:
     later test: the rest of a key after a password word, a code once its keyword's
     sentence is gone, a long sentence once a shorter one inside it was replaced.
     """
-    places = _merged([*password_spans(text), *secret_spans(text), *number_spans(text)])
+    places = _places(text)
     # By its place too: a piece the splitter gives no sentence for. An empty place
     # (a key block with no body) holds nothing to cut.
     out = [place for place in places if place[0] < place[1]]
@@ -293,10 +293,28 @@ def _kept(text: str) -> str:
         while found >= 0:
             out.append((found, found + len(sentence)))
             found = text.find(sentence, found + 1)
+    return _left_out(text, out)
+
+
+# What stands where a secret's place was cut out.
+_LEFT_OUT: Final = "[left out]"
+# How many times a cleaning is applied at most (:func:`_stable`).
+_PASSES: Final = 3
+
+
+def _places(text: str) -> list[tuple[int, int]]:
+    """The place of every secret in *text* as given, in order: a password's value, what
+    the redaction replaces, a card or ID number. Overlapping places are one."""
+    return _merged([*password_spans(text), *secret_spans(text), *number_spans(text)])
+
+
+def _left_out(text: str, spans: list[tuple[int, int]]) -> str:
+    """*text* with each of *spans* (merged where they overlap) replaced by the mark
+    :data:`_LEFT_OUT`."""
     parts: list[str] = []
     kept_from = 0
-    for start, end in _merged(out):
-        parts += [text[kept_from:start], "[left out]"]
+    for start, end in _merged(spans):
+        parts += [text[kept_from:start], _LEFT_OUT]
         kept_from = end
     parts.append(text[kept_from:])
     return "".join(parts)
@@ -329,6 +347,45 @@ def cleaned(text: str) -> str:
     return _clean(text)
 
 
+def _stable(step: Callable[[str], str], text: str) -> str:
+    """*text* through *step* until the result no longer changes, at most
+    :data:`_PASSES` times; the result of the last pass when it still changed."""
+    for _ in range(_PASSES):
+        after = step(text)
+        if after == text:
+            break
+        text = after
+    return text
+
+
+def _title_once(title: str) -> str:
+    """One pass of :func:`cleaned_title`."""
+    marks = [m.span() for m in re.finditer(re.escape(_LEFT_OUT), title)]
+    places = []
+    for start, end in _places(title):
+        if start < end:
+            # The reader of passwords takes a mark for a value and gives part of it
+            # ("[left"): the place holds the whole mark, so the mark stays one.
+            for first, last in marks:
+                if first < end and start < last:
+                    start, end = min(start, first), max(end, last)
+            places.append((start, end))
+    return redact_secrets(_left_out(title, places))[0]
+
+
+def cleaned_title(title: str) -> str:
+    """A chat's or task's *title* without the places of its secrets: a password's
+    value, a key, a token or code, a card or ID number, each replaced by ``[left out]``
+    (:func:`_places`), then redacted as a text is.
+
+    A title is a short label, so no sentence is dropped for its words: ``Reset
+    password flow`` stays, ``Pay with card 4111 …`` loses the number only. The cut
+    is repeated until it changes nothing (:func:`_stable`), so cleaning a cleaned
+    title gives it back. The one place a title is cleaned: the task line of a
+    document's text, the stored title, a note's source and the label recall shows."""
+    return _stable(_title_once, title.strip())
+
+
 def holds_secret(title: str, text: str) -> bool:
     """Whether a memory item's *title* or *text* holds a secret, as a note would be
     refused for (:func:`~.records.sensitive`). The one test every step of the item
@@ -337,10 +394,10 @@ def holds_secret(title: str, text: str) -> bool:
 
 
 def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
-    """A turn's task line (``""`` for a chat), typed text and answer, each cleaned
-    (:func:`_clean`). Each is cleaned whole, before any cut, so no half of a key
-    or key block is left at a chunk's edge."""
-    task = _clean(title)
+    """A turn's task line (``""`` for a chat; the title through :func:`cleaned_title`),
+    typed text and answer (:func:`_clean`). Each is cleaned whole, before any cut, so
+    no half of a key or key block is left at a chunk's edge."""
+    task = cleaned_title(title)
     return (f"Task: {task}\n" if task else ""), _clean(typed), _clean(answer)
 
 
@@ -545,17 +602,30 @@ async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
-# The ``meta`` key that says every stored title has been through :func:`cleaned`.
+# The ``meta`` key that says every stored title has been through :func:`cleaned_title`.
 _TITLES_CLEANED: Final = "titles_cleaned"
 
 
-async def _clean_titles(conn: aiosqlite.Connection) -> None:
-    """Rewrite the titles an older index.db kept as given through :func:`cleaned`, once.
+def _retitled(text: str, old: str, new: str) -> str:
+    """The *text* of a task's document stored before titles were cleaned, with the
+    first line, ``Task: <old title>`` (the line redacted, as it was written), replaced by
+    ``Task: <new title>``. A text that does not start with that line, and the rest of
+    one that does, stay as they are."""
+    if not old.strip():
+        return text
+    lead = redact_secrets(f"Task: {old.strip()}\n")[0]
+    return f"Task: {new}\n{text[len(lead):]}" if text.startswith(lead) else text
 
-    A document's title is cleaned when it is stored; this is for the rows stored
-    before that. Only titles change (the texts were always cleaned, and a rebuild
-    redoes them). The old titles are overwritten in the file and the log, as a
-    forget does it. Running it again changes nothing."""
+
+async def _clean_titles(conn: aiosqlite.Connection) -> None:
+    """Rewrite the titles an older index.db kept as given through :func:`cleaned_title`,
+    once, and with each the title line a task's text starts with.
+
+    A document's title and the title line of its text are cleaned when it is stored;
+    this is for the rows stored before that. Only the title, and the first line of a
+    text that starts with it (chunk 0 of a task: no later chunk carries it), change.
+    The old bytes are overwritten in the file and the log, as a forget does it.
+    Running it again changes nothing."""
     async with conn.execute(
         "SELECT 1 FROM meta WHERE key = ?", (_TITLES_CLEANED,)
     ) as cur:
@@ -565,17 +635,27 @@ async def _clean_titles(conn: aiosqlite.Connection) -> None:
         await conn.execute("BEGIN IMMEDIATE")
         try:
             clean: dict[str, str] = {}
-            rewrites: list[tuple[str, int]] = []
+            changed: list[tuple[int, str]] = []
             async with conn.execute(
                 "SELECT id, title FROM documents WHERE title != ''"
             ) as cur:
                 for row_id, title in await cur.fetchall():
                     if title not in clean:
-                        clean[title] = cleaned(title)
+                        clean[title] = cleaned_title(title)
                     if clean[title] != title:
-                        rewrites.append((clean[title], row_id))
+                        changed.append((row_id, title))
+            rewrites: list[tuple[str, str, int]] = []
+            for row_id, title in changed:
+                async with conn.execute(
+                    "SELECT text FROM documents WHERE id = ?", (row_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                text = str(row[0]) if row else ""
+                rewrites.append(
+                    (clean[title], _retitled(text, title, clean[title]), row_id)
+                )
             await conn.executemany(
-                "UPDATE documents SET title = ? WHERE id = ?", rewrites
+                "UPDATE documents SET title = ?, text = ? WHERE id = ?", rewrites
             )
             await conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, 1)",
@@ -585,7 +665,7 @@ async def _clean_titles(conn: aiosqlite.Connection) -> None:
         except BaseException:
             await conn.rollback()
             raise
-    if rewrites:
+    if changed:
         await checkpoint_wal(conn)
 
 
@@ -648,7 +728,7 @@ class ConversationIndex:
                     (session_id, turn),
                 )
             # A title is cleaned as a text is, wherever the document came from.
-            titles = {doc.title: cleaned(doc.title) for doc in docs}
+            titles = {doc.title: cleaned_title(doc.title) for doc in docs}
             for doc in docs:
                 vector = (
                     None if doc.vector is None else np.asarray(doc.vector, np.float32)

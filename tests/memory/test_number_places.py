@@ -28,6 +28,7 @@ from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
     cleaned,
+    cleaned_title,
     document_text,
 )
 from localmelo.support.memory.recall import chat_label
@@ -40,6 +41,16 @@ KEY = "sk-" + "a1B2c3D4" * 4
 CARD = "4111 1111 1111 1111"
 CARD_TITLE = f"Pay with card {CARD}"
 PASSWORD_TITLE = "Sign in with password hunter2 please"
+# A title cut by its places: the words stay, the secret's place is left out.
+CARD_LABEL = "Pay with card [left out]"
+PASSWORD_LABEL = "Sign in with password [left out] please"
+# Titles whose words a note would refuse; a title keeps them.
+WORD_TITLES = [
+    "Reset password flow for the login page",
+    "Add a PIN pad to the checkout form",
+    "Debug OTP timeout",
+    "Wi-Fi password rotation",
+]
 NBSP = "\N{NO-BREAK SPACE}"
 THIN = "\N{THIN SPACE}"
 NARROW = "\N{NARROW NO-BREAK SPACE}"
@@ -349,17 +360,42 @@ def test_ordinary_digit_runs_are_refused_as_they_were_except_one() -> None:
     assert all(now for now, row in zip(after, rows, strict=True) if row["before"])
 
 
-# ── A title is cleaned like the text ──
+# ── A title is cleaned by its places ──
+
+TITLES = {
+    CARD_TITLE: CARD_LABEL,
+    PASSWORD_TITLE: PASSWORD_LABEL,
+    f"Use key {KEY} for the build": "Use key [left out] for the build",
+    "Ssn 123-45-6789 lookup": "Ssn [left out] lookup",
+    f"Pay {CARD[:9]}\n{CARD[10:]} now": "Pay [left out] now",
+    "Fix login, password: hunter2": "Fix login, password: [left out]",
+    "OTP 482913 timeout": "OTP [left out] timeout",
+    "The password is hunter2\n4111 1111\n1111 1111\nThanks.": (
+        "The password is [left out]\n[left out]\nThanks."
+    ),
+    **{title: title for title in WORD_TITLES},
+}
 
 
-@pytest.mark.parametrize(
-    "title", [CARD_TITLE, PASSWORD_TITLE, f"Pay {CARD[:9]}\n{CARD[10:]}"]
-)
-def test_a_tasks_title_in_a_documents_text_is_cleaned(title: str) -> None:
-    assert document_text("Do it.", "Done.", title=title) == (
-        "Task: [left out]\nUser: Do it.\nmelo: Done."
-    )
-    assert cleaned(cleaned(title)) == cleaned(title) == "[left out]"
+@pytest.mark.parametrize(("title", "label"), list(TITLES.items()))
+def test_a_title_loses_the_places_of_its_secrets_and_keeps_its_words(
+    title: str, label: str
+) -> None:
+    assert cleaned_title(title) == label
+    assert cleaned_title(label) == label
+    assert not re.search(r"\d{4}|hunter2|a1B2", cleaned_title(title))
+
+
+def test_a_title_with_a_private_key_block_loses_its_body() -> None:
+    title = "Key -----BEGIN PRIVATE KEY-----\nMIIabcdefghijklmnop\n-----END PRIVATE KEY-----"
+    assert "MIIabcdefghijklmnop" not in cleaned_title(title)
+    assert cleaned_title(cleaned_title(title)) == cleaned_title(title)
+
+
+@pytest.mark.parametrize(("title", "label"), list(TITLES.items()))
+def test_a_tasks_title_in_a_documents_text_is_cleaned(title: str, label: str) -> None:
+    text = document_text("Do it.", "Done.", title=title)
+    assert text == f"Task: {label}\nUser: Do it.\nmelo: Done."
 
 
 def test_an_ordinary_title_is_kept_and_an_empty_one_has_no_task_line() -> None:
@@ -390,17 +426,22 @@ async def test_a_stored_title_is_cleaned_whatever_the_kind(tmp_path: Path) -> No
                 _doc("chat", PASSWORD_TITLE, "c1"),
                 _doc("task", "Water the beds", "t2"),
                 _doc("front", "", "f1"),
+                _doc("chat", WORD_TITLES[0], "w1"),
+                _doc("task", "  ", "w2"),
             ]
         )
         stored = await index.fetch(await index.ids())
         assert {d.session_id: d.title for d in stored} == {
-            "t1": "[left out]",
-            "c1": "[left out]",
+            "t1": CARD_LABEL,
+            "c1": PASSWORD_LABEL,
             "t2": "Water the beds",
             "f1": "",
+            "w1": WORD_TITLES[0],
+            "w2": "",
         }
         labels = await index.session_labels({"t1", "c1"})
-        assert labels["t1"][1] == labels["c1"][1] == "[left out]"
+        assert labels["t1"][1] == CARD_LABEL
+        assert labels["c1"][1] == PASSWORD_LABEL
     finally:
         await index.aclose()
 
@@ -413,8 +454,7 @@ async def test_recall_reads_a_cleaned_title_back(tmp_path: Path) -> None:
         await index.add(_doc("chat", PASSWORD_TITLE, "c1", turn=2))
         items = await memory.search("tomato garden plan", docs_k=4, records_k=0)
         where = sorted(item.where.split(",")[0] for item in items)
-        assert where == ["chat “[left out]”", "task “[left out]”"]
-        assert chat_label("task", "[left out]", "gateway") == "task “[left out]”"
+        assert where == [f"chat “{PASSWORD_LABEL}”", f"task “{CARD_LABEL}”"]
     finally:
         await memory.aclose()
 
@@ -443,16 +483,24 @@ async def test_the_documents_a_turn_is_indexed_as_keep_a_cleaned_title(
         await memory.index_turns(turns)
         _, index = memory.stores()
         stored = {d.session_id: d for d in await index.fetch(await index.ids())}
-        assert stored["t1"].title == stored["c1"].title == "[left out]"
-        assert stored["t1"].text.startswith("Task: [left out]\n")
+        assert stored["t1"].title == CARD_LABEL
+        assert stored["c1"].title == PASSWORD_LABEL
+        assert stored["t1"].text.startswith(f"Task: {CARD_LABEL}\n")
         assert "4111" not in "".join(d.text for d in stored.values())
     finally:
         await memory.aclose()
 
 
-@pytest.mark.parametrize("title", [CARD_TITLE, PASSWORD_TITLE])
+@pytest.mark.parametrize(
+    ("title", "label"),
+    [
+        (CARD_TITLE, CARD_LABEL),
+        (PASSWORD_TITLE, PASSWORD_LABEL),
+        (WORD_TITLES[0], WORD_TITLES[0]),
+    ],
+)
 async def test_a_notes_source_names_its_chat_by_a_cleaned_title(
-    tmp_path: Path, title: str
+    tmp_path: Path, title: str, label: str
 ) -> None:
     store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
     await store.open()
@@ -470,23 +518,80 @@ async def test_a_notes_source_names_its_chat_by_a_cleaned_title(
         found = await memory.before_turn(store, turns[-1], typed)
         assert [w.text for w in found.remembered] == ["You prefer short answers."]
         (entry,) = await memory.records()
-        assert entry.provenance["title"] == "[left out]"
-        assert entry.provenance["chat"] == "chat “[left out]”"
+        assert entry.provenance["title"] == label
+        assert entry.provenance["chat"] == f"chat “{label}”"
         stored = json.dumps(entry.provenance, ensure_ascii=False)
         assert CARD not in stored and "hunter2" not in stored
         items = await memory.search("short answers", docs_k=0, records_k=4)
-        assert [item.where.split(",")[0] for item in items] == ["chat “[left out]”"]
+        assert [item.where.split(",")[0] for item in items] == [f"chat “{label}”"]
     finally:
         await memory.aclose()
         await store.aclose()
 
 
+@pytest.mark.parametrize(
+    ("title", "label"),
+    [
+        (CARD_TITLE, CARD_LABEL),
+        (PASSWORD_TITLE, PASSWORD_LABEL),
+        (WORD_TITLES[1], WORD_TITLES[1]),
+    ],
+)
+async def test_a_note_stored_with_a_raw_title_reads_a_cleaned_label_at_recall(
+    tmp_path: Path, title: str, label: str
+) -> None:
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    try:
+        # The source as it was written before a title was cleaned: the title as the
+        # chat has it, and the label made from it.
+        source = {
+            "session_id": "s1",
+            "turn": 1,
+            "turn_id": 1,
+            "kind": "chat",
+            "title": title,
+            "surface": "gateway",
+            "chat": chat_label("chat", title, "gateway"),
+            "workspace": "",
+        }
+        await records.write(
+            memory.stores()[0],
+            [
+                records.Candidate(
+                    "You prefer short answers.",
+                    "I prefer short answers.",
+                    "preferences",
+                    "user_statement",
+                )
+            ],
+            [None],
+            source=source,
+            embed_model="",
+        )
+        # What is stored stays as it was; the line the model reads is cleaned.
+        (entry,) = await memory.records()
+        assert entry.provenance["title"] == title
+        items = await memory.search("short answers", docs_k=0, records_k=4)
+        assert [item.where.split(",")[0] for item in items] == [f"chat “{label}”"]
+        assert not re.search(r"\d{4}|hunter2", items[0].where)
+    finally:
+        await memory.aclose()
+
+
 # ── Rows already in an index ──
+
+
+def _old_text(kind: str, title: str) -> str:
+    """A turn's text as it was written before a title was cleaned: a task's title line
+    went through the redaction only."""
+    lead = redact_secrets(f"Task: {title.strip()}\n")[0] if kind == "task" else ""
+    return f"{lead}User: hi\nmelo: hello"
 
 
 def _old_insert(path: str, rows: list[tuple[str, str, str]]) -> None:
     """Rows as an index.db made before titles were cleaned holds them: the title
-    stored as given (session id, kind and title of each)."""
+    stored as given and a task's text starting with its title line (session id,
+    kind and title of each)."""
     raw = sqlite3.connect(path)
     raw.executescript(_SCHEMA)
     for turn, (session, kind, title) in enumerate(rows, 1):
@@ -499,7 +604,7 @@ def _old_insert(path: str, rows: list[tuple[str, str, str]]) -> None:
                 "gateway",
                 kind,
                 title,
-                "User: hi\nmelo: hello",
+                _old_text(kind, title),
                 1.0,
                 None,
                 "",
@@ -514,39 +619,78 @@ async def test_an_index_made_before_titles_were_cleaned_is_cleaned_once(
     tmp_path: Path,
 ) -> None:
     path = str(tmp_path / "index.db")
-    _old_insert(
-        path,
-        [
-            ("t1", "task", CARD_TITLE),
-            ("c1", "chat", PASSWORD_TITLE),
-            ("t2", "task", "Water the beds"),
-            ("t3", "task", CARD_TITLE),
-        ],
-    )
+    key_title = f"Use key {KEY} for the build"
+    wrapped = f"Pay {CARD[:9]}\n{CARD[10:]} now"
+    rows = [
+        ("t1", "task", CARD_TITLE),
+        ("c1", "chat", PASSWORD_TITLE),
+        ("t2", "task", "Water the beds"),
+        ("t3", "task", CARD_TITLE),
+        ("t4", "task", key_title),
+        ("t5", "task", wrapped),
+        ("t6", "task", WORD_TITLES[0]),
+    ]
+    _old_insert(path, rows)
+    # The text of the older code starts with the title it was given.
+    assert _old_text("task", CARD_TITLE).startswith(f"Task: {CARD_TITLE}\n")
     index = ConversationIndex(path)
     try:
-        stored = await index.fetch(await index.ids())
-        assert {d.session_id: d.title for d in stored} == {
-            "t1": "[left out]",
-            "c1": "[left out]",
+        stored = {d.session_id: d for d in await index.fetch(await index.ids())}
+        assert {session: d.title for session, d in stored.items()} == {
+            "t1": CARD_LABEL,
+            "c1": PASSWORD_LABEL,
             "t2": "Water the beds",
-            "t3": "[left out]",
+            "t3": CARD_LABEL,
+            "t4": "Use key [left out] for the build",
+            "t5": "Pay [left out] now",
+            "t6": WORD_TITLES[0],
         }
-        assert {d.text for d in stored} == {"User: hi\nmelo: hello"}
+        # The task line is the cleaned title; nothing else of a text changes.
+        body = "User: hi\nmelo: hello"
+        assert {session: d.text for session, d in stored.items()} == {
+            "t1": f"Task: {CARD_LABEL}\n{body}",
+            "c1": body,
+            "t2": f"Task: Water the beds\n{body}",
+            "t3": f"Task: {CARD_LABEL}\n{body}",
+            "t4": f"Task: Use key [left out] for the build\n{body}",
+            "t5": f"Task: Pay [left out] now\n{body}",
+            "t6": f"Task: {WORD_TITLES[0]}\n{body}",
+        }
         assert await index.meta("titles_cleaned") == 1
     finally:
         await index.aclose()
     # The old titles are gone from the file and its log, not only from the rows.
     kept = b"".join(p.read_bytes() for p in tmp_path.glob("index.db*"))
-    assert b"4111 1111" not in kept and b"hunter2" not in kept
-    # Opened again it does not look at the titles again: the step runs once.
+    assert not re.search(rb"4111|hunter2|a1B2|1111 1111", kept)
+    # Opened again it does not look at the rows again: the step runs once.
     _old_insert(path, [("t9", "task", CARD_TITLE)])
     again = ConversationIndex(path)
     try:
-        titles = {d.session_id: d.title for d in await again.fetch(await again.ids())}
-        assert titles["t1"] == "[left out]" and titles["t9"] == CARD_TITLE
+        docs = {d.session_id: d for d in await again.fetch(await again.ids())}
+        assert docs["t1"].title == CARD_LABEL
+        assert docs["t9"].title == CARD_TITLE
+        assert docs["t9"].text == _old_text("task", CARD_TITLE)
+        assert docs["t1"].text == f"Task: {CARD_LABEL}\n{body}"
     finally:
         await again.aclose()
+
+
+async def test_a_text_that_does_not_start_with_its_title_line_is_left_as_it_is(
+    tmp_path: Path,
+) -> None:
+    path = str(tmp_path / "index.db")
+    _old_insert(path, [("t1", "task", CARD_TITLE)])
+    raw = sqlite3.connect(path)
+    raw.execute("UPDATE documents SET text = 'User: hi\nmelo: hello'")
+    raw.commit()
+    raw.close()
+    index = ConversationIndex(path)
+    try:
+        (doc,) = await index.fetch(await index.ids())
+        assert doc.title == CARD_LABEL
+        assert doc.text == "User: hi\nmelo: hello"
+    finally:
+        await index.aclose()
 
 
 # ── A search query ──
