@@ -308,10 +308,13 @@
   "approval.title.unreviewed": "Run a step melo could not review?",
   "approval.truncated": "Approval arguments were truncated or changed; they cannot safely be allowed here. You can deny or stop the run.",
   "approval.typeCaption": "Typing on a web page",
-  "approval.typeContent": "melo wants to type the text below on {site} in Safari's automation window. It never types passwords, card numbers or one-time codes. Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
-  "approval.typeContentChrome": "melo wants to type the text below on {site} in melo's browser, which runs in the background. It never types passwords, card numbers or one-time codes. Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
+  "approval.typeContent": "melo wants to type the text below on {site} in Safari's automation window. {never} Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
+  "approval.typeContentChrome": "melo wants to type the text below on {site} in melo's browser, which runs in the background. {never} Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
+  "approval.typeGiven": "The text stands for that password. melo never types card numbers or one-time codes.",
+  "approval.typeGivenTitle": "Type the password you gave on {site}?",
   "approval.typeInto": "Type into “{label}” on {site}?",
   "approval.typeIntoKind": "Type into a {kind} on {site}?",
+  "approval.typeNever": "It never types passwords, card numbers or one-time codes.",
   "approval.typeSite": "Let melo type on {site}?",
   "approval.useTool": "Let melo use {tool}?",
   "approval.why": "Why melo asks",
@@ -1238,8 +1241,8 @@
   "memory.remembered": "Remembered: {note}",
   "memory.undo": "Undo",
   "memory.used": {
-    "one": "Used {n} memory",
-    "other": "Used {n} memories"
+    "one": "Recalled {n} memory",
+    "other": "Recalled {n} memories"
   },
   "memoryRows.chat.chat": "chat “{title}”",
   "memoryRows.chat.chatUntitled": "a chat",

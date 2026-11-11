@@ -1,7 +1,7 @@
 /**
  * What memory across chats did for a message, shown under it (the `turn.memory` event).
  *
- * "Used 2 memories ▾" opens the notes and earlier chats the turn recalled, each with where it came
+ * "Recalled 2 memories ▾" opens the notes and earlier chats the turn recalled, each with where it came
  * from. "Remembered: you prefer short answers · Undo" names a note the message made melo keep; Undo
  * deletes it (`DELETE /api/memory/records/{id}?undo=true`). "Not remembered: …" says why a
  * statement was not kept. "From your other chats (last 30 min) ▾" opens the lines a new chat's

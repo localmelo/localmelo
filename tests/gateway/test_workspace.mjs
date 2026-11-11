@@ -1465,9 +1465,9 @@ test('what memory recalled and kept shows under the message, and Undo forgets th
     remembered: [{id: 7, text: 'You prefer short answers.', topic: 'preferences'}], refused: ''}});
   const user = findNode(h.element('messages'), (node) => node.className === 'msg user');
   assert.deepEqual(user.children.map((child) => child.className), ['user-bubble', 'memory-notes']);
-  assert.match(flatten(notes()), /Used 1 memory ▾/);
+  assert.match(flatten(notes()), /Recalled 1 memory ▾/);
   assert.match(flatten(notes()), /Remembered: you prefer short answers\. · Undo/);
-  findNode(notes(), (node) => node.tag === 'button' && node.textContent.startsWith('Used')).click();
+  findNode(notes(), (node) => node.tag === 'button' && node.textContent.startsWith('Recalled')).click();
   assert.match(flatten(notes()), /Your group meeting is on Thursdays\. \(you said it · chat “Planning”, Oct 30\)/);
   findNode(notes(), (node) => node.tag === 'button' && node.textContent === 'Undo').click();
   await new Promise((resolve) => setImmediate(resolve));

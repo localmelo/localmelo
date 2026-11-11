@@ -6,7 +6,7 @@ In the web console and the app, today:
 
 - melo keeps a note about you when you ask it to, or when it judges one worth keeping; a line under your message says `Remembered: … · Undo`.
 - The **Memory** tab lists the notes, and you can reword or forget any of them.
-- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Used … memory` under your message shows each source.
+- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Recalled … memory` under your message shows each source.
 
 ## What localmelo remembers
 
@@ -24,7 +24,7 @@ In the web console and the app, today:
 
 ## Memory across chats
 
-![A chat that asks "when is my group meeting?": under the message, "Used 1 memory" opens the earlier exchange it used and the chat it came from.](../assets/img/memory-across.webp)
+![A chat that asks "when is my group meeting?": under the message, "Recalled 1 memory" opens the earlier exchange it recalled and the chat it came from.](../assets/img/memory-across.webp)
 
 In the web console and the app, melo remembers across chats.
 
@@ -93,7 +93,7 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 ```
 
 - If part of the message looked like a password or key, another line says it was not kept and must not be written anywhere; the secret itself is never quoted.
-- Under your message the page shows `Used 1 memory ▾`; open it to see each item and its source, such as `you said it · chat “Planning”, Oct 30`.
+- Under your message the page shows `Recalled 1 memory ▾`; open it to see each item and its source, such as `you said it · chat “Planning”, Oct 30`.
 - An item is recalled when it holds at least 40% of the message's content words (a plural, `-ing` or `-ed` ending does not matter: "meet" finds "meets"), or is close in meaning to the message, a similarity of at least 0.45 by the embedding model. This applies to the block and to the memory search tool alike. The bars are loose on purpose: measured against stricter ones, they answered ten more of every hundred questions about earlier chats. The price is that a message about something else can recall an unrelated chat (about half of unrelated test questions did); the answers did not use it.
 - When the embedding model takes over 1.5 seconds or fails, that message is searched by words alone, and the log says so once.
 - The chat's own earlier turns are recalled once they have left the model's window of recent messages (see [Working-memory window](../reference/memory.md#working-memory-window)), like turns of other chats, and read `this chat, Oct 30`; a turn the window still shows is not recalled, because the model has it. A note is not recalled again as the turn it came from, and older turns count for less (a 30-day half-life).

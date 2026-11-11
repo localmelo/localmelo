@@ -32,8 +32,8 @@ test('readMemory keeps what the page can use and is null for nothing', () => {
 });
 
 test('the words: one memory, two memories, a note inside a sentence', () => {
-  assert.equal(usedLabel(1), 'Used 1 memory');
-  assert.equal(usedLabel(2), 'Used 2 memories');
+  assert.equal(usedLabel(1), 'Recalled 1 memory');
+  assert.equal(usedLabel(2), 'Recalled 2 memories');
   assert.equal(inline('You prefer short answers.'), 'you prefer short answers.');
   assert.equal(inline('Your group meeting is on Thursdays.'), 'your group meeting is on Thursdays.');
   assert.equal(inline('Sam has the lab keys.'), 'Sam has the lab keys.');
@@ -55,7 +55,7 @@ test('closed, it says how many; open, it lists each with its source', () => {
   const shut = memoryNodes({doc, memory, open: false, toggle: () => toggles.push(1), undo: (note) => undone.push(note.id)});
   assert.equal(shut.length, 1);
   const [toggle, undo] = shut[0].all('button');
-  assert.equal(toggle.textContent, 'Used 1 memory ▾');
+  assert.equal(toggle.textContent, 'Recalled 1 memory ▾');
   assert.equal(toggle.attributes['aria-expanded'], 'false');
   assert.equal(shut[0].all('li').length, 0);
   toggle.handlers.click();
@@ -69,7 +69,7 @@ test('closed, it says how many; open, it lists each with its source', () => {
   assert.deepEqual(undone, [7]);
 
   const [open] = memoryNodes({doc, memory, open: true, toggle() {}, undo() {}});
-  assert.equal(open.all('button')[0].textContent, 'Used 1 memory ▴');
+  assert.equal(open.all('button')[0].textContent, 'Recalled 1 memory ▴');
   assert.deepEqual(open.all('li').map((li) => li.text()), [`Your group meeting is on Thursdays. (${source})`]);
 });
 

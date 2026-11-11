@@ -37,10 +37,10 @@ test('the language is picked as the shared cases say', () => {
 test('the page reads English until it switches, then Chinese, and an unknown key is itself', async () => {
   assert.equal(language(), 'en');
   assert.equal(t('running.more', {n: 2}), 'and 2 more');
-  assert.equal(t('memory.used', {n: 1}), 'Used 1 memory');
+  assert.equal(t('memory.used', {n: 1}), 'Recalled 1 memory');
   assert.equal(await useLanguage('zh-Hans'), 'zh-Hans');
   assert.equal(t('running.more', {n: 2}), '还有 2 个');
-  assert.equal(t('memory.used', {n: 1}), '用到 1 条记忆');
+  assert.equal(t('memory.used', {n: 1}), '想起 1 条记忆');
   assert.equal(t('no.such.key'), 'no.such.key');
   // A converted screen draws its words in the page's language.
   assert.equal(describe({tasks: 2, chats: 1}), '1 个对话、2 个任务');

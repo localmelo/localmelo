@@ -1300,7 +1300,14 @@ async def test_a_sign_in_page_asks_once_and_not_again_after_not_now() -> None:
     assert takeovers == ["takeover:https://example.com", "takeover:https://example.com"]
     assert "they did not take it over" in first.text and "<<page " in first.text
     assert "did not take" not in again.text, "not asked again on the site"
-    assert typed.is_error and "nor a password the user did not give" in typed.text
+    assert (
+        typed.is_error
+        and (
+            "nor a password it does not hold from the user (none was given for this "
+            "site, or it was too long to keep)."
+        )
+        in typed.text
+    )
     await provider.close()
 
 
