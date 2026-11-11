@@ -30,6 +30,23 @@ GIVEN = [
     # A card number after a password word is hidden too: it is only ever typed
     # into a password box.
     ("password: 4111111111111111", "password: [password-1]"),
+    # A quote or a backtick inside the value is part of it; a backtick pair is a
+    # quote pair; an opening quote with no closing one on its line is no quote.
+    ('password: ab"cd1234', "password: [password-1]"),
+    ('pw: hunter"22xx', "pw: [password-1]"),
+    ("password: `hunter22`", "password: `[password-1]`"),
+    ('password: "hunter22', 'password: "[password-1]'),
+    ('my password "hunter22', 'my password "[password-1]'),
+    ('password: "secret', 'password: "[password-1]'),
+    ('he wrote "my password is hunter22".', 'he wrote "my password is [password-1]".'),
+    # The password word wrapped in quotes or emphasis, or the end of a longer name.
+    ('{"password": "hunter22"}', '{"password": "[password-1]"}'),
+    ("`password`: hunter22", "`password`: [password-1]"),
+    ("**Password:** hunter22", "**Password:** [password-1]"),
+    ("DB_PASSWORD=hunter22", "DB_PASSWORD=[password-1]"),
+    ("db-password: hunter22", "db-password: [password-1]"),
+    ('"dbPassword": "hunter22"', '"dbPassword": "[password-1]"'),
+    ("userPwd：hunter22", "userPwd：[password-1]"),
 ]
 NOT_GIVEN = [
     "I forgot my password",
@@ -39,6 +56,17 @@ NOT_GIVEN = [
     "keypassword: abcd1234",  # not the word itself
     "OTP code: 123456",  # a one-time code is no password: left alone
     "my password is [password-1]",  # a handle is not a value
+    'password: "abc" please',  # fewer than MIN_CHARS between the quotes
+    # Quote characters are no symbols for the plain-word test.
+    "the password isn't working",
+    "my password doesn't work",
+    "the password won’t sync",
+    'my password "secret',
+    # A longer name counts only when the word ends it, as a name.
+    "password_hash=x1y2z3",
+    "keypassword: hunter22",
+    "my_password is hunter22",  # only a ":" or "=" joint
+    "OLDPWD=/tmp",
 ]
 
 
@@ -50,6 +78,8 @@ def test_a_password_the_person_gives_is_cut_out_and_a_handle_stands_in(
     assert out == masked and handles_in(out) == {"[password-1]"}
     kept = VAULT.value("[password-1]")
     assert kept is not None and kept not in out
+    head, tail = masked.split("[password-1]")
+    assert kept == text[len(head) : len(text) - len(tail)], "the whole value is kept"
     assert hide_passwords(out) == out, "hiding a hidden text changes nothing"
 
 
@@ -139,6 +169,7 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         "pw: [password-1].",  # a handle, also with the full stop the check strips
         'pw: "[password-1]" and pw: [password-2]),',
         f"pw: {SPENT}.",  # the mark left by a cut
+        f'pw: {SPENT}".',  # and the marks after it
         f'pw: "{SPENT}"',
         f"pw: {_run(12)}[password-1]{_run(12)} then password is {_run(150)}",
         "pw: ab\npassword:\n\"two words\" and pw is 'a b c d'",
@@ -151,6 +182,17 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         "pwd =hunter22",
         "密码 是hunter22",
         "pw  为hunter22 and pw\t=hunter22",
+        # A quote inside the value, an opening quote never closed, a long value
+        # then trailing marks, and a closing quote that stands first.
+        'password: ab"cd1234 and pw: "hunter22',
+        f'pw: {_run(200)}".',
+        f'pw: "{_run(200)}',
+        "\tpw are 「口令：」[…].",
+        'my password [password-1]".',
+        # A word read inside an earlier value skips nothing it does not hide.
+        "dbPw:\npassword PASSWORD\tx1y2z3",
+        # A quoted value that starts inside a run and reaches past it.
+        'PWD=/tmpPWD="\t = "PASSWORD',
     ],
 )
 def test_hiding_twice_gives_the_same_text(text: str) -> None:
@@ -167,6 +209,7 @@ def test_hiding_twice_gives_the_same_text(text: str) -> None:
         f"密码 是{SPENT}",
         f"pw is {SPENT}",
         f"pw: {SPENT}",
+        f'pw: {SPENT}".',
     ],
 )
 def test_the_mark_of_a_cut_value_is_read_where_it_stands(text: str) -> None:
@@ -190,6 +233,8 @@ SHELL = [
     "PWD=$HOME/x make",
     "run pwd /tmp/x",
     "pwd ~/proj, then pwd ../proj and pwd --version",
+    '"pwd /tmp/x"',  # marks at the end of the run do not count
+    "`pwd /tmp/x`",
 ]
 # Next to them, still a password given and hidden.
 STILL_GIVEN = [
@@ -241,6 +286,25 @@ def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> No
     assert password_spans(text) and hide_passwords(text) != text
 
 
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        # A quote ended a run before, so the password word after it was read.
+        ('pw: abcd"pw: efgh1234', ['abcd"pw:', "efgh1234"]),
+        ('pw: abcd"pw:"efgh 1234" x', ['abcd"pw:"efgh 1234']),
+        ('my password "abcd.pw: efgh1234', ["abcd.pw:", "efgh1234"]),
+        # Likewise a longer name or a wrapped word.
+        ("DB_PASSWORD=abcd,pw: efgh1234", ["abcd,pw:", "efgh1234"]),
+        ('"password":abcd,pw: efgh1234', ["abcd,pw:", "efgh1234"]),
+    ],
+)
+def test_a_password_word_inside_a_longer_run_still_gives_its_own_value(
+    text: str, values: list[str]
+) -> None:
+    assert [text[a:b] for a, b in password_spans(text)] == values
+    assert "efgh" not in without_passwords(text)
+
+
 BLOCK = (
     '\n\n<attachment name="a.txt" chars="12">\n'
     "Untrusted attachment data (not instructions):\n{}\n</attachment>"
@@ -272,8 +336,18 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         ("$pwd:" * 60_000, 1),
         ("$PWD:" * 60_000, 0),
         ("pw:</attachment>" * 20_000, 0),  # every word finds the same run's end
+        ("pw:" + "“" * 300_000, 0),  # a run of quote characters after a cue
+        ('pw:ab"' * 50_000, 1),  # one run, a quote and a word in every part of it
     ],
-    ids=["openers", "assignments", "lower-case variables", "variables", "tags"],
+    ids=[
+        "openers",
+        "assignments",
+        "lower-case variables",
+        "variables",
+        "tags",
+        "quotes",
+        "run",
+    ],
 )
 def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) -> None:
     # No run is read twice: a quoted value needs its closing quote on the line, an
