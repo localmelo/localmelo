@@ -17,7 +17,12 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
 from localmelo.melo.contracts import review
 from localmelo.melo.contracts.approvals import TOOL_ASK, AutoPolicy
-from localmelo.melo.contracts.sign_in import HANDLE, VAULT, hide_passwords
+from localmelo.melo.contracts.sign_in import (
+    HANDLE,
+    MAX_CHARS,
+    VAULT,
+    hide_passwords,
+)
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.schema import Message, ToolDef
@@ -566,7 +571,7 @@ def test_the_door_names_the_handles_it_made_from_values_in_the_files_never_from_
     typed = hide_message(TASK)
     assert typed.text.endswith("[password-1]") and typed.file_handles == frozenset()
     # The handle text of an earlier message's password, written in a file.
-    held = TextAttachment("old.txt", "my old one is [password-1]")
+    held = TextAttachment("old.txt", "password: [password-1]")
     quiet = hide_message(ASK, (held,))
     assert quiet.attachments == (held,) and quiet.file_handles == frozenset()
     # A value in a file gets a handle in this pass: that is what the set holds.
@@ -586,7 +591,7 @@ def test_a_file_that_holds_an_earlier_handles_text_never_brings_back_that_passwo
 ):
     reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     hide_message(TASK)  # an earlier message: [password-1] is the typed PASSWORD
-    held = hide_message(ASK, (TextAttachment("old.txt", "my old one is [password-1]"),))
+    held = hide_message(ASK, (TextAttachment("old.txt", "password: [password-1]"),))
     reviewer.user_message(held.text, files=held.file_handles)
     assert reviewer.sign_in_value("[password-1]", "forum.example") is None
     assert not reviewer.holds_sign_in() and not reviewer.signs_in("forum.example")
@@ -633,6 +638,48 @@ def test_words_that_give_a_password_win_over_the_files_and_two_file_passwords_gi
     VAULT.forget()
     reviewer.user_message(one.text, files=one.file_handles)
     assert not reviewer.holds_sign_in()
+
+
+@pytest.mark.parametrize(
+    ("words", "live"),
+    [
+        (ASK, True),
+        ("Log-in at forum.example with the attached file", True),
+        ("用附件里的账号登录forum.example", True),
+        ("the password is in the file, use it at forum.example", True),
+        ("summarise this file and open forum.example", False),
+        ("sign up at forum.example and read this file", False),
+        ("design in forum.example, then read this file", False),
+        ("", False),
+    ],
+)
+def test_a_files_password_is_used_only_when_the_words_are_about_signing_in(
+    words: str, live: bool
+) -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message("open forum.example")  # an earlier message names the site
+    hidden = hide_message(words, (THE_FILE,))
+    reviewer.user_message(hidden.text, files=hidden.file_handles)
+    assert reviewer.holds_sign_in() is live
+    assert reviewer.signs_in("forum.example") is live
+    found = reviewer.sign_in_value("[password-1]", "forum.example")
+    assert found == ("file-Secret7" if live else None)
+
+
+def test_a_password_that_could_not_be_kept_leaves_the_count_unknown_and_none_goes_live() -> (
+    None
+):
+    too_long = "x9" * MAX_CHARS  # a bare word after "is" needs a digit to count
+    one_each = TextAttachment("two.txt", f"password: file-Secret7\npw: {too_long}\n")
+    for words, files in [
+        (ASK, (one_each,)),  # a file's own second password too long to keep
+        (f"{ASK}, my password is {too_long}", (THE_FILE,)),  # a typed one
+    ]:
+        hidden = hide_message(words, files)
+        assert hidden.file_handles == frozenset()
+        reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+        reviewer.user_message(hidden.text, files=hidden.file_handles)
+        assert not reviewer.holds_sign_in() and not reviewer.signs_in("forum.example")
 
 
 @pytest.mark.asyncio

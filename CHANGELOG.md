@@ -68,7 +68,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The hosts of one site count as one site, so one allow covers them.
 - A human check from a known provider asks you once per chat, in Chrome, in Ask and in Auto: Always in this chat covers such checks in that chat, its tasks and its chores (in the main chat, every chat). Other boxes and Safari ask as before.
 - The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
-- A password in a file you attach to a message is typed on a site your message names when the file holds only one password and your message gives none; two or more, or a message sent again, are handed to you.
+- A password in a file you attach is typed on a site your message names when the message says to sign in and the files hold only one password; otherwise the page is handed to you.
 
 ### Memory
 

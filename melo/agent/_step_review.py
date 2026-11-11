@@ -98,7 +98,7 @@ from localmelo.melo.contracts.review import (
     named_by,
     step_key,
 )
-from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in, says_sign_in
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -505,19 +505,20 @@ class StepReviewer:
         mid-run) keeps them.
 
         A password the message gave can be typed in this run (#547): the handles
-        its words hold. With none, the one a file it carried gave (#626): *files*
-        are the handles the door made from values in the message's files, given
-        by the caller as data and never found in a text, and when exactly one of
-        them is still in the vault it goes live (two or more: none). A message
-        read mid-run carries no *files*.
+        its words hold. With none, the one a file it carried gave (#626), when the
+        words are about signing in (:func:`~localmelo.melo.contracts.sign_in.says_sign_in`):
+        *files* are the handles the door made from values in the message's files,
+        given by the caller as data and never found in a text. Exactly one goes
+        live, if the vault still keeps it; two or more, or none (a value too long
+        to keep, which the door says by giving none), do not. A message read
+        mid-run carries no *files*.
         """
         if recalled is not None:
             self._recalled = recalled
         text = self._said(text)
         gave = handles_in(text)
-        if not gave:
-            kept = frozenset(h for h in files if VAULT.value(h) is not None)
-            gave = kept if len(kept) == 1 else frozenset()
+        if not gave and len(files) == 1 and says_sign_in(text):
+            gave = frozenset(h for h in files if VAULT.value(h) is not None)
         self._live |= gave
         # A message counts even with no words (an attachment): a review
         # settled for the last message is asked again, with the new words.

@@ -208,7 +208,8 @@ _PAGE_NOTE = (
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
     "browser_type and browser_select act on the page you read, by ref. Sign in "
     "with the details the user gave: a password they wrote in their message, "
-    "or the one in a file they attached, reads [password-1] there (melo keeps "
+    "or the only one in a file they attached when they asked to sign in, reads "
+    "[password-1] there (melo keeps "
     "the real one out of your sight): "
     "browser_type that text into the password box (the list says melo never "
     "types there: that holds for any other password) and melo types the real "

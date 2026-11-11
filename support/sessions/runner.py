@@ -949,7 +949,8 @@ class SessionRunner:
                 kwargs["from_person"] = False
                 if self._memory is not None:
                     kwargs["hide_tools"] = _NOTE_TOOLS
-            elif turn.file_handles:
+            if turn.file_handles:
+                # Only the person's own turn has them: _start refuses any other.
                 kwargs["file_handles"] = turn.file_handles
             # The chat began when its session did, across reloads and restarts.
             session = None

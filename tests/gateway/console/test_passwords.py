@@ -321,7 +321,7 @@ async def test_the_one_password_of_a_sent_file_is_typed_for_that_run_and_no_retr
         assert not review.holds_sign_in()
 
         # A file that holds only the handle's text brings the password back to no one.
-        held = a_file("old.txt", "the old one is [password-1]")
+        held = a_file("old.txt", "password: [password-1]")
         assert (
             await _post_turn(client, main, words, attachments=[held])
         ).status_code == 202
