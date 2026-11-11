@@ -146,10 +146,13 @@ def test_a_dot_or_a_dash_separates_a_cards_digits_only_in_one_form(dash: str) ->
         assert records.number_spans(text) == [], text
 
 
-def test_a_card_does_not_start_in_a_decimal_numbers_fraction() -> None:
+def test_a_number_does_not_start_in_a_decimal_numbers_fraction() -> None:
     # The digits after "<digit>." are the fraction of a number, whatever the checksum
     # says; a card written beside such a number is still found.
     assert records.number_spans("Score 0.4111111111111111") == []
+    # Eighteen digits there are no ID number either; after a word they are one.
+    assert records.number_spans("Score 0.001728625909087178") == []
+    assert records.number_spans("Id 110101199003070018.") == [(3, 21)]
     assert records.number_spans(f"Total 12.50 {CARD}") == [(12, 12 + len(CARD))]
     # Inside a number of dotted groups the card is read without its first group.
     dotted = "4111.1111.1111.1111"
@@ -408,27 +411,32 @@ def test_a_secret_next_to_a_number_does_not_hide_it() -> None:
 PLAIN_CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 
 
+# An ID number read wherever its digits start.
+PLAIN_ID = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
+
+
 def _plain_reading(text: str) -> bool:
     """What the rule answered for a text without a secret word when a card was read
-    only as digits joined by one space or hyphen."""
+    only as digits joined by one space or hyphen, and an ID number wherever its
+    digits start."""
     return (
         any(
             records._luhn(re.sub(r"\D", "", m.group()))
             for m in PLAIN_CARD.finditer(text)
         )
-        or records._ID_NUMBER.search(text) is not None
+        or PLAIN_ID.search(text) is not None
         or bool(redact_secrets(text)[1])
     )
 
 
 def test_ordinary_digit_runs_are_refused_as_they_were_except_for_the_changes() -> None:
     rows = json.loads((DATA / "number_precision.json").read_text("utf-8"))
-    assert len(rows) == 79
+    assert len(rows) == 81
     texts = [row["text"] for row in rows]
     # "before" is the plain reading's answer, here as the code gives it.
     assert [row["before"] for row in rows] == [_plain_reading(t) for t in texts]
     after = [records.sensitive(t) for t in texts]
-    assert sum(row["before"] for row in rows) == 7
+    assert sum(row["before"] for row in rows) == 9
     assert sum(after) == 6
     changed = [
         t
@@ -441,6 +449,9 @@ def test_ordinary_digit_runs_are_refused_as_they_were_except_for_the_changes() -
         # The digits after a decimal point are no card.
         "Score 0.4425935186026221",
         "Score 0.46432068068045473",
+        # Eighteen digits after a decimal point are no ID number.
+        "Score 0.001728625909087178",
+        "Score 0.026612664415084475",
     ]
     assert all(
         now

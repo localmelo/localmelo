@@ -271,7 +271,11 @@ _SECRET_WORDS = re.compile(
 )
 # What a cut-out password's mark is read as: a value by its shape.
 _STOOD_FOR: Final = "0000"
-_ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
+# An ID number as it is written: ``123-45-6789``, or 17 digits and a check character.
+# The 18 do not start right after a digit and a dot (a decimal number's fraction).
+_ID_NUMBER = re.compile(
+    r"(?<!\d)(\d{3}-\d{2}-\d{4}|(?<!\d\.)\d{17}[\dXx])(?![\dA-Za-z])"
+)
 # A card number is 13 to 19 digits that pass the checksum. Read plainly, one space or
 # hyphen may stand between two digits. A card does not start right after a digit and
 # a dot: those are the fraction of a decimal number.
@@ -494,9 +498,9 @@ def number_spans(text: str) -> list[tuple[int, int]]:
     is: a number alone on a line, or one that crosses a line, belongs to no sentence.
 
     A dot or a dash separates a card's digits only in the form
-    ``4111.1111.1111.1111``, and a card does not start right after a digit and a dot
-    (a decimal number's fraction): floats, prices, versions, addresses, coordinates
-    and year ranges are no cards.
+    ``4111.1111.1111.1111``, and neither a card nor an 18-character ID number starts
+    right after a digit and a dot (a decimal number's fraction): floats, prices,
+    versions, addresses, coordinates and year ranges are no cards.
 
     Not found: a card written in groups after a group of four or more digits on its
     line (written with dots, dashes or Unicode spaces, also when that group ends the
