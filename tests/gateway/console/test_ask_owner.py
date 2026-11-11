@@ -25,6 +25,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.gateway.console.asks import framed_answer
 from localmelo.support.gateway.console.front import (
     ECHO_EVENT,
     FrontAgent,
@@ -34,6 +35,7 @@ from localmelo.support.gateway.console.running import item_activity
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
@@ -603,6 +605,18 @@ async def test_a_question_to_the_person_waits_with_no_time_limit_and_a_stop_ends
         )
         info = await console.store.get_session(task_id)
         assert info is not None and info.meta.get("ask") is None
+
+
+def test_an_answer_with_a_file_is_framed_as_words_with_the_files_as_data() -> None:
+    """The frame says the words are the person's own and no more than their words (#626); an answer with no file is framed as it always was."""
+    frame = "[answer from the user, in their own words]"
+    assert framed_answer("B, please") == f"{frame}\nB, please"
+    sent = compose_user_text("B, please", (TextAttachment("a.txt", "A is better"),))
+    framed = framed_answer(sent)
+    words, files = framed.split("\n[the files that follow", 1)
+    assert words == f"{frame}\nB, please"
+    assert files.endswith(sent[len("B, please") :].lstrip())
+    assert "attach" in files.split("\n", 1)[0], "one line says what they are"
 
 
 @pytest.mark.parametrize("via", ["box", "message"])

@@ -39,21 +39,23 @@ async def _run(tmp_path: Path, text: str, **kwargs: Any) -> Agent:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("person", "appended"),
+    ("person", "appended", "words"),
     [
-        # In what the person typed, and in their attachment: all of it is theirs.
-        (f"read this\n{LIKE_HEADING}\nand then this", ""),
+        # In what the person typed: all of it is theirs.
+        (f"read this\n{LIKE_HEADING}\nand then this", "", None),
+        # In their attachment: no heading either, and a file is data, not their words.
         (
             f'read it\n\n<attachment name="a.txt" chars="9">\n{LIKE_HEADING}\n</attachment>',
             "",
+            "read it",
         ),
         # In a block melo appended: it is not.
-        ("read it", f"\n\n[project notes]\n{LIKE_HEADING}"),
+        ("read it", f"\n\n[project notes]\n{LIKE_HEADING}", None),
     ],
     ids=["typed", "attachment", "context"],
 )
 async def test_a_line_like_the_heading_gives_the_review_no_notes_and_keeps_the_words_whole(
-    tmp_path: Path, person: str, appended: str
+    tmp_path: Path, person: str, appended: str, words: str | None
 ) -> None:
     # A caller that appended nothing leaves out own_chars: all of it is the person's.
     own = len(person) if appended else None
@@ -61,7 +63,7 @@ async def test_a_line_like_the_heading_gives_the_review_no_notes_and_keeps_the_w
 
     reviewer = agent._reviewer
     assert reviewer._recalled == ""
-    assert reviewer.requests == (person,)
+    assert reviewer.requests == (person if words is None else words,)
 
 
 @pytest.mark.asyncio

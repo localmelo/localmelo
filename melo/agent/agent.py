@@ -123,6 +123,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     is_cancellation,
 )
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.folders import WRITE_TOOLS
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
@@ -1524,8 +1525,16 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         caller that put text of melo's after the person's message passes only
         the person's part here (see *own_chars* of :meth:`run_task`, which
         hides what follows it too). See :mod:`localmelo.melo.contracts.sign_in`.
+
+        Hiding never crosses the place where a file's block starts (#626): the
+        words before the first block and the rest are hidden as two parts and
+        joined as they were, so a password word that ends the person's words
+        cannot take the block's opener as its value, whichever order the
+        caller hides and cuts in (the step review's words end at that opener).
+        A text with no block is hidden as one.
         """
-        return hide_passwords(text)
+        words = words_before_files(text)
+        return hide_passwords(words) + hide_passwords(text[len(words) :])
 
     async def run_tool(
         self,
@@ -3881,7 +3890,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 recalled = self.hide_passwords(recalled)  # the notes follow suit
             if isinstance(user_words, str):
                 user_words = self.hide_passwords(user_words)
-        person_words = own if user_words is None else user_words
+        # A file's text is data, never the person's words (#626): they end where
+        # a file's block starts, here and in the step review.
+        person_words = words_before_files(own if user_words is None else user_words)
         if routine is not None:
             if not isinstance(routine, str):
                 raise TypeError("routine must be a str")
