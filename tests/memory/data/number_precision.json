@@ -343,5 +343,55 @@
   "kind": "adjacent",
   "text": "020 7638 0245\n020 7851 8656",
   "before": false
+ },
+ {
+  "kind": "float",
+  "text": "Result 968.8489275020787",
+  "before": false
+ },
+ {
+  "kind": "float",
+  "text": "Result 484.6651849863808",
+  "before": false
+ },
+ {
+  "kind": "coordinates",
+  "text": "70.68089788244, 51.81896411662",
+  "before": false
+ },
+ {
+  "kind": "coordinates",
+  "text": "-18.31956458303, 32.58050325001",
+  "before": false
+ },
+ {
+  "kind": "dotted version",
+  "text": "Build 955033.111521.8152",
+  "before": false
+ },
+ {
+  "kind": "dotted version",
+  "text": "Build 13.18.7931.5765.7",
+  "before": false
+ },
+ {
+  "kind": "year ranges",
+  "text": "2007\u20132009 2011\u20132013",
+  "before": false
+ },
+ {
+  "kind": "year ranges",
+  "text": "1988\u20131989 1992\u20131995",
+  "before": false
+ },
+ {
+  "kind": "fraction",
+  "text": "Score 0.4425935186026221",
+  "before": true
+ },
+ {
+  "kind": "fraction",
+  "text": "Score 0.46432068068045473",
+  "before": true
  }
 ]

@@ -273,21 +273,34 @@ _SECRET_WORDS = re.compile(
 _STOOD_FOR: Final = "0000"
 _ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
 # A card number is 13 to 19 digits that pass the checksum. Read plainly, one space or
-# hyphen may stand between two digits.
-_CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
-# Read as it is written: between two digits at most one separator, a space, hyphen
-# or dot, one Unicode space or invisible character (no-break, thin, ideographic,
+# hyphen may stand between two digits. A card does not start right after a digit and
+# a dot: those are the fraction of a decimal number.
+_CARD = re.compile(r"(?<!\d)(?<!\d\.)(?:\d[ -]?){12,18}\d(?!\d)")
+# Read as it is written: between two digits at most one separator, a space, hyphen,
+# dot or dash, one Unicode space or invisible character (no-break, thin, ideographic,
 # zero-width ...), or a line break with a few spaces around it (a wrapped line). A
-# tab or a run of spaces is not one: they set out a table. A match may hold more than
-# one line break; :func:`_card_like` allows one. Every count is bounded (12 to 18
-# digits, 8 spaces around a break), so no repetition is nested unbounded and a match
-# takes time in proportion to the text.
+# tab or a run of spaces is not one: they set out a table. A dot or a dash (not the
+# plain hyphen) stands between a card's digits only in the one form
+# ``4111.1111.1111.1111`` (:func:`_card_like`): floats, prices, versions, addresses
+# and year ranges are written with them too. A match may hold more than one line
+# break; :func:`_card_like` allows one. Every count is bounded (12 to 18 digits, 8
+# spaces around a break), so no repetition is nested unbounded and a match takes
+# time in proportion to the text.
 _SPACES: Final = 8
 _FILL = r"\u00a0\u1680\u2000-\u200d\u202f\u205f\u2060\u3000\ufeff"
-_GAP = rf"(?:[-.{_FILL}]| )"
+# The Unicode hyphens and dashes (hyphen, non-breaking hyphen, figure dash, en dash,
+# em dash) and the minus sign.
+_DASHES = r"\u2010-\u2014\u2212"
+_GAP = rf"(?:[-.{_DASHES}{_FILL}]| )"
 _BREAK = rf"[ {_FILL}]{{0,{_SPACES}}}(?:\r\n|[\r\n])[ {_FILL}]{{0,{_SPACES}}}"
-_CARD_WRITTEN = re.compile(rf"(?<!\d)(?:\d(?:{_GAP}|{_BREAK})?){{12,18}}\d(?!\d)")
+_CARD_WRITTEN = re.compile(
+    rf"(?<!\d)(?<!\d\.)(?:\d(?:{_GAP}|{_BREAK})?){{12,18}}\d(?!\d)"
+)
 _LINE_BREAK = re.compile(r"\r\n|[\r\n]")
+# A separator that a card is written with only in one form (:func:`_card_like`).
+_STRICT_GAP = re.compile(rf"[.{_DASHES}]")
+# The end of a decimal number's whole part: a digit and a dot.
+_WHOLE_PART = re.compile(r"\d\.\Z")
 # A digit joined to a number through a separator or a line break, on either side.
 _JOINED_BEFORE = re.compile(rf"\d(?:{_GAP}|{_BREAK})\Z")
 _JOINED_AFTER = re.compile(rf"(?:{_GAP}|{_BREAK})\d")
@@ -441,13 +454,19 @@ def _luhn(digits: str) -> bool:
 
 def _card_like(text: str, start: int, end: int) -> bool:
     """Whether ``text[start:end]``, a match of a card pattern, is a card number: a dot
-    is a separator only when every separator is a dot, there is at most one line
+    or a dash (not the plain hyphen) stands between its digits only when every
+    separator is that one character, there are at least three, and every group of
+    digits but the last has four (``4111.1111.1111.1111``); there is at most one line
     break, and with one the number is the whole run (no digit joined to it before or
-    after, so the rows of a table are never one wrapped number), and the checksum
+    after, so the rows of a table are never one wrapped number); and the checksum
     passes."""
     part = text[start:end]
     separators = re.sub(r"\d", "", part)
-    if "." in separators and separators.strip("."):
+    if _STRICT_GAP.search(separators) and (
+        len(set(separators)) != 1
+        or len(separators) < 3
+        or any(len(group) != 4 for group in _DIGITS.findall(part)[:-1])
+    ):
         return False
     breaks = len(_LINE_BREAK.findall(part))
     if breaks > 1:
@@ -489,6 +508,7 @@ def number_spans(text: str) -> list[tuple[int, int]]:
                 for group in _DIGITS.finditer(match.group())
             ]
             last = len(groups) - 1
+            all_dots = not re.sub(r"\d", "", match.group()).strip(".")
             for first, final in ((0, last - 1), (1, last), (1, last - 1)):
                 if first > final:
                     continue
@@ -497,6 +517,12 @@ def number_spans(text: str) -> list[tuple[int, int]]:
                 if not 13 <= digits <= 19 or _LINE_BREAK.search(text[start:end]):
                     continue
                 if first != final and groups[first][1] - groups[first][0] < 4:
+                    continue
+                # The kept part does not start in a decimal number's fraction, unless it
+                # is dotted groups itself and so is the whole match
+                # (``12.4111.1111.1111.1111``).
+                dotted = all_dots and "." in text[start:end]
+                if not dotted and _WHOLE_PART.search(text[max(0, start - 2) : start]):
                     continue
                 if _card_like(text, start, end):
                     places.append((start, end))

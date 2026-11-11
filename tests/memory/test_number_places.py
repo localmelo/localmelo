@@ -56,6 +56,17 @@ THIN = "\N{THIN SPACE}"
 NARROW = "\N{NARROW NO-BREAK SPACE}"
 IDEOGRAPHIC = "\N{IDEOGRAPHIC SPACE}"
 ZERO_WIDTH = "\N{ZERO WIDTH SPACE}"
+EN_DASH = "\N{EN DASH}"
+# The Unicode hyphens and dashes, and the minus sign, that stand between a card's
+# groups only when every separator is the same one.
+DASHES = [
+    "\N{HYPHEN}",
+    "\N{NON-BREAKING HYPHEN}",
+    "\N{FIGURE DASH}",
+    EN_DASH,
+    "\N{EM DASH}",
+    "\N{MINUS SIGN}",
+]
 # The Unicode spaces and invisible characters that may stand between two digits.
 UNICODE_GAPS = [
     "\u00a0",
@@ -90,6 +101,7 @@ def test_a_card_wrapped_over_two_lines_is_a_secret_and_is_cut() -> None:
         CARD,
         "4111-1111-1111-1111",
         "4111.1111.1111.1111",
+        EN_DASH.join(["4111", "1111", "1111", "1111"]),
         NBSP.join(["4111", "1111", "1111", "1111"]),
         THIN.join(["4111", "1111", "1111", "1111"]),
         NARROW.join(["4111", "1111", "1111", "1111"]),
@@ -118,6 +130,32 @@ def test_each_unicode_space_or_invisible_character_may_stand_between_groups() ->
         assert records.number_spans(f"pay {number} now") == [(4, 4 + len(number))], gap
 
 
+@pytest.mark.parametrize("dash", [*DASHES, "."])
+def test_a_dot_or_a_dash_separates_a_cards_digits_only_in_one_form(dash: str) -> None:
+    # Every separator the same, at least three, every group but the last of four
+    # digits. The digits of each text below pass the checksum.
+    number = dash.join(["4111", "1111", "1111", "1111"])
+    assert records.number_spans(f"pay {number} now") == [(4, 4 + len(number))]
+    for text in (
+        f"4111{dash}1111 1111 1111",  # beside a space
+        f"4111{dash}1111-1111-1111",  # beside a hyphen
+        dash.join(["41111", "1111", "1111", "111"]),  # a group of five
+        dash.join(["4", "111111111111111"]),  # one separator
+        dash.join(["3400", "000000", "00009"]),  # two separators
+    ):
+        assert records.number_spans(text) == [], text
+
+
+def test_a_card_does_not_start_in_a_decimal_numbers_fraction() -> None:
+    # The digits after "<digit>." are the fraction of a number, whatever the checksum
+    # says; a card written beside such a number is still found.
+    assert records.number_spans("Score 0.4111111111111111") == []
+    assert records.number_spans(f"Total 12.50 {CARD}") == [(12, 12 + len(CARD))]
+    # Inside a number of dotted groups the card is read without its first group.
+    dotted = "4111.1111.1111.1111"
+    assert records.number_spans(f"Order 12.{dotted}") == [(9, 9 + len(dotted))]
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -129,6 +167,16 @@ def test_each_unicode_space_or_invisible_character_may_stand_between_groups() ->
         "4111    1111    1111    1111",  # four spaces
         "4111.1111 1111 1111",  # a dot beside another separator
         "4111-1111.1111-1111",
+        f"4111{EN_DASH}1111 1111 1111",  # a dash beside a space
+        f"2010{EN_DASH}2011 2012{EN_DASH}2013",  # a row of year ranges
+        "3.14159265358979",  # a float: the digits after the point are no number
+        "0.8387461234567891",
+        "40.71277612345, -74.00597412345",  # a latitude and a longitude
+        "70.68089788244, 51.81896411662",  # the same, each number passing the checksum
+        "968.8489275020787",  # a float that passes the checksum
+        "2024.11.10.123456.7890",  # a build number: groups are not of four digits
+        "Score 0.4111111111111111",
+        "Score 0.4111 1111 1111 1111",
         "4111 1111 1111 1112",  # the checksum fails
         "4111 1111 1111",  # 12 digits
         "41111111111111111111",  # 20 digits in one run
@@ -256,6 +304,8 @@ def _repeated(unit: str) -> Callable[[int], str]:
         "1" * 40 + " ",
         "1\u200b",
         "1.2",
+        "1\u2013",
+        "1.4111.1111.1111.",
         "4111 1111 1111 1112 12\n",
         "1" + " " * 8 + "\r\n" + " " * 8,
     ],
@@ -354,36 +404,49 @@ def test_a_secret_next_to_a_number_does_not_hide_it() -> None:
 # ── The ordinary texts with long digit runs ──
 
 
+# A card read only as digits joined by one space or hyphen, wherever it starts.
+PLAIN_CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+
+
 def _plain_reading(text: str) -> bool:
     """What the rule answered for a text without a secret word when a card was read
     only as digits joined by one space or hyphen."""
     return (
         any(
             records._luhn(re.sub(r"\D", "", m.group()))
-            for m in records._CARD.finditer(text)
+            for m in PLAIN_CARD.finditer(text)
         )
         or records._ID_NUMBER.search(text) is not None
         or bool(redact_secrets(text)[1])
     )
 
 
-def test_ordinary_digit_runs_are_refused_as_they_were_except_one() -> None:
+def test_ordinary_digit_runs_are_refused_as_they_were_except_for_the_changes() -> None:
     rows = json.loads((DATA / "number_precision.json").read_text("utf-8"))
-    assert len(rows) == 69
+    assert len(rows) == 79
     texts = [row["text"] for row in rows]
     # "before" is the plain reading's answer, here as the code gives it.
     assert [row["before"] for row in rows] == [_plain_reading(t) for t in texts]
     after = [records.sensitive(t) for t in texts]
-    assert sum(row["before"] for row in rows) == 5
+    assert sum(row["before"] for row in rows) == 7
     assert sum(after) == 6
     changed = [
         t
         for t, now, row in zip(texts, after, rows, strict=True)
         if now != row["before"]
     ]
-    # A dot joins the years of a row, and the checksum passes.
-    assert changed == ["Seasons 2010.2011.2012.2013"]
-    assert all(now for now, row in zip(after, rows, strict=True) if row["before"])
+    assert changed == [
+        # A dot joins the years of a row, and the checksum passes.
+        "Seasons 2010.2011.2012.2013",
+        # The digits after a decimal point are no card.
+        "Score 0.4425935186026221",
+        "Score 0.46432068068045473",
+    ]
+    assert all(
+        now
+        for text, now, row in zip(texts, after, rows, strict=True)
+        if row["before"] and row["kind"] != "fraction"
+    )
 
 
 # ── A title is cleaned by its places ──
