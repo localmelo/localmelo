@@ -22,17 +22,19 @@ plainly a password given, nothing is cut out and nothing can be typed: the page
 is handed to the person, as before. A card number or a one-time code is never
 cut out or typed: those stay the person's. A value is read whole or not at all:
 a bare one is the whole run to the next blank, whatever quote characters or
-backticks it holds, without the punctuation, quotes and backticks at its end; a
-quoted one (a backtick pair is a quote pair) runs to its closing quote on its
-line, and an opening quote with no closing one on its line is no quote: the bare
-run after it is the value. The password word may be wrapped in quotes, backticks
-or emphasis (``"password": "x"``, ``**Password:** x``) and may end a longer name
-(``DB_PASSWORD=x``, ``dbPassword: x``), with a ``:`` or ``=`` joint only. One
-over :data:`MAX_CHARS` is cut out too, with :data:`SPENT` in its place and
-nothing kept (melo could not type it), and :data:`SPENT` is never read as a value
-where it stands. A shell's working folder is no password (``PWD=/tmp make``,
-``$PWD``, ``pwd /tmp``: see ``_folder``), nor is a file block's tag. The reading
-takes time in proportion to the text: it never reads a run of characters twice.
+backticks it holds, without the punctuation, quotes, backticks and closing
+brackets after a quote at its end; a quoted one (a backtick pair is a quote pair)
+runs to its first closing quote on its line, and an opening quote with no closing
+one on its line is no quote: the bare run after it is the value. A plain word
+with a question mark after it is a question, not a password. The password word
+may be wrapped in quotes, backticks or emphasis (``"password": "x"``,
+``**Password:** x``) and may end a longer name (``DB_PASSWORD=x``,
+``dbPassword: x``), with a ``:`` or ``=`` joint only. One over :data:`MAX_CHARS`
+is cut out too, with :data:`SPENT` in its place and nothing kept (melo could not
+type it), and :data:`SPENT` is never read as a value where it stands. A shell's
+working folder is no password (``PWD=/tmp make``, ``$PWD``, ``pwd /tmp``: see
+``_folder``), nor is a file block's tag. The reading takes time in proportion to
+the text: where a run or a quote ends is found once and kept (see :func:`_next`).
 
 Text that is kept and never typed from is read by two functions that only
 read: :func:`password_spans` says where a text gives a password, for memory to
@@ -186,7 +188,13 @@ def _folder(match: re.Match[str], text: str, start: int, stop: int) -> bool:
 
 def _trim(text: str, start: int, stop: int) -> int:
     """*stop* moved back over the marks at the end of the run ``text[start:stop]``
-    that do not count (:data:`_TRAILING`); it reads only those marks."""
+    that do not count (:data:`_TRAILING`, and closing brackets after a quote:
+    ``hunter22"}``); it reads only those marks."""
+    tail = stop
+    while tail > start and text[tail - 1] in _TRAILING + "}]":
+        tail -= 1
+    if (quote := _QUOTE.search(text, tail, stop)) is not None:
+        stop = quote.start()  # the brackets after it close what the quote began
     while stop > start and text[stop - 1] in _TRAILING:
         stop -= 1
     return stop
@@ -210,6 +218,12 @@ def _next(
     return at
 
 
+def _plain(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]`` is a plain word: letters only, where quote
+    characters ("isn't") and one question mark at its end ("again?") are no symbols."""
+    return text[start : end - (text[end - 1] in "?？")].translate(_NO_QUOTES).isalpha()
+
+
 def _fancy(match: re.Match[str]) -> bool:
     """Whether *match* reads a form the reader once left alone: a name that ends in
     the password word, marks around the joint, or a quote right after it."""
@@ -221,8 +235,8 @@ def _fancy(match: re.Match[str]) -> bool:
     )
 
 
-def _values(text: str) -> list[tuple[int, int, str]]:
-    """The passwords *text* gives, as ``(start, end, value)`` of the value, in order.
+def _values(text: str) -> list[tuple[int, int]]:
+    """The passwords *text* gives, as ``(start, end)`` of each value, in order.
 
     A value is a whole run: a bare one to the next blank (or the end), whatever
     quotes or backticks it holds, without the marks at its end; a quoted one to its
@@ -230,15 +244,17 @@ def _values(text: str) -> list[tuple[int, int, str]]:
     closing one on its line is no quote: the bare run after it is the value. A run
     over :data:`MAX_CHARS` is a value too (the caller keeps none of it).
 
-    A password word inside a bare run that holds a quote or a backtick, or that a
-    marked joint or a longer name began, is read for what follows it (a quote ended
-    such a run before, so the word after it was read): its value is cut out too. A
-    quoted value that starts inside such a run and reaches past it is one value with
-    the run, to the end of the run that holds its closing quote.
+    A password word inside a run (or a quoted value) is read for what follows it. A
+    value that starts inside the last run and reaches past it is one value with it,
+    from the run's first character (a quoted run starts at its quote, so no quote is
+    left to pair another way) to the end of the run that holds its end. So is a
+    quoted value inside a run that is no value by its shape (a plain word): read
+    again with a handle in the quote, such a run would look like a value.
     """
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[int, int]] = []
     memo: dict[re.Pattern[str], int] = {}
-    pos = covered = run = 0  # the last bare run is text[run:covered]
+    pos = covered = run = 0  # the last run read is text[run:covered]
+    hidden = False  # it is cut out (a value, or a handle that stands for one)
     while (match := _GIVEN.search(text, pos)) is not None:
         # Where the next look starts when nothing was read: after the word.
         pos = match.end("cue")
@@ -256,27 +272,26 @@ def _values(text: str) -> list[tuple[int, int, str]]:
             closing = _next(text, _CLOSING[opening], start, memo)
             if _next(text, _LINE, start, memo) < closing:
                 closing = len(text)  # not on the line: no quote
-        if closing < len(text):
-            if closing <= covered or closing - start < MIN_CHARS:
+        quoted = closing < len(text)
+        first = start - quoted  # a quoted value is read from its quote
+        inside = first < covered  # it starts in the last run
+        if quoted:
+            if closing - start < MIN_CHARS or (hidden and inside and closing < covered):
                 continue
-            end, after = closing, closing + 1
-            if start <= covered and found and found[-1][0] >= run:
-                # The quote stands in the run of the value before it: one value,
-                # to the end of the run that holds the closing quote.
-                covered = _next(text, _RUN_END, closing, memo)
-                start, end = found.pop()[0], _trim(text, closing, covered)
-                run = start
+            end, stop, after = closing, closing + 1, start
+            if inside:
+                stop = _next(text, _RUN_END, closing, memo)
+                end = _trim(text, closing, stop)
         else:
             stop = _next(text, _RUN_END, start, memo)
             if (
-                stop <= covered  # inside a value cut out before
+                stop <= covered  # inside the last run, which hides it or is no value
                 or stop - start < MIN_CHARS
                 or is_file_tag(text, start, stop)
                 or _folder(match, text, start, stop)
             ):
                 continue
-            inside = match.start("cue") < covered
-            end, run, covered = _trim(text, start, stop), start, stop
+            end = _trim(text, start, stop)
             # Read on from the value's start when a word inside it may be read.
             after = (
                 start
@@ -285,15 +300,22 @@ def _values(text: str) -> list[tuple[int, int, str]]:
             )
             # A bare word after "is" or a space is no password by its shape.
             if end - start < MIN_CHARS or (
-                match.group("strong") is None
-                and text[start:end].translate(_NO_QUOTES).isalpha()
+                match.group("strong") is None and _plain(text, start, end)
             ):
-                # A word inside the last value skips nothing it does not hide.
-                pos = pos if inside else after
+                # A word inside a value cut out reads nothing past it: it is gone
+                # once the value has its handle.
+                if not (hidden and match.start("cue") < covered):
+                    run, covered, hidden, pos = start, stop, False, after
                 continue
-        pos = after
+        if inside:
+            if found and found[-1][0] >= run:
+                found.pop()
+            start = run
+        else:
+            run = first
+        covered, hidden, pos = stop, True, after
         if not HANDLE.fullmatch(text, start, end):
-            found.append((start, end, text[start:end]))
+            found.append((start, end))
     return found
 
 
@@ -339,10 +361,10 @@ class Vault:
             return text
         with self._lock:
             handles = [
-                self._handle(value) if len(value) <= MAX_CHARS else SPENT
-                for _, _, value in spans
+                self._handle(text[start:end]) if end - start <= MAX_CHARS else SPENT
+                for start, end in spans
             ]
-        return _splice(text, [(start, end) for start, end, _ in spans], handles)
+        return _splice(text, spans, handles)
 
     def _handle(self, value: str) -> str:
         for handle, kept in self._values.items():
@@ -389,7 +411,7 @@ def password_spans(text: str) -> list[tuple[int, int]]:
     whole. It only reads: nothing is kept and no handle is made. A handle is not
     a value.
     """
-    return [(start, end) for start, end, _ in _values(text)]
+    return _values(text)
 
 
 def without_passwords(text: str) -> str:

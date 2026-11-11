@@ -142,7 +142,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
 - A text file you send on to a task, running or finished, is data too: only the words you typed with it count as yours.
 - A password longer than 128 characters is cut out whole, not in part; hiding a message twice gives the same text, and a shell's `PWD=/folder` or `pwd /folder` is no longer taken for a password.
-- A password with a quote in it, in backticks, after a quote that is never closed, or after `"password":`, `**Password:**` or `DB_PASSWORD=` is hidden whole.
+- A password with a quote in it, in backticks, after a quote that is never closed, or after `"password":`, `**Password:**` or `DB_PASSWORD=` is hidden; a value in quotes ends at its first closing quote, and a question such as `what's my password again?` is left alone.
 
 ### Scripts and API
 

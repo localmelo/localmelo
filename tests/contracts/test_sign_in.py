@@ -37,8 +37,19 @@ GIVEN = [
     ("password: `hunter22`", "password: `[password-1]`"),
     ('password: "hunter22', 'password: "[password-1]'),
     ('my password "hunter22', 'my password "[password-1]'),
-    ('password: "secret', 'password: "[password-1]'),
+    # ... and the rest of a later line is no part of it.
+    ('password: "hunter22\nthen "ok" here', 'password: "[password-1]\nthen "ok" here'),
     ('he wrote "my password is hunter22".', 'he wrote "my password is [password-1]".'),
+    # Closing brackets after a closing quote are no part of the value, any others are.
+    ('{"hint": "my password is hunter22"}', '{"hint": "my password is [password-1]"}'),
+    ('["pw: hunter22"]', '["pw: [password-1]"]'),
+    ("password: x1y2}", "password: [password-1]"),
+    # Emphasis after the colon is part of a value that begins with it.
+    ("password:**hunter22", "password:[password-1]"),
+    # One question mark ends a plain word, nothing else does.
+    ("my password is hunter??", "my password is [password-1]"),
+    ("my password hunter!", "my password [password-1]"),
+    ("password: hunter?", "password: [password-1]"),
     # The password word wrapped in quotes or emphasis, or the end of a longer name.
     ('{"password": "hunter22"}', '{"password": "[password-1]"}'),
     ("`password`: hunter22", "`password`: [password-1]"),
@@ -47,6 +58,16 @@ GIVEN = [
     ("db-password: hunter22", "db-password: [password-1]"),
     ('"dbPassword": "hunter22"', '"dbPassword": "[password-1]"'),
     ("userPwd：hunter22", "userPwd：[password-1]"),
+    # A password word inside a quoted value is read for its own value: a quoted value
+    # that starts there and reaches past the first one is one value with it, from the
+    # first quote, so no quote is left to pair differently.
+    (
+        '"password": "abcd1234 then pw="hunter22" ok',
+        '"password": [password-1]" ok',
+    ),
+    # A run that is no value by its shape (a plain word) holds the words of a value
+    # that is read the same way: the run is one value with it.
+    ('Pwd 我\'pw是"abcd" x', 'Pwd [password-1]" x'),
 ]
 NOT_GIVEN = [
     "I forgot my password",
@@ -67,6 +88,9 @@ NOT_GIVEN = [
     "keypassword: hunter22",
     "my_password is hunter22",  # only a ":" or "=" joint
     "OLDPWD=/tmp",
+    # A question is no password.
+    "what's my password again?",
+    "密码是对的吗？",
 ]
 
 
@@ -193,6 +217,8 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         "dbPw:\npassword PASSWORD\tx1y2z3",
         # A quoted value that starts inside a run and reaches past it.
         'PWD=/tmpPWD="\t = "PASSWORD',
+        # A run that is no value holds a word whose value is quoted.
+        'Pwd 口令是"hunter 22"',
     ],
 )
 def test_hiding_twice_gives_the_same_text(text: str) -> None:
@@ -338,6 +364,8 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         ("pw:</attachment>" * 20_000, 0),  # every word finds the same run's end
         ("pw:" + "“" * 300_000, 0),  # a run of quote characters after a cue
         ('pw:ab"' * 50_000, 1),  # one run, a quote and a word in every part of it
+        # Values that merge, again and again: no value is copied for each merge.
+        ("pw:a" + '"pw:"bcde f' * 55_000, 1),
     ],
     ids=[
         "openers",
@@ -347,6 +375,7 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         "tags",
         "quotes",
         "run",
+        "merges",
     ],
 )
 def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) -> None:
