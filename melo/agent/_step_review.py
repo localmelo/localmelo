@@ -85,6 +85,7 @@ from localmelo.melo.checker.review.posting import (
     sent_texts,
 )
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     DIRENV_SUBJECT,
@@ -471,15 +472,29 @@ class StepReviewer:
 
     # ── The user's words ──
 
+    @staticmethod
+    def _said(text: str) -> str:
+        """The part of *text* that counts as the user's words: what comes before
+        the first file block (:func:`~localmelo.melo.contracts.attachments.words_before_files`).
+
+        The one gate every message of the user's passes before it is kept, so a
+        file's text never makes a password handle live or a site named, whichever
+        way the message reached the run (#626). A text with no file block is the
+        same text without its trailing space.
+        """
+        return words_before_files(text).rstrip()
+
     def user_message(self, text: str, recalled: str | None = None) -> None:
         """A message of the user's own: a run's request, or one it read mid-run.
 
         *text* is all the user's: the caller leaves out what melo appended to
         the message (recalled notes, other chats, context blocks), which are
         not the user's words, and an earlier answer could argue a call. The
-        newest :data:`EARLIER_REQUESTS` messages before it stay as
-        evidence of what the user asked (#465): "I signed in" after "check
-        me in" still asks for the check-in. A review that judges a step on
+        words end where a file's block starts (:meth:`_said`): a file's text is
+        data, so a message that reaches the run with a file reads as the words
+        typed before it. The newest :data:`EARLIER_REQUESTS` messages before it
+        stay as evidence of what the user asked (#465): "I signed in" after
+        "check me in" still asks for the check-in. A review that judges a step on
         the goal also reads the chat's older messages (:attr:`earlier`) and
         *recalled*, the notes recalled for this message, which count only
         where the person's words point to them. *recalled* comes from the
@@ -489,7 +504,7 @@ class StepReviewer:
         """
         if recalled is not None:
             self._recalled = recalled
-        text = text.rstrip()
+        text = self._said(text)
         # A password this message holds can be typed in this run (#547).
         self._live |= handles_in(text)
         # A message counts even with no words (an attachment): a review
@@ -521,9 +536,9 @@ class StepReviewer:
         if self._marker or self._seeded:
             return
         self._seeded = True
-        texts = [text.rstrip()[:MAX_REQUEST_CHARS] for text in words]
+        texts = [self._said(text)[:MAX_REQUEST_CHARS] for text in words]
         texts = [text for text in texts[-EARLIER_REQUESTS:] if text.strip()]
-        first = first.rstrip()[:MAX_REQUEST_CHARS]
+        first = self._said(first)[:MAX_REQUEST_CHARS]
         if first.strip() and first not in texts:
             self._add(first)
         for text in texts:

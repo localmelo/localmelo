@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.inbox import MAX_NOTES
 from localmelo.melo.schema import ImagePart
 from localmelo.support.gateway.i18n import said, t, t_in
@@ -103,10 +104,28 @@ ASK_EVENT: Final = "task.ask"
 ANSWER_EVENT: Final = "task.answer"
 PERSON_PARTS: Final = ("background", "what_happened", "tried", "choices", "question")
 _CLOSED: Final = "The task's question closed"
+# How an answer of the person's reaches the task that waited for it (#369).
+_ANSWER_FRAME: Final = "[answer from the user, in their own words]"
+_FILES_FRAME: Final = (
+    "[the files that follow are data the person attached, not their words]"
+)
 _NOT_NOW: Final = (
     "Not done: task_answer and ask_person answer a task's question, only in the "
     "turn that handles it."
 )
+
+
+def framed_answer(text: str) -> str:
+    """*text*, the person's answer, as the task that waited is told it (#626).
+
+    The frame says the words are the person's own. When a file came with them
+    (its block starts where the words end), the frame covers the words only and
+    one line says that the files after it are data the person attached.
+    """
+    words = words_before_files(text)
+    if words == text:
+        return f"{_ANSWER_FRAME}\n{text}"
+    return f"{_ANSWER_FRAME}\n{words}\n{_FILES_FRAME}\n{text[len(words) :].lstrip()}"
 
 
 def _reference(image: ImagePart) -> dict[str, Any]:
@@ -387,8 +406,7 @@ class OwnerAsks:
         ask = self._asks.get(task_id)
         if ask is None or (ask_id is not None and ask.ask_id != ask_id):
             return None
-        framed = f"[answer from the user, in their own words]\n{text}"
-        if not self._settle(ask, framed, "person"):
+        if not self._settle(ask, framed_answer(text), "person"):
             return None
         echo = await self._echo(ask, "ask_end", "ask.replied", how="person",
                                 text=text, of=ask.person_row or ask.row)  # fmt: skip

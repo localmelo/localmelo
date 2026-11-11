@@ -32,6 +32,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     Withdrawal,
 )
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import TASK_EXTENSIONS, ImagePart, Message
@@ -58,11 +59,7 @@ from localmelo.support.sessions.approvals import (
     ChatPolicy,
     chat_mode,
 )
-from localmelo.support.sessions.attachments import (
-    TextAttachment,
-    compose_user_text,
-    words_before_files,
-)
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.grants import (
     STORED_KINDS,
     Grant,

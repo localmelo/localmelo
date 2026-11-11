@@ -56,12 +56,16 @@ class ToolOutput:
 
     Callables may still return a plain ``str``. ``is_error=True`` marks a
     failure the tool itself reported (an MCP result with ``isError``); the
-    text then becomes the outcome's error.
+    text then becomes the outcome's error. ``no_more_calls=True`` says that the
+    tool takes no more calls in this run (a note refused for the last time): the
+    agent stops offering it, and a later call to it does not run. Only the
+    tool's own code sets it, never a reader of its text.
     """
 
     text: str = ""
     images: list[ImagePart] = field(default_factory=list)
     is_error: bool = False
+    no_more_calls: bool = False
 
 
 @dataclass
@@ -93,6 +97,7 @@ class ExecutionOutcome:
     artifacts: list[ArtifactMeta] = field(default_factory=list)
     logs: list[LogMeta] = field(default_factory=list)
     images: list[ImagePart] = field(default_factory=list)
+    no_more_calls: bool = False
 
     def to_tool_result(self) -> ToolResult:
         return ToolResult(
@@ -101,4 +106,5 @@ class ExecutionOutcome:
             error=self.error,
             duration_ms=self.duration_ms,
             images=list(self.images),
+            no_more_calls=self.no_more_calls,
         )

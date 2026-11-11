@@ -43,6 +43,7 @@ from typing import Any, Final
 from localmelo.melo.agent._brief_aids import cue
 from localmelo.melo.agent._checkpoint import standing
 from localmelo.melo.checker.redaction import redact_secrets, redacted
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.sign_in import spent
 from localmelo.melo.contracts.task_files import written_paths
 from localmelo.melo.schema import (
@@ -195,11 +196,15 @@ class Handoff:
         wrote it (a password in it included): the newest note. With *words*,
         the person's own words of the request instead of the request. Within
         ``MAX_OBJECTIVE_CHARS``: the oldest messages go first, never the request.
+        A message that came with a file keeps the file in the request; its words
+        end where the file starts, one message at a time (#626).
         """
         head = spent((self.words or words_of(self.request)) if words else self.request)
         notes = list(self.notes)
         if live and notes:
             notes[-1] = live
+        if words:
+            notes = [said for said in map(words_before_files, notes) if said.strip()]
         kept = _newest(notes, MAX_OBJECTIVE_CHARS - len(head) - 2)
         return "\n\n".join([head, *kept])
 

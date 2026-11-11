@@ -56,6 +56,7 @@ import aiosqlite
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.events import (
     EVENT_FIELDS,
     EVENT_SCHEMA_VERSION,
@@ -82,7 +83,6 @@ from localmelo.support.sessions.attachments import (
     decode_attachments,
     encode_attachments,
     is_stand_in,
-    words_before_files,
 )
 from localmelo.support.sessions.display import home_label, short_title
 from localmelo.support.sessions.submissions import (

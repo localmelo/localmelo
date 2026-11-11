@@ -69,6 +69,10 @@ def read(text: str, now: datetime = NOW) -> tuple[str, str, str, str]:
             "remind me about the meeting on 2026-11-02 at 15:00",
             ("the meeting", "2026-11-02", "15:00"),
         ),
+        (
+            "remind me of the dentist tomorrow at 3pm",
+            ("the dentist", "2026-10-29", "15:00"),
+        ),
         ("remind me to call at 9 on the 30th of nov", ("call", "2026-11-30", "09:00")),
         # 12 am and 12 pm, 24-hour times, a bare small hour.
         ("remind me at 12 am to sleep", ("sleep", "2026-10-29", "00:00")),
@@ -222,6 +226,8 @@ def test_a_time_more_than_a_year_ahead_is_far() -> None:
         "hello",
         "what time is it?",
         "remind me what the report said",
+        "can you remind me of the website that had free exercises?",
+        "remind me about the budget",  # of/about with no time: a question
         "remind me tomorrow at 9",  # no work left
         "提醒我",
         "我记得明天有会",  # a weak cue is only at the start of the clause
