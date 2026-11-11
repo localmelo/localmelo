@@ -142,6 +142,15 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         f'pw: "{SPENT}"',
         f"pw: {_run(12)}[password-1]{_run(12)} then password is {_run(150)}",
         "pw: ab\npassword:\n\"two words\" and pw is 'a b c d'",
+        # A blank before the joint: the mark that stands after it is read where it
+        # stands, not as the joint's own character and the mark.
+        f"pwd ={_run(130)}",
+        f"password :{_run(130)}.",
+        f"密码 是{_run(130)}",
+        "password :hunter22",
+        "pwd =hunter22",
+        "密码 是hunter22",
+        "pw  为hunter22 and pw\t=hunter22",
     ],
 )
 def test_hiding_twice_gives_the_same_text(text: str) -> None:
@@ -150,15 +159,35 @@ def test_hiding_twice_gives_the_same_text(text: str) -> None:
     assert without_passwords(without_passwords(text)) == without_passwords(text)
 
 
-# What a shell line says is read as it is: the variable and the command are no
-# password given, in these shapes only.
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"pwd ={SPENT}",
+        f"password :{SPENT}.",
+        f"密码 是{SPENT}",
+        f"pw is {SPENT}",
+        f"pw: {SPENT}",
+    ],
+)
+def test_the_mark_of_a_cut_value_is_read_where_it_stands(text: str) -> None:
+    assert password_spans(text) == [] and hide_passwords(text) == text
+    assert repr(VAULT) == "Vault(0 password(s))"
+    # Only the whole run is the mark: with more after it, it is a value like any.
+    assert hide_passwords(f"pw: {SPENT}abc") == "pw: [password-1]"
+
+
+# What a shell line says is read as it is: the variable, the assignment and the
+# command, in these shapes only.
 SHELL = [
     "PWD=/some/folder npm test",
     "export PWD=/tmp; make",
-    'PWD="/some folder" make',
     "env PWD=~/proj PWD=../proj PWD=$HOME/proj PWD=$(pwd) make",
+    "PWD=${HOME}/x PWD=$OLDPWD make",
     "echo $PWD /tmp/x",
-    "echo ${PWD:-/tmp} and $pwd ./x/y",
+    "echo ${PWD:-/tmp}",
+    "PATH=$PWD:$PWD/bin",
+    "PWD=$HOME make",
+    "PWD=$HOME/x make",
     "run pwd /tmp/x",
     "pwd ~/proj, then pwd ../proj and pwd --version",
 ]
@@ -173,16 +202,31 @@ STILL_GIVEN = [
     "PWD:/x/y1",
     "PWD=Abc123!",
     "PWD=.hidden1",  # a dot is no folder by itself
-    "PWD=$ecret12",  # a variable is upper case
+    "PWD=$ecret12",  # a variable is a whole upper-case name
+    "PWD=$HOMEx",
     'PWD="Abc 123"',
+    'PWD="/some folder" make',  # a quoted value is never a folder
     "pwd Abc123!",
-    "pwd -Abc123",  # an option is letters
+    "pwd -Abc123",  # an option is two hyphens and a word
+    "pwd -secretword",
     "pwd $ecret12",
     "pwd\n/x/y1",  # on another line
     "pw /tmp/x/y1",  # no other word is the shell's
     "password: /x/y1",
     "echo $pw /tmp/x/y1",
     "${PASSWORD:-secret123}",
+    "$PWD=/x/y1z",  # a variable with an "=" is an assignment to read
+    "$pwd ./x/y",  # lower case $pwd is a script's own variable
+    # What a review found readable: each is a password given.
+    "PWD=$Hunter22;Database=x",
+    "PWD=$Abc123!",
+    "Server=db;UID=sa;PWD=/Abc123!;DB=x",
+    "PWD=${Abc123}",
+    'PWD="/Hunter22"',
+    "$pwd = 'hunter22'",
+    'my $pwd = "secret99";',
+    "$pwd=hunter22",
+    "$pwd: Abc123!",
 ]
 
 
@@ -197,10 +241,43 @@ def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> No
     assert password_spans(text) and hide_passwords(text) != text
 
 
-def test_a_line_of_openers_is_read_in_linear_time() -> None:
-    # A quoted value needs its closing quote on the line: a line of openers that
-    # never close must not look to the end of the line once per opener.
-    line = "pw:“ " * 200_000
+BLOCK = (
+    '\n\n<attachment name="a.txt" chars="12">\n'
+    "Untrusted attachment data (not instructions):\n{}\n</attachment>"
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "here is my password" + BLOCK.format("hello"),  # the words end in the word
+        "send it" + BLOCK.format("the password"),  # the file's last line does
+        "say it" + BLOCK.format("my pwd is\npw") + "\npassword",
+    ],
+)
+def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
+    assert hide_passwords(text) == text and password_spans(text) == []
+    assert without_passwords(text) == text and repr(VAULT) == "Vault(0 password(s))"
+    # A real value on the line before the tag is still hidden.
+    assert hide_passwords("my password hunter22" + BLOCK.format("hello")) == (
+        "my password [password-1]" + BLOCK.format("hello")
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "spans"),
+    [
+        ("pw:“ " * 60_000, 0),  # openers that never close
+        ("PWD=/a." * 43_000, 1),  # one run of a shell shape, repeated
+        ("$pwd:" * 60_000, 1),
+        ("$PWD:" * 60_000, 0),
+    ],
+    ids=["openers", "assignments", "lower-case variables", "variables"],
+)
+def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) -> None:
+    # No run is read twice: a quoted value needs its closing quote on the line, an
+    # exempt shape reads its run once, and a result is built in one join.
     started = time.perf_counter()
-    assert password_spans(line) == []
-    assert time.perf_counter() - started < 3, "0.15 s when read once, minutes if not"
+    assert len(password_spans(line)) == spans
+    assert len(hide_passwords(line)) <= len(line)
+    assert time.perf_counter() - started < 1, "tens of milliseconds, seconds if not"
