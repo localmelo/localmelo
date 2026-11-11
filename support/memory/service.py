@@ -1869,8 +1869,9 @@ class ChatMemory:
         self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
     ) -> Admission | str:
         """Where the support of *note* is, at the note gate's level, or why it is
-        refused (a message for the model). A note that needs a page and a result
-        together stays tagged ``result``, the least trusted source it needs.
+        refused (a message for the model). At the default level a note that needs a
+        page and a result together stays tagged ``result``, the least trusted source
+        it needs.
 
         An instruction to the assistant is refused first. Then the sources, most
         trusted first: what the user typed (its words), a page or file the user
