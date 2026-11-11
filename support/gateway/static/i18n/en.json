@@ -310,7 +310,7 @@
   "approval.typeCaption": "Typing on a web page",
   "approval.typeContent": "melo wants to type the text below on {site} in Safari's automation window. {never} Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
   "approval.typeContentChrome": "melo wants to type the text below on {site} in melo's browser, which runs in the background. {never} Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.",
-  "approval.typeGiven": "The text below stands for that password. It never types card numbers or one-time codes.",
+  "approval.typeGiven": "The text stands for that password. melo never types card numbers or one-time codes.",
   "approval.typeGivenTitle": "Type the password you gave on {site}?",
   "approval.typeInto": "Type into “{label}” on {site}?",
   "approval.typeIntoKind": "Type into a {kind} on {site}?",

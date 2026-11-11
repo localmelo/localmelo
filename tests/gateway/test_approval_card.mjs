@@ -386,7 +386,7 @@ test('a form send and typing show what goes, say when the page decides, and offe
   const titled = (field, id, on) => findNode(drawn('chrome', field, id, on), (node) => node.className === 'approval-title').textContent;
   const send = 'Once the text is in the page, the page may send it on its own: melo asks before it presses send, but cannot stop every send the page makes.';
   const never = 'It never types passwords, card numbers or one-time codes.';
-  const gave = 'The text below stands for that password. It never types card numbers or one-time codes.';
+  const gave = 'The text stands for that password. melo never types card numbers or one-time codes.';
   assert.equal(sentence(undefined, undefined, 't1'), `melo wants to type the text below on example.com in Safari's automation window. ${never} ${send}`);
   assert.equal(sentence('chrome', undefined, 't2'), `melo wants to type the text below on example.com in melo's browser, which runs in the background. ${never} ${send}`);
   assert.equal(sentence('chrome', 'search', 't3'), sentence('chrome', undefined, 't2'), 'a search box changes no word');

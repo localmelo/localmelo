@@ -568,7 +568,7 @@ def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> No
     assert shown.title == "Type the password you gave on example.com?"
     given = " ".join(line for _, line in shown.body)
     assert "The text above stands for that password." in given
-    assert "never types card numbers or one-time codes" in given
+    assert "melo never types card numbers or one-time codes" in given
     assert "never types passwords" not in given
     assert "the page may send it on its own" in given
 

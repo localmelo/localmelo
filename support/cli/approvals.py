@@ -419,7 +419,7 @@ def _tool_panel(
             said = f"melo wants to type this text on {site} {window}:"
             note = (
                 (
-                    "The text above stands for that password. It never types card "
+                    "The text above stands for that password. melo never types card "
                     "numbers or one-time codes."
                     if arguments.get("field") == "password"
                     else "It never types passwords, card numbers or one-time codes."
