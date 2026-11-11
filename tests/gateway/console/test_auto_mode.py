@@ -37,7 +37,7 @@ from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, typed_words
 from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import ActsOnSite, FakeModel, verdict
 from localmelo.tests.sessions.helpers import started_agent
@@ -483,8 +483,16 @@ async def test_a_card_its_viewer_leaves_or_nobody_answers_is_declined(
 
 @pytest.mark.asyncio
 async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    runs: list[tuple[str, str | None]] = []
+    run_task = Agent.run_task
+
+    async def spy(self: Agent, query: str, **kwargs: Any) -> Any:
+        runs.append((query, kwargs.get("user_words")))
+        return await run_task(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", spy)
     plans = [
         step(KEYS),
         _answer("I left .git as it is."),
@@ -515,6 +523,12 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
         )
         await wait_turn(client, sid)
         assert ran.codes == [KEYS]
+        # The sentence is melo's: the model gets it, but the stored turn is composed,
+        # no reader takes it for words the person typed, and the run counts none.
+        assert body["turn"]["composed"] is True
+        assert runs[-1] == (body["turn"]["user_text"], "")
+        first, sent = await console.store.list_turns(sid)
+        assert (typed_words(first), typed_words(sent)) == ("Tidy the notes", "")
         allowed = (await approvals(console, sid))[1]
         assert (allowed["origin"], allowed["allowance"]) == ("user", "once")
         session = (await client.get(f"/api/sessions/{sid}")).json()["session"]

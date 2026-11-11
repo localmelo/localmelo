@@ -581,9 +581,10 @@ class SessionRunner:
         whose text the person did not send though it has none (a task
         another agent, a channel or melo made): the run counts no message of
         theirs in it. *composed* marks a turn of the person's whose *text*
-        melo wrote (a stop card): stored as ``TurnInfo.composed``, as is every
-        turn not *from_person*, so that memory reads no words of it; it needs
-        *words*. *images* are the pictures the
+        melo wrote (a stop card, the go-ahead of Allow once): stored as
+        ``TurnInfo.composed``, as is every turn not *from_person*, so that
+        memory reads no words of it; it needs *words* (``""`` for a turn with
+        none: the run counts no words of theirs in it). *images* are the pictures the
         person added: stored with the turn and sent to the model with *text*
         (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
@@ -636,8 +637,8 @@ class SessionRunner:
         composed: bool = False,
     ) -> _Turn:
         self._check_open()
-        if composed and from_person and not words:
-            # The run would read the empty typed text as the person's words.
+        if composed and from_person and words is None:
+            # The run would read the composed text as the person's words.
             raise ValueError("a composed turn of the person's needs their words")
         if images and self._worker:
             raise ValueError("worker sessions do not support pictures")
