@@ -2672,7 +2672,10 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
             "chart it",
         ),
         # A title is not words: the row's text is, marked or not.
-        ({"user_text": "I live in Lisbon.", "typed_text": "Trip plans"}, "I live in Lisbon."),
+        (
+            {"user_text": "I live in Lisbon.", "typed_text": "Trip plans"},
+            "I live in Lisbon.",
+        ),
         (
             {
                 "user_text": "Summarize the long report about the quarter's sales in detail",

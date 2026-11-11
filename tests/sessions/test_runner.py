@@ -522,7 +522,8 @@ async def test_a_title_is_not_read_as_the_words_of_the_turn(tmp_path: Path) -> N
     """Only a turn begun with its words apart is marked; a title alone is no words (#626)."""
     s = await setup(tmp_path, [answer("ok"), answer("ok")])
     await s.runner.run_turn("I live in Lisbon.", title="Trip plans")
-    await s.runner.run_turn("Install matplotlib and chart", words="chart it")
+    await s.runner.start_turn("Install matplotlib and chart", words="chart it")
+    await s.runner.wait()
     stored = await s.store.list_turns(s.runner.session_id or "")
     assert [(t.typed_text, t.typed_apart, typed_words(t)) for t in stored] == [
         ("Trip plans", False, "I live in Lisbon."),
