@@ -68,7 +68,7 @@ More about reflections:
 
 ### Ending with an answer
 
-- A run that stops (`gate_stopped` or `budget_exhausted`) with no answer is asked once more, without tools, for its final answer from what it gathered; `unknown` is allowed.
+- A run that stops (`gate_stopped`, `budget_exhausted` or `stuck`) with no answer is asked once more, without tools, for its final answer from what it gathered; `unknown` is allowed (a `stuck` run is asked to answer what it can in plain words).
 - When the task asks for a closing line, such as `FINAL ANSWER: ...`, and the answer lacks it, one more request asks for that line and adds it after the answer.
 - A task that names no closing line is left as it is, and a request that fails leaves the answer as it was.
 - `-X agent.answer_on_stop=off` turns both requests off.

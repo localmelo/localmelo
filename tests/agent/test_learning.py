@@ -161,6 +161,7 @@ async def test_other_statuses_add_only_the_episode() -> None:
         ScriptedLLM([read("/a", f"call_{i}") for i in range(3)]),
         attempt_policy="none",
         max_steps=3,
+        answer_on_stop=False,
     )
     result = await agent.run_task(QUERY)
     assert result.status in ("stuck", "budget_exhausted")
