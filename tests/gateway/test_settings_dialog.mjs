@@ -1301,7 +1301,7 @@ test('the phone\'s list says the state of each section on its second line', asyn
   await h.open();
   await flush();
   assert.deepEqual(['model', 'memory', 'chats', 'permissions', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
-    ['Not reachable · old', 'On · words, helped by your models', 'ws', '', 'Check-in off', 'System theme'], 'Permissions says its count once the list was read');
+    ['Not reachable · old', 'On · words and meaning', 'ws', '', 'Check-in off', 'System theme'], 'Permissions says its count once the list was read');
 });
 
 test('checked words read naturally', () => {
