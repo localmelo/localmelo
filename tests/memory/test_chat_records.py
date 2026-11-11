@@ -86,6 +86,30 @@ STATEMENTS = [
             ["Your piano teacher is Mr. Bellamy."],
             ["about"],
         ),
+        # The note is the fact, not the ask: it does not open with the marker.
+        (
+            "Remember that I'm allergic to peanuts.",
+            ["You are allergic to peanuts."],
+            ["about"],
+        ),
+        (
+            "Please remember that I'm allergic to peanuts.",
+            ["You are allergic to peanuts."],
+            ["about"],
+        ),
+        (
+            "Remember, my sister Ana lives in Leeds and her birthday is May 3.",
+            ["Your sister Ana lives in Leeds and her birthday is May 3."],
+            ["about"],
+        ),
+        (
+            "Please remember that the launch code is NECTAR-42.",
+            ["The launch code is NECTAR-42."],
+            ["about"],
+        ),
+        ("Don't forget that I work at Acme now.", ["You work at Acme now."], ["about"]),
+        ("记住我对花生过敏。", ["你对花生过敏。"], ["about"]),
+        ("别忘了我姐姐住在利兹。", ["你姐姐住在利兹。"], ["about"]),
     ],
 )
 def test_a_request_to_remember_becomes_a_second_person_record_in_english_and_chinese(
@@ -163,6 +187,21 @@ def test_a_plain_statement_is_not_kept_by_rule(
     ],
 )
 def test_questions_to_dos_meta_and_long_pastes_are_not_records(typed: str) -> None:
+    assert records.candidates(typed) == ([], False)
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "Please remember where I work now and the years of my degree, then write it.",
+        "Don't forget her email and where she works, I'll need both before the meeting.",
+        "Remember that she prefers email.",
+        "Remember where I parked: level 3, row B.",
+        "From now on, answer in Chinese.",
+        "记住她的邮箱和她在哪里工作。",
+    ],
+)
+def test_a_request_that_points_elsewhere_leaves_no_record(typed: str) -> None:
     assert records.candidates(typed) == ([], False)
 
 
@@ -491,6 +530,194 @@ async def test_different_preferences_are_both_kept(
     await _say(memory, store, sid, "Remember that I prefer Python.")
     await _say(memory, store, sid, "Remember that I prefer dark mode.")
     assert len(await memory.records()) == 2
+
+
+# ── a note from a page, a file or a result replaces only a note of that kind ──
+
+OWN_SIGNALS = ["user_statement", "user_request"]
+BOB, ALICE, CARLA = (
+    "Your manager is Bob.",
+    "Your manager is Alice Wu.",
+    "Your manager is Carla Reyes.",
+)
+
+
+async def _put(
+    memory: ChatMemory, text: str, signal: str, topic: str = "people", **provenance: str
+) -> records.Written:
+    """Write one note of the people topic (or *topic*) as *signal* admits it;
+    *provenance* adds to its source (``source="pointed"``, as a note from a page
+    has it)."""
+    where = {"session_id": "s1", "turn": 1, "chat": "Main chat", **provenance}
+    (written,) = await records.write(
+        memory.stores()[0],
+        [records.Candidate(text, "", topic, signal)],
+        [None],
+        source=where,
+        embed_model="",
+    )
+    return written
+
+
+async def _texts(memory: ChatMemory) -> list[str]:
+    return sorted(entry.text for entry in await memory.records())
+
+
+@pytest.mark.parametrize("how", ["pointed", "result"])
+@pytest.mark.parametrize("own", OWN_SIGNALS)
+async def test_a_note_from_a_page_or_a_result_stands_beside_the_persons_own_note(
+    memory: ChatMemory, own: str, how: str
+) -> None:
+    mine = await _put(memory, BOB, own)
+    other = await _put(memory, ALICE, "outcome", source=how)
+    assert other.replaced is None and other.id != mine.id
+    assert await _texts(memory) == [ALICE, BOB]
+
+
+async def test_the_persons_own_note_replaces_a_note_from_a_page(
+    memory: ChatMemory,
+) -> None:
+    page = await _put(memory, ALICE, "outcome", source="pointed")
+    mine = await _put(memory, BOB, "user_statement")
+    assert mine.replaced == page.id
+    assert await _texts(memory) == [BOB]
+
+
+@pytest.mark.parametrize("first", ["pointed", "result"])
+async def test_a_note_from_a_page_replaces_an_older_note_from_a_page_or_a_result(
+    memory: ChatMemory, first: str
+) -> None:
+    old = await _put(memory, ALICE, "outcome", source=first)
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [CARLA]
+
+
+async def test_a_note_from_a_page_replaces_the_page_note_that_stands_beside_the_typed_one(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    old = await _put(memory, ALICE, "outcome", source="pointed")
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [BOB, CARLA]
+
+
+async def test_the_same_text_from_a_page_is_not_written_beside_the_persons_own(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    assert (
+        await records.write(
+            memory.stores()[0],
+            [records.Candidate(BOB, "", "people", "outcome")],
+            [None],
+            source={"session_id": "s1", "turn": 2, "source": "pointed"},
+            embed_model="",
+        )
+        == []
+    )
+    assert await _texts(memory) == [BOB]
+
+
+async def test_a_note_sleep_writes_still_replaces_the_persons_own_note(
+    memory: ChatMemory,
+) -> None:
+    old = await _put(memory, BOB, "user_statement")
+    new = await _put(memory, ALICE, "sleep", source="sleep")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [ALICE]
+
+
+async def test_only_a_note_the_persons_own_words_made_is_theirs(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    await _put(memory, "You like tea.", "user_request")
+    await _put(memory, "Your lab is in Leeds.", "outcome", source="pointed")
+    await _put(memory, "Your desk is D4.", "outcome", source="result")
+    await _put(memory, "You run on Fridays.", "user_statement", source="pointed")
+    await _put(memory, "Your team is Atlas.", "sleep", source="sleep")
+    mine = {e.text: records.by_person(e) for e in await memory.records()}
+    assert mine == {
+        BOB: True,
+        "You like tea.": True,
+        "Your lab is in Leeds.": False,
+        "Your desk is D4.": False,
+        "You run on Fridays.": False,
+        "Your team is Atlas.": False,
+    }
+
+
+async def test_a_note_from_a_page_does_not_replace_an_imported_note(
+    memory: ChatMemory, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "CLAUDE.md").write_text(
+        "## Me\n- My weekly sync is on Wednesday.\n", encoding="utf-8"
+    )
+    plan = await memory.import_scan(home=home)
+    await memory.import_apply(plan, [s["id"] for s in plan.sources])
+    (imported,) = await memory.records()
+    assert imported.admitted_by == "import"
+    page = await _put(
+        memory, "Your weekly sync is on Friday.", "outcome", "about", source="pointed"
+    )
+    assert page.replaced is None
+    assert await _texts(memory) == [
+        "Your weekly sync is on Friday.",
+        "Your weekly sync is on Wednesday.",
+    ]
+
+
+async def test_a_note_kept_before_sources_were_written_is_replaced_by_a_page_note(
+    memory: ChatMemory,
+) -> None:
+    old = await _put(memory, ALICE, "outcome")
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [CARLA]
+
+
+@pytest.mark.parametrize(
+    ("signal", "provenance", "kept"),
+    [
+        ("user_statement", {}, True),
+        ("user_request", {}, True),
+        ("sleep", {"source": "sleep"}, True),
+        ("import", {"source": "import"}, True),
+        ("outcome", {}, False),
+        ("outcome", {"source": "pointed"}, False),
+        ("outcome", {"source": "result"}, False),
+        ("outcome", {"source": "inferred"}, False),
+        ("user_statement", {"source": "pointed"}, False),
+    ],
+)
+async def test_a_note_is_kept_from_replacement_unless_it_is_from_material(
+    memory: ChatMemory, signal: str, provenance: dict[str, str], kept: bool
+) -> None:
+    await _put(memory, ALICE, signal, **provenance)
+    (entry,) = await memory.records()
+    assert records.kept_from_replacement(entry) is kept
+    assert records.standing(entry) == (records.OWN if kept else records.TAKEN)
+    # An edited note is kept, whatever it came from; one from material stands
+    # below the person's own all the same.
+    edited = await memory.edit_record(entry.id, BOB)
+    assert edited is not None and records.kept_from_replacement(edited)
+    assert records.standing(edited) == (records.OWN if kept else records.REWORDED)
+
+
+async def test_a_note_the_person_edited_is_kept_from_a_page_s_replacement_but_is_not_their_own_words(
+    memory: ChatMemory,
+) -> None:
+    page = await _put(memory, ALICE, "outcome", source="pointed")
+    edited = await memory.edit_record(page.id, BOB)
+    assert edited is not None
+    assert records.kept_from_replacement(edited) and not records.by_person(edited)
+    again = await _put(memory, ALICE, "outcome", source="pointed")
+    assert again.replaced is None
+    assert await _texts(memory) == [ALICE, BOB]
 
 
 async def test_a_delete_blanks_the_decision_text_and_logs_the_delete(

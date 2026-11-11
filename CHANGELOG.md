@@ -14,6 +14,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A finished task's answer comes back to the chat that started it.
 - Auto mode: choose Ask or Auto for each chat. In Auto, the steps the goal plainly needs run, risky ones ask with the reason, and Allow once lets one through.
 - In Auto, a card waits only while someone can see it, and your earlier words in the chat still count.
+- The go-ahead Allow once sends is melo's own sentence: a chat shows it as a folded "Not typed by you" line, and a chat or a task no longer keeps it as words you typed; it never answers a question a task waits on.
 - Text in a file or a paste that imitates the heading of melo's memory is not taken for recalled notes when a step is reviewed in Auto, and a password typed after such a line is hidden like any other.
 - In Auto, a long task that goes well no longer runs out of reviews (a review that lets a high-impact step run on your words still counts), and a tool you allowed for the chat runs its routine calls without one.
 - Approval cards say in one plain sentence what the step will do and why melo asks, and follow your chat's mode.
@@ -78,6 +79,9 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
 - A note from a page, a file or a task's result is never shown to the model as your words.
+- What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused. A saved `note_gate = "typed"` reads as `pointed`.
+- A note melo takes from a page, a file or a task's result now replaces only an older note of that kind: one you typed, reworded or imported, or that sleep wrote, is kept beside it with its source, and your own words are listed first.
+- An ask that points at something elsewhere ("remember her email and where she works") no longer leaves a note that only repeats the ask, and a note from "remember that …" no longer starts with those words.
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.

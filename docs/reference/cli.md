@@ -164,7 +164,7 @@ embedding model (and the chat model only with `-X ingest=compress`).
 
 | Verb | What it does |
 |---|---|
-| `melo memory list [-n N]` | Print the notes newest first: number, topic, text, and the chat and day each came from. `-n N` keeps the newest N. |
+| `melo memory list [-n N]` | Print the notes newest first: number, topic, text, and where each came from (the chat, the page or file it was kept from, or a finished task's result) and the day. `/memory` in the terminal shows the same words. `-n N` keeps the newest N. |
 | `melo memory forget [ID] [-y]` | Forget note `ID`, or with no `ID` every note and the chat index (chats stay). It asks first: on a terminal a list with `Keep it` or `Keep everything` first, with piped input a numbered question read from stdin; Esc, end of input and Enter keep. `-y` does not ask. Exit 1 when nothing was forgotten. |
 | `melo memory status` | Whether memory across chats is on, the number of notes and of indexed chat turns, how it searches (by meaning with the embedding model, or by words only), the folder and the last reason the embedding model was not used. |
 | `melo memory import [-u BATCH]` | Offer the notes other assistants on this computer keep about you: a list of `Bring in N notes from M files`, `Show what they say` and `Not now` (piped input: a numbered question). The list starts on `Show what they say`. It writes nothing until the first row is chosen, then prints the batch; Esc, ctrl+c and end of input bring nothing in and record nothing (`Nothing brought in.`, exit 130 for Esc and ctrl+c, else 0). `-u BATCH` (`--undo`) takes that batch back and keeps notes you edited since (`Kept N notes you edited.`). Exit 1 when `--undo` finds no notes. |

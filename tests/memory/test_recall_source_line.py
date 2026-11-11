@@ -69,6 +69,22 @@ def test_a_pointed_or_result_note_in_the_first_person_is_the_users_note(
         assert _line(item) == f"the user's note “{FIRST}” (from jane.example.com)"
 
 
+@pytest.mark.parametrize(
+    ("how", "where"),
+    [
+        ("pointed", f"from jane.example.com, {DAY}"),
+        ("result", f"from a finished task's result, {DAY}"),
+    ],
+)
+def test_a_pointed_or_result_note_names_where_it_came_from_not_that_you_said_it(
+    how: str, where: str
+) -> None:
+    assert _item(how, SECOND, QUOTE, where).source == where
+    assert _item("typed", SECOND, QUOTE, f"Main chat, {DAY}").source == (
+        f"you said it · Main chat, {DAY}"
+    )
+
+
 @pytest.mark.parametrize("quote", ["", QUOTE])
 def test_an_inferred_note_keeps_its_melo_inferred_line(quote: str) -> None:
     item = _item("inferred", SECOND, quote, "Main chat")

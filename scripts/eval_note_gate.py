@@ -16,8 +16,8 @@ and ``inferred`` (a conclusion the user did not state), all refuse. ``crosslang`
 only when both ``--judge-url`` and ``--judge-model`` are supplied.
 
 The arms, as the chat's ``remember`` tool applies them (``T0``, ``T1`` and ``T1b`` are
-the typed rule, the default; the meaning arms need ``--model``, and ``J`` needs
-``--judge-url`` and ``--judge-model``):
+the words rule that checks a note against what the user typed; the meaning arms need
+``--model``, and ``J`` needs ``--judge-url`` and ``--judge-model``):
 
 ``T0``   every Chinese or Japanese character or pair must be found, no slack (the rule
          before CJK wording was told from details).
@@ -41,7 +41,7 @@ the typed rule, the default; the meaning arms need ``--model``, and ``J`` needs
 
 Ship rule for ``J`` on the held-out set: admit at least 85% of zh restatements
 and refuse zh swaps no less often than ``T1b``'s 85%. ``ChatMemory.remember`` applies
-this arm at the default level, with the chat's own model as the judge.
+this arm with the chat's own model as the judge.
 
 The embedding model is read from a local directory, nothing is downloaded or
 written, and no model server is called unless the judge is explicitly enabled.

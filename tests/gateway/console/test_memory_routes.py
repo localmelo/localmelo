@@ -132,16 +132,18 @@ async def test_deleting_a_chat_deletes_its_documents(
     assert await console.memory.search("tomato garden", docs_k=8) == []
 
 
-async def test_a_note_from_material_or_inferred_says_so_and_a_typed_one_reads_as_before(
+async def test_a_note_from_material_a_result_or_inferred_says_so_and_a_typed_one_reads_as_before(
     setup: tuple[Console, httpx.AsyncClient, list[ScriptedLLM]], tmp_path: Path
 ) -> None:
-    """The notes page names the page, the file or the model as a note's source
-    (``[memory] note_gate``, #442) in place of "you said it"."""
+    """The notes page names the page, the file, the finished task's result or the
+    model as a note's source (``[memory] note_gate``, #442) in place of "you said
+    it"; a typed note and a judged one (typed words, worded differently) read as
+    they always did."""
     console, client, _ = setup
     session_id = await say(client, tmp_path, "Plan my job search")
     at = {"session_id": session_id, "turn": 1, "chat": "Plan my job search"}
 
-    async def keep(text: str, **provenance: str) -> int:
+    async def keep(text: str, **provenance: Any) -> int:
         (written,) = await records.write(
             console.memory.stores()[0],
             [records.Candidate(text, "", "about", "user_statement")],
@@ -160,6 +162,8 @@ async def test_a_note_from_material_or_inferred_says_so_and_a_typed_one_reads_as
     file = await keep(
         "You know Python and Rust.", source="pointed", **{"from": "resume.pdf"}
     )
+    result = await keep("Your flat lease ends June 30.", source="result")
+    judged = await keep("你喜欢慢跑。", judged=True)
     inferred = await keep(
         "You are looking for roles at large tech companies.", source="inferred"
     )
@@ -177,6 +181,12 @@ async def test_a_note_from_material_or_inferred_says_so_and_a_typed_one_reads_as
     assert rows[page]["from"] == f"from jane.example.com, {day}"
     assert rows[file]["source"] == f"from resume.pdf, {day}"
     assert rows[file]["from"] == f"from the file resume.pdf, {day}"
+    # A note a finished task's result supports says so, and names no chat.
+    assert rows[result]["source"] == f"from a finished task's result, {day}"
+    assert rows[result]["from"] == f"from a finished task's result, {day}"
+    # A judged note is the user's own words, worded differently.
+    assert rows[judged]["source"] == f"you said it · {chat}, {day}"
+    assert rows[judged]["from"] == f"from {chat}, {day}"
     # A note the model inferred says so, and in which chat.
     assert rows[inferred]["source"] == f"melo inferred it · {chat}, {day}"
     assert rows[inferred]["from"] == f"melo inferred it from {chat}, {day}"

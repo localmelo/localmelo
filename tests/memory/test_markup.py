@@ -54,7 +54,7 @@ def _pages(output: str) -> list[str]:
         ),
     ]
     typed = {1: "read my resume.html and remember what matters"}
-    return [m.text for m in gate.pointed_material(events, typed)]
+    return [m.text for m in gate.pointed_material(events, typed, [])]
 
 
 def _supports(note: str, output: str) -> bool:
