@@ -588,7 +588,7 @@ test('a server that lists an embedding model offers "Remember across chats with 
   assert.equal(h.element('s-across-chats').checked, true);
   await flush();
   assert.equal(h.element('s-embed-offer').hidden, false, 'the server was asked on its own');
-  assert.match(h.element('s-memory-hint').textContent, /by words only/);
+  assert.match(h.element('s-memory-hint').textContent, /by words\./);
   assert.equal(h.element('s-embed-offer-label').textContent, 'Remember across chats with Qwen3-Embedding-0.6B?');
   assert.equal(h.element('s-embed-use').checked, false, 'the offer is an offer: nothing is chosen for the person');
   h.element('s-embed-use').checked = true;
@@ -1010,7 +1010,7 @@ test('the model rows say Connected, the model and when it was checked, and a tes
   const off = harness({'GET /settings': full()}, new Map(), () => false, {health: () => ({model_server: {reachable: null}})});
   await off.open();
   assert.equal(off.element('s-chat-state').dataset.text, 'Checking · old');
-  assert.equal(off.element('s-embed-state').dataset.text, 'Off · notes are found by words only');
+  assert.equal(off.element('s-embed-state').dataset.text, 'Off · notes are found by words');
 });
 
 test('a cloud server says whether its key is set and names the variable, never the key', async () => {

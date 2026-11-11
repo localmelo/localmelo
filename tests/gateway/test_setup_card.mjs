@@ -56,7 +56,7 @@ const PLAN = {
 const WITHOUT_EMBED = {
   ...PLAN,
   rows: PLAN.rows.map((r) => (r.id === 'model:embed' ? {...r, size: '', where: 'skipped', state: 'skipped'} : r)),
-  download: 'Download about 5.8 GB.', notes: ['Without Qwen3 Embedding 0.6B, memory goes by words only.'], action: 'Set up Qwen3 8B (5.8 GB)',
+  download: 'Download about 5.8 GB.', notes: ['Without Qwen3 Embedding 0.6B, memory goes by words.'], action: 'Set up Qwen3 8B (5.8 GB)',
 };
 
 const step = (id, name, state, line = '', done = 0, total = 0, progress = '') => ({id, name, state, line, done_bytes: done, total_bytes: total, progress});
@@ -125,7 +125,7 @@ test('turning a row off asks for the list worded for it and redraws it in place,
   assert.deepEqual(h.calls.at(-1), ['GET', '/setup/plan?skip=model%3Aembed', undefined]);
   assert.deepEqual(h.root.rows('setup-row'), rows, 'the same rows, drawn again in place');
   assert.equal(rows[3].dataset.state, 'skipped');
-  assert.match(h.text(), /Download about 5\.8 GB\..*Without Qwen3 Embedding 0\.6B, memory goes by words only\./);
+  assert.match(h.text(), /Download about 5\.8 GB\..*Without Qwen3 Embedding 0\.6B, memory goes by words\./);
   assert.ok(h.root.button('Set up Qwen3 8B (5.8 GB)'));
   assert.equal(doc.activeElement, box, 'a keyboard user stays on the box');
   h.plan = PLAN;

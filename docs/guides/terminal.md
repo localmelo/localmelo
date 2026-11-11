@@ -473,12 +473,12 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
-melo remembers across chats by words only; melo setup adds search by meaning.
+melo remembers across chats by words; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
-- Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
+- Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, without it`).
 - With no server running, a supported Apple-silicon Mac prints `Checking what this Mac can run…` and [one list](model-servers.md#first-run-setup): the Mac, the recommended model, each item with its size and where it goes, and the total to download. The menu starts on `Set up <model> (<size>)`; nothing installs until you choose it. `Choose what to install` skips items one by one, `Choose another model` plans another pick, and `Use a server I already run`, `Use a hosted service` and `Quit` leave. A step that fails or is stopped with Ctrl-C returns to the menu, and what was downloaded is kept. Piped answers keep their original prompt and are told `Run melo in a terminal to set this up.`; a pipe never starts a setup. Other systems print the manual way.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
@@ -510,7 +510,7 @@ On a terminal every question with a fixed set of answers is a list, as the tool 
 ```
 
 - ↑ ↓ move, Enter confirms the selected row, and a number key (1 to 9) chooses that row at once.
-- The safe or recommended answer is selected first, and Esc gives the answer named at the end of the key line (`esc cancel` ends the setup; `esc not now`, `esc no, by words only` and `esc don't attach it` decline).
+- The safe or recommended answer is selected first, and Esc gives the answer named at the end of the key line (`esc cancel` ends the setup; `esc not now`, `esc no, without it` and `esc don't attach it` decline).
 - There is no filter field: the lists are short, and letters typed in them do nothing.
 - Ctrl+C prints `Setup cancelled.` and exits with 130, Ctrl+D exits with 0.
 - Without a terminal (answers piped in, a script, a test) no list is drawn and each question reads the typed answer it always did (`Use it? [Y/n]:`, a number for a backend, Enter for the default); a direct run (`melo "task"`) never asks a question.

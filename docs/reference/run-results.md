@@ -55,10 +55,11 @@ Details:
   (see [Events](events.md#reflection)).
 - **An answer when a run stops.** By default (the developer setting `[agent]
   answer_on_stop`, `true`; `-X agent.answer_on_stop=off` turns it off), a run that ends
-  `gate_stopped` or `budget_exhausted` with an empty `result` makes one more
+  `gate_stopped`, `budget_exhausted` or `stuck` with an empty `result` makes one more
   request, without tools, that asks for the final answer from the working
   window and the latest reflection, in the format the task asks for, with
-  `unknown` allowed. The run keeps its status and `error`; `result` is that
+  `unknown` allowed (a `stuck` run is asked to answer what it can in plain
+  words). The run keeps its status and `error`; `result` is that
   answer and the record gains `"answered_on_stop": true`. The request counts in
   `n_aux`. A request that fails, or a blank reply, leaves the run as it was.
   It also answers a run that ends `provider_error` because the server refused a
@@ -109,7 +110,8 @@ Details:
 - **`stuck`.** Only with `--attempt-policy none`; with `reflect`, a
   reflection decides what happens next. The error is
   `Stuck: the same tool calls or errors repeated`. Repeated calls that return
-  new results, such as polling a job, are not stuck.
+  new results, such as polling a job, are not stuck. With `answer_on_stop`, the
+  run still ends `stuck` and `result` is the answer of its extra request.
 - **`provider_error`.** See [Provider errors and retries](#provider-errors-and-retries).
 - **`setup_error`.** The error names the problem, for example
   `MCP server 'notes' exited (code 1)`. An agent does not retry an MCP or tool

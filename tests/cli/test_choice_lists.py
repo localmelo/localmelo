@@ -196,7 +196,7 @@ def test_long_term_memory_is_a_list_that_starts_on_using_it(
     assert offered == (model, False)
     text = seen(drawn)
     assert "Remember across chats with nomic-embed-text?" in text
-    assert "❯ 1. Yes, with it" in text and "esc no, by words only" in text
+    assert "❯ 1. Yes, with it" in text and "esc no, without it" in text
 
 
 # ── The first run: a found server, a failed address, no server ──

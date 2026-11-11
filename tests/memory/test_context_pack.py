@@ -32,7 +32,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
 )
-from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
+from localmelo.tests.memory.chat_memory_helpers import FakeChat, FakeEmbedding
 
 HOLDER = "test-host:1:pack"
 
@@ -214,6 +214,26 @@ async def test_the_objective_recalls_project_notes_of_no_known_workspace(
     assert "PEG grammars" in pack
     assert "fixtures" not in pack  # another folder's project
     assert "Sam" not in pack  # People never
+
+
+async def test_without_an_embedding_model_the_chat_model_picks_the_recalled_notes(
+    memory: ChatMemory,
+) -> None:
+    await note(memory, "Your parser uses PEG grammars.", "", "projects")
+    await note(memory, "Your parser code prefers small functions.", "", "projects")
+    objective = "parser"
+    # `auto` with no embedding model and a chat model set up: its pick is the pack's.
+    picker = FakeChat("small")
+    memory.chat_provider = lambda: picker  # type: ignore[method-assign]
+    pack = await memory.context_pack(objective, "c")
+    assert "small functions" in pack and "PEG" not in pack
+    assert len(picker.calls) == 1 and "Query: " + objective in picker.calls[0]
+    # A choice that fails leaves the words order.
+    down = FakeChat(fail=True)
+    memory.chat_provider = lambda: down  # type: ignore[method-assign]
+    words = lines(await memory.context_pack(objective, "c"))
+    assert len(down.calls) == 1 and len(words) == 2
+    assert "PEG grammars" in words[0] and "small functions" in words[1]
 
 
 async def test_the_objective_does_not_list_a_note_twice(
