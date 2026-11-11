@@ -411,7 +411,7 @@ class OwnerAsks:
         echo = await self._echo(ask, "ask_end", "ask.replied", how="person",
                                 text=text, of=ask.person_row or ask.row)  # fmt: skip
         self._emit(ANSWER_EVENT, ask, by="person")
-        self._index(ask, text)
+        self._index(ask, words_before_files(text))
         return echo
 
     # ── The person's words in the chat ──

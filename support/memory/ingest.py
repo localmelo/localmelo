@@ -81,6 +81,7 @@ from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
     process_holder,
+    typed_words,
 )
 
 MAX_FILE_BYTES: Final = 500 * 1024 * 1024
@@ -439,6 +440,10 @@ async def run(
                 holder=holder,
                 new_session=None if session_id else NewSession(),
             )
+            # The words the store reads in the row it just wrote (a file's block cut
+            # off, a stand-in for files no words), as a rebuild reads them: these
+            # are what the index, the notes and the encoder take in.
+            said = typed_words(info)
             if not session_id:
                 session_id = info.session_id
                 report.sessions += 1
@@ -465,20 +470,20 @@ async def run(
                 answer=answer,
             )
             report.turns += 1
-            report.cut += int(is_cut(typed, answer))
-            turns.append((source, info.turn, typed, answer, exchange.answered_at))
+            report.cut += int(is_cut(said, answer))
+            turns.append((source, info.turn, said, answer, exchange.answered_at))
             mine.append(
                 hippo_encode.Turn(
                     info.turn,
                     exchange.asked_at,
                     exchange.answered_at,
-                    typed,
+                    said,
                     answer,
                 )
             )
             if notes == "rules":
                 report.notes += await memory.keep_said(
-                    chats, info, typed, exchange.asked_at
+                    chats, info, said, exchange.asked_at
                 )
         if session_id:
             encode.append((chat.label, session_id, str(source["title"]), mine))

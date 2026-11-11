@@ -271,8 +271,60 @@ _SECRET_WORDS = re.compile(
 )
 # What a cut-out password's mark is read as: a value by its shape.
 _STOOD_FOR: Final = "0000"
-_ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
-_CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+# In a title that names a password or a code, what may be its value
+# (:func:`named_secret_spans`): a run of plain characters with a digit in it, and
+# what follows the word and a link. A hyphen links only after a space
+# (``password-protected`` names no value).
+_PLAIN_RUN = re.compile(r"[!-~\d]+")
+_DIGIT = re.compile(r"\d")
+_RUN_TAIL: Final = ".,;:!?)"
+_LINK = re.compile(
+    r"\s*(?:[:：=\u2013\u2014]|(?:is|are|was|were|to)\b|[为是])\s*|\s+-\s*",
+    re.IGNORECASE,
+)
+# An ID number as it is written: ``123-45-6789``, or 17 digits and a check character.
+# The 18 do not start right after a digit and a dot (a decimal number's fraction).
+_ID_NUMBER = re.compile(
+    r"(?<!\d)(\d{3}-\d{2}-\d{4}|(?<!\d\.)\d{17}[\dXx])(?![\dA-Za-z])"
+)
+# A card number is 13 to 19 digits that pass the checksum. Read plainly, one space or
+# hyphen may stand between two digits. A card does not start right after a digit and
+# a dot: those are the fraction of a decimal number.
+_CARD = re.compile(r"(?<!\d)(?<!\d\.)(?:\d[ -]?){12,18}\d(?!\d)")
+# Read as it is written: between two digits at most one separator, a space, hyphen,
+# dot or dash, one Unicode space or invisible character (no-break, thin, ideographic,
+# zero-width ...), or a line break with a few spaces around it (a wrapped line). A
+# tab or a run of spaces is not one: they set out a table. A dot or a dash (not the
+# plain hyphen) stands between a card's digits only in the one form
+# ``4111.1111.1111.1111`` (:func:`_card_like`): floats, prices, versions, addresses
+# and year ranges are written with them too. A match may hold more than one line
+# break; :func:`_card_like` allows one. Every count is bounded (12 to 18 digits, 8
+# spaces around a break), so no repetition is nested unbounded and a match takes
+# time in proportion to the text.
+_SPACES: Final = 8
+_FILL = r"\u00a0\u1680\u2000-\u200d\u202f\u205f\u2060\u3000\ufeff"
+# The Unicode hyphens and dashes (hyphen, non-breaking hyphen, figure dash, en dash,
+# em dash) and the minus sign.
+_DASHES = r"\u2010-\u2014\u2212"
+_GAP = rf"(?:[-.{_DASHES}{_FILL}]| )"
+_BREAK = rf"[ {_FILL}]{{0,{_SPACES}}}(?:\r\n|[\r\n])[ {_FILL}]{{0,{_SPACES}}}"
+_CARD_WRITTEN = re.compile(
+    rf"(?<!\d)(?<!\d\.)(?:\d(?:{_GAP}|{_BREAK})?){{12,18}}\d(?!\d)"
+)
+_LINE_BREAK = re.compile(r"\r\n|[\r\n]")
+# A separator that a card is written with only in one form (:func:`_card_like`).
+_STRICT_GAP = re.compile(rf"[.{_DASHES}]")
+# The end of a decimal number's whole part: a digit and a dot.
+_WHOLE_PART = re.compile(r"\d\.\Z")
+# A digit joined to a number through a separator or a line break, on either side.
+_JOINED_BEFORE = re.compile(rf"\d(?:{_GAP}|{_BREAK})\Z")
+_JOINED_AFTER = re.compile(rf"(?:{_GAP}|{_BREAK})\d")
+# How far back a digit can be joined to a number: the digit and the longest break
+# (CRLF with :data:`_SPACES` spaces on each side).
+_JOIN_REACH: Final = 1 + 2 + 2 * _SPACES
+# The digit groups of a card match that fails the checks, for the retry without its
+# first or last group.
+_DIGITS = re.compile(r"\d+")
 
 # A plain statement: the user's own words about themselves, at most this long
 # once a lead-in ("By the way, …", "对了，…") is set aside.
@@ -415,13 +467,145 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _card_like(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]``, a match of a card pattern, is a card number: a dot
+    or a dash (not the plain hyphen) stands between its digits only when every
+    separator is that one character, there are at least three, and every group of
+    digits but the last has four (``4111.1111.1111.1111``); there is at most one line
+    break, and with one the number is the whole run (no digit joined to it before or
+    after, so the rows of a table are never one wrapped number); and the checksum
+    passes."""
+    part = text[start:end]
+    separators = re.sub(r"\d", "", part)
+    if _STRICT_GAP.search(separators) and (
+        len(set(separators)) != 1
+        or len(separators) < 3
+        or any(len(group) != 4 for group in _DIGITS.findall(part)[:-1])
+    ):
+        return False
+    breaks = len(_LINE_BREAK.findall(part))
+    if breaks > 1:
+        return False
+    if breaks and (
+        _JOINED_BEFORE.search(text[max(0, start - _JOIN_REACH) : start])
+        or _JOINED_AFTER.match(text, end)
+    ):
+        return False
+    return _luhn(re.sub(r"\D", "", part))
+
+
+def number_spans(text: str) -> list[tuple[int, int]]:
+    """Where *text* holds an ID number or a card number: the ``(start, end)`` of each,
+    sorted, in *text* as given.
+
+    An ID number is ``123-45-6789`` or 17 digits and a check character. A card number
+    is 13 to 19 digits that pass the checksum, read both ways (:data:`_CARD`,
+    :data:`_CARD_WRITTEN`) and checked by :func:`_card_like`. When a match fails the
+    checks, it is read again without its first group of digits, without its last, and
+    without both: an expiry date, a security code or an order number may stand next to
+    a card. The part kept holds 13 to 19 digits and no line break, and with more than
+    one group starts with a group of four or more digits. It is for a reader that
+    takes text out by its place, as :func:`~localmelo.melo.checker.redaction.secret_spans`
+    is: a number alone on a line, or one that crosses a line, belongs to no sentence.
+
+    A dot or a dash separates a card's digits only in the form
+    ``4111.1111.1111.1111``, and neither a card nor an 18-character ID number starts
+    right after a digit and a dot (a decimal number's fraction): floats, prices,
+    versions, addresses and coordinates are no cards. Four years joined in that form
+    (``2019-2020-2021-2022``, with any one dash) are read as a card when they pass
+    the checksum, about one time in ten.
+
+    Not found: a card written in groups after a group of four or more digits on its
+    line (written with dots, dashes or Unicode spaces, also when that group ends the
+    line before it); a card with tabs or wide gaps between its groups; a card
+    wrapped over two lines with another number joined to it on the line before or
+    after (a line before it that is itself cut as a secret does not count: the
+    cleaning of the index repeats, and finds the card when that line is gone); a
+    hyphen followed by a line break; a card with one group per line; ``4111. 1111.``;
+    a card right after a digit and a dot (``3.4111111111111111``); a card written
+    with dots or dashes in groups other than four (``3782.822463.10005``,
+    ``41111111.11111111``); a card whose groups a horizontal bar, a small or
+    full-width hyphen or a soft hyphen separates; and, of the ID numbers, ``123 45 6789``, nine bare digits
+    and the 15-digit form.
+    """
+    places = [match.span(1) for match in _ID_NUMBER.finditer(text)]
+    for pattern in (_CARD, _CARD_WRITTEN):
+        for match in pattern.finditer(text):
+            if _card_like(text, *match.span()):
+                places.append(match.span())
+                continue
+            groups = [
+                (match.start() + group.start(), match.start() + group.end())
+                for group in _DIGITS.finditer(match.group())
+            ]
+            last = len(groups) - 1
+            all_dots = not re.sub(r"\d", "", match.group()).strip(".")
+            for first, final in ((0, last - 1), (1, last), (1, last - 1)):
+                if first > final:
+                    continue
+                start, end = groups[first][0], groups[final][1]
+                digits = sum(b - a for a, b in groups[first : final + 1])
+                if not 13 <= digits <= 19 or _LINE_BREAK.search(text[start:end]):
+                    continue
+                if first != final and groups[first][1] - groups[first][0] < 4:
+                    continue
+                # The kept part does not start in a decimal number's fraction, unless it
+                # is dotted groups itself and so is the whole match
+                # (``12.4111.1111.1111.1111``).
+                dotted = all_dots and "." in text[start:end]
+                if not dotted and _WHOLE_PART.search(text[max(0, start - 2) : start]):
+                    continue
+                if _card_like(text, start, end):
+                    places.append((start, end))
+    return sorted(set(places))
+
+
 def holds_secret_value(text: str) -> bool:
     """Whether *text* holds the value of a secret: a key or token, a code next to its
     word, a private key, a card or ID number. The words alone (``password``) do not count.
     """
-    if redact_secrets(text)[1] or _ID_NUMBER.search(text):
-        return True
-    return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _CARD.finditer(text))
+    return bool(redact_secrets(text)[1]) or bool(number_spans(text))
+
+
+def named_secret_spans(text: str) -> list[tuple[int, int]]:
+    """Where a short *text* that names a password or a code (:data:`_SECRET_WORDS`), a
+    title, may give it: the ``(start, end)`` of each place, sorted.
+
+    A place is every run of plain characters with a digit in it, anywhere in the
+    text (``PIN 4821 for the bank``, ``4821 is my PIN``, a value on the next line),
+    and, in a sentence that names one, everything after the word and a link (``is``,
+    ``was``, ``to``, ``:``, ``=``, a dash) up to the sentence's closing punctuation
+    (``my password is correct horse``). No digit of such a text is kept, so no part
+    of a number that only a later cut would make readable is. It is for a reader
+    that keeps the other words: a note and a turn's text lose the whole sentence
+    (:func:`sensitive`).
+
+    Not found: a password of letters only that no link comes before (``sunflower is
+    my password``, ``password sunflower``, a value on the line after the link).
+    """
+    named = [
+        (start, sentence, words)
+        for start, sentence in split_sentences(text)
+        if (words := list(_SECRET_WORDS.finditer(sentence)))
+    ]
+    if not named:
+        return []
+    places = [
+        (run.start(), run.start() + len(run.group().rstrip(_RUN_TAIL)))
+        for run in _PLAIN_RUN.finditer(text)
+        if _DIGIT.search(run.group())
+    ]
+    for start, sentence, words in named:
+        for word in words:
+            link = _LINK.match(sentence, word.end())
+            if link is None:
+                continue
+            # The sentence keeps its end, so the next one is not joined to it.
+            rest = sentence[link.end() :].rstrip(_RUN_TAIL + "。！？")
+            if re.search(r"\w", rest):
+                places.append((start + link.end(), start + link.end() + len(rest)))
+                break  # what a later word of the sentence links to lies inside
+    return sorted(set(places))
 
 
 def gives_password(text: str) -> bool:

@@ -1,12 +1,15 @@
 """A time bound for the scans that read a page or a file: linear, not quadratic.
 
 ``assert_linear(make, run)`` builds a text of 50 KB and one of 200 KB with *make* and
-times *run* on each, alternating, the best of five each: a busy moment then slows both
-sizes alike instead of one. The scan must take under half a second on the small one and
+times *run* on each, alternating, the best of five each, in the CPU time of the
+process. The wall clock is no use on a machine busy with other work: the process waits
+for a core now and then, the best of five on the small text finds a stretch without a
+wait but a scan 4 times as long seldom does, and 4 times as much text then looks like
+20 times as much. The scan must take under half a second on the small one and
 under two seconds on the large one, and 4 times as much text may take at most 8 times
 as long (with a little slack for a clock that cannot see so small a time). A failed
-measurement is taken once more: a machine busy with other work can still spoil one, but
-a scan that is quadratic in the text takes 16 times as long, and many seconds, each time.
+measurement is taken once more: a scan that is quadratic in the text takes 16 times as
+long, and many seconds, each time.
 
 ``assert_memory_linear(make, run)`` bounds the memory *run* holds at once the same way:
 4 times as much text may hold at most 8 times as much (16 when it grows with the square).
@@ -27,9 +30,9 @@ ROUNDS = 5
 
 
 def _timed(run: Callable[[], object]) -> float:
-    start = time.perf_counter()
+    start = time.process_time()
     run()
-    return time.perf_counter() - start
+    return time.process_time() - start
 
 
 def measure(small: T, large: T, run: Callable[[T], Any]) -> tuple[float, float]:

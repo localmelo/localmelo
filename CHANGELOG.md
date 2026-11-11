@@ -83,6 +83,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 - A note melo cannot keep no longer costs you the answer: after its last refused try the note tool is not offered again in that turn, and melo answers the rest of what you asked.
+- A file you send, and the "[1 file]" or "[1 picture]" mark for a message with no words, no longer count as something you said when melo searches your chats or checks a note.
 
 ### App and web console
 
@@ -141,6 +142,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
 - A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
 - A text file you send on to a task, running or finished, is data too: only the words you typed with it count as yours.
+- A card number alone on a line, written with dots or unusual spaces, across one line break, or followed by its expiry or security code is kept out of what melo remembers; a chat's title loses such a number, a PIN or a password too.
 - A password longer than 128 characters is cut out whole, not in part; hiding a message twice gives the same text, and a shell's `PWD=/folder` or `pwd /folder` is no longer taken for a password.
 
 ### Scripts and API
