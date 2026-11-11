@@ -91,7 +91,8 @@ final class StatusView: NSView {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isIndeterminate = true
-        spinner.setAccessibilityLabel(L10n.t("app.start.label", "Starting localmelo"))
+        // The title and the step say what is going on; a label here would say the title again.
+        spinner.setAccessibilityElement(false)
         working.spacing = 8
         working.addArrangedSubview(spinner)
         working.addArrangedSubview(step)

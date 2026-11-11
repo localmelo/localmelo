@@ -87,9 +87,34 @@ _DECLARATIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
 # The words and punctuation a request may put between its marker and the
 # fact: "remember,", "remember that", "记住：", "记住，".
 _CLAUSE_LEAD = re.compile(r"^[\s,:;，：；\-—–、]+", re.UNICODE)
-_CLAUSE_THAT = re.compile(r"^(?:the\s+fact\s+)?that\b[\s,:;，：；]*", re.IGNORECASE)
+# "That", or a word that only points ahead before a colon or comma ("remember it: my
+# locker number is 14"), is no part of the fact.
+_CLAUSE_THAT = re.compile(
+    r"^(?:(?:the\s+fact\s+)?that\b[\s,:;，：；]*"
+    r"|(?:it|this|these|those|这个|这些|这点|这件事)\s*[,:;，：；]\s*)",
+    re.IGNORECASE,
+)
 # "Remember to buy milk." is a to-do, not a fact.
 _INFINITIVE_LEAD = re.compile(r"^(?:to\b|去)", re.IGNORECASE)
+# A note read later without its chat has to hold what it says. Two openings say its
+# words point at something the chat held. One is a third-person pronoun ("her email",
+# "he lives in Leeds"): the note does not say who. "It" is left out: it is as often a
+# subject that names nothing ("it takes me 40 minutes to get to work").
+_OPENING = r"^[\s\"'“‘(（\[]*"
+_THIRD_PERSON_LEAD = re.compile(
+    _OPENING + r"(?:(?:he|him|his|she|her|hers|they|them|their|theirs|its)\b|他|她|它)",
+    re.IGNORECASE,
+)
+# The other is the word of an indirect question ("where I work now"): what the person
+# asked melo to remember is the answer, and these words only name it, unless the answer
+# follows a colon ("who my doctor is: Dr. Lin"). 几 asks only before what it counts on a
+# clock or a calendar (几点, 几号): 几年前 and 几乎 state.
+_QUESTION_LEAD = re.compile(
+    _OPENING + r"(?:(?:where|what|when|who|whom|which|how|why|whether)\b"
+    r"|哪(?!怕)|什么|谁|何时|怎么|多少|几(?=[点号月岁楼时]))",
+    re.IGNORECASE,
+)
+_ANSWER_AFTER_COLON = re.compile(r"[:：]\s*\S")
 
 # A meta sentence is not a stable fact about the user (review finding 6):
 # "my task is …" and "我的任务是…" describe the work, not the person.
@@ -145,19 +170,55 @@ def _marker_span(sentence: str, marker: str) -> tuple[int, int] | None:
     return None if start < 0 else (start, start + len(marker))
 
 
-def request_clause(sentence: str) -> str:
-    """The fact a remember request carries after its earliest marker."""
+def _after_marker(sentence: str) -> tuple[str, bool]:
+    """The words a remember request carries after its earliest marker, and whether
+    they are a statement, never an indirect question: "that", a pointing word or a
+    comma, colon or dash led them ("remember that …", "remember: …")."""
     spans = [
         span
         for marker in REMEMBER_MARKERS
         if (span := _marker_span(sentence, marker)) is not None
     ]
     if not spans:
-        return ""
-    start = min(spans)[1]
-    clause = _CLAUSE_LEAD.sub("", sentence[start:])
-    clause = _CLAUSE_THAT.sub("", clause)
-    return clause.strip()
+        return "", False
+    rest = sentence[min(spans)[1] :]
+    led = _CLAUSE_LEAD.sub("", rest)
+    clause = _CLAUSE_THAT.sub("", led)
+    return clause.strip(), clause != led or led != rest.lstrip()
+
+
+def request_clause(sentence: str) -> str:
+    """The fact a remember request carries after its earliest marker."""
+    return _after_marker(sentence)[0]
+
+
+def stands_alone(note: str, *, statement: bool = False) -> bool:
+    """Whether *note*, the words a remember request leaves, reads on its own when it is
+    found later without its chat. It is no to-do ("remember to call …"), it does not
+    open with a third-person pronoun (:data:`_THIRD_PERSON_LEAD`), and it does not open
+    with the word of an indirect question (:data:`_QUESTION_LEAD`) unless it is a
+    *statement* (the words after "that" or after a comma or colon, or a whole
+    sentence: "remember that when I travel I prefer window seats") or its answer
+    follows a colon ("who my doctor is: Dr. Lin")."""
+    if _INFINITIVE_LEAD.match(note) or _THIRD_PERSON_LEAD.match(note):
+        return False
+    return (
+        statement
+        or not _QUESTION_LEAD.match(note)
+        or _ANSWER_AFTER_COLON.search(note) is not None
+    )
+
+
+def request_note(sentence: str) -> str:
+    """The note a statement leaves that asks to remember a fact and states it, when the
+    words after the marker alone did not read as one (:func:`classify_user_text`): those
+    words when they state the fact ("Remember that I'm allergic to peanuts." leaves "I'm
+    allergic to peanuts."), else the whole *sentence* ("I live in Leeds, remember
+    that."). ``""`` when that note does not stand alone (:func:`stands_alone`)."""
+    clause, stated = _after_marker(sentence)
+    if clause and (_states_a_statement_marker(clause) or _states_a_fact(clause)):
+        return clause if stands_alone(clause, statement=stated) else ""
+    return sentence if stands_alone(sentence, statement=True) else ""
 
 
 def _is_meta_statement(text: str) -> bool:
@@ -215,9 +276,9 @@ def classify_user_text(text: str) -> UserSignals:
     store to remember and never states a fact (review finding 6). ``my … is``
     and ``我的…是`` also refuse a meta noun, because a task, question or
     plan is not a stable fact. A remember request's clause after the marker
-    is a ``request_facts`` entry, written with ``user_request`` beside the
-    run's digest; a direct statement stays a ``facts`` entry, written at
-    once with ``user_statement``.
+    is a ``request_facts`` entry when it stands alone (:func:`stands_alone`),
+    written with ``user_request`` beside the run's digest; a direct statement
+    stays a ``facts`` entry, written at once with ``user_statement``.
     """
     remember = False
     facts: list[str] = []
@@ -231,9 +292,11 @@ def classify_user_text(text: str) -> UserSignals:
         )
         remember = remember or sentence_remember
         if sentence_remember:
-            clause = request_clause(stripped)
+            clause, stated = _after_marker(stripped)
             if clause and _states_a_declarative_fact(clause):
-                if clause not in request_facts:
+                if clause not in request_facts and stands_alone(
+                    clause, statement=stated
+                ):
                     request_facts.append(clause)
                 continue
         stated = _states_a_statement_marker(stripped)

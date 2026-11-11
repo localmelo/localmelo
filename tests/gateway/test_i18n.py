@@ -50,6 +50,9 @@ DISCOVERY = ROOT / "support/backends/discovery.py"
 MODEL_OFFER = ROOT / "support/backends/model_offer.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
+# Where a note taken from a page, a file or a task's result came from, as the notes
+# page and the terminal's list word it (``say``).
+NOTE_SOURCE = ROOT / "support/memory/note_gate.py"
 APP = ROOT / "macos/LocalMeloApp"
 CASES = json.loads((ROOT / "tests/fixtures/i18n_cases.json").read_text("utf-8"))
 _PARAM = re.compile(r"\{(\w+)\}")
@@ -324,6 +327,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         LISTING,
         DISCOVERY,
         MODEL_OFFER,
+        NOTE_SOURCE,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
