@@ -792,6 +792,21 @@ async def test_what_the_user_prefers_is_a_fact_not_an_instruction(
     assert len(await gate.notes()) == 2
 
 
+async def test_a_preference_about_how_melo_works_is_kept_at_the_default_level(
+    make: Any,
+) -> None:
+    gate = make(note_gate.POINTED)
+    await gate.turn(
+        "I prefer answers under 150 words, and from now on please answer in Chinese."
+    )
+    for note in (
+        "You prefer answers under 150 words.",
+        "You want melo to answer in Chinese from now on.",
+    ):
+        assert (await gate.remember(note, "preferences")).startswith("Remembered: ")
+    assert len(await gate.notes()) == 2
+
+
 # ── poisoning ──
 
 POISON = [
