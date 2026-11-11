@@ -545,7 +545,50 @@ def test_a_page_is_pointed_to_by_its_host_or_by_the_address_typed(
     typed: str, url: str, pointed: bool
 ) -> None:
     found = read(fetched(url), {1: "Read this.", 2: typed})
-    assert [m.ref for m in found] == ([url] if pointed else [])
+    # The address a note keeps has no query string.
+    assert [m.ref for m in found] == ([url.partition("?")[0]] if pointed else [])
+
+
+@pytest.mark.parametrize(
+    ("asked", "kept"),
+    [
+        (
+            "https://jane.example.com/about?key=value#part",
+            "https://jane.example.com/about",
+        ),
+        ("https://jane.example.com/?key=value", "https://jane.example.com/"),
+        ("https://jane.example.com?key=value", "https://jane.example.com"),
+        ("https://jane.example.com/a/b#part", "https://jane.example.com/a/b"),
+        # A login before the host is no part of the address either; the port is.
+        (
+            "http://jane:pw1234@jane.example.com:8080/a?key=value",
+            "http://jane.example.com:8080/a",
+        ),
+    ],
+)
+def test_a_page_keeps_its_scheme_host_and_path_and_no_query_string(
+    asked: str, kept: str
+) -> None:
+    (found,) = read(fetched(asked), {1: "Read jane.example.com."})
+    assert found.ref == kept
+    assert gate.name_of(found.ref) == "jane.example.com"
+
+
+def test_the_pages_of_one_path_with_different_queries_are_not_one_read() -> None:
+    first, second = "https://jane.example.com/p?id=1", "https://jane.example.com/p?id=2"
+    events = [
+        started("a", "web_fetch", url=first, part=1),
+        finished("a", "web_fetch", page(first, "Page one.")),
+        started("b", "web_fetch", url=second, part=2),
+        finished("b", "web_fetch", page(second, "Page two, no part one before it.")),
+    ]
+    found = read(events, {1: "Read jane.example.com."})
+    # Both keep the same address, and each stays a text of its own.
+    assert [m.ref for m in found] == ["https://jane.example.com/p"] * 2
+    assert [m.text.strip() for m in found] == [
+        "Page one.",
+        "Page two, no part one before it.",
+    ]
 
 
 def test_a_typed_address_and_a_typed_host_work_together() -> None:

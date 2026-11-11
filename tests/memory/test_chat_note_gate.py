@@ -368,6 +368,21 @@ async def test_a_page_whose_host_the_user_typed_supports_a_note_and_says_so(
     assert gate.emitted[-1]["remembered"] == data["remembered"]
 
 
+async def test_a_pointed_note_keeps_the_address_without_its_query_string_or_fragment(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    turn = await gate.turn(f"Read {URL} and tell me which jobs fit.")
+    await gate.fetch(turn, f"{URL}?key=value#part")
+    reply = await gate.remember(
+        "You have an MSc in Robotics at Carnegie Mellon University."
+    )
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST})")
+    (entry,) = await gate.notes()
+    assert entry.provenance["from"] == URL
+    assert "key=value" not in json.dumps(entry.provenance) and "#" not in reply
+
+
 async def test_a_pointed_note_reads_with_its_host_at_recall(
     make: Any, store: SessionStore
 ) -> None:

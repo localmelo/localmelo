@@ -178,9 +178,11 @@ _PATH_END = ".,;:!?)]}>'\"/"
 class Material(NamedTuple):
     """A page or file the user pointed to, as this chat read it.
 
-    *ref* is the address (a page) or the file name, *text* what the tool returned
-    that may support a note (:func:`material_text`: no hidden text, no order to the
-    assistant, never empty) and *other* says the user called it someone else's.
+    *ref* is the address (a page: its scheme, host, port and path, never a query
+    string, a fragment or a login, since a note keeps it) or the file name, *text*
+    what the tool returned that may support a note (:func:`material_text`: no hidden
+    text, no order to the assistant, never empty) and *other* says the user called it
+    someone else's.
     *browser* says the page was read in the browser (:data:`BROWSER_TOOLS`): what the
     browser shows melo is not what a reader sees (its labels and hidden controls), so
     such a page supports no note and its *text* only tells why a note is refused.
@@ -226,6 +228,17 @@ def _place_of(address: str) -> Place | None:
         return None
     host = next(iter(named_sites("http://" + netloc)), "") if netloc else ""
     return Place(host, _tail(parts.path, parts.query)) if host else None
+
+
+def _kept_address(address: str) -> str:
+    """*address* as a note keeps it: its scheme (when it has one), host, port and path.
+
+    What follows the path (a query string, a fragment) and any login before the host
+    are left out: a link may carry a token there."""
+    text = address.strip()
+    parts = urlsplit(text if "://" in text else "//" + text)
+    scheme = f"{parts.scheme}://" if parts.scheme else ""
+    return f"{scheme}{parts.netloc.rpartition('@')[2]}{parts.path}"
 
 
 def _spellings(host: str) -> set[str]:
@@ -480,9 +493,8 @@ def _assembled(reads: Sequence[_Read], limit: int = MAX_MATERIAL) -> list[Materi
             continue
         stated = material_text(whole)
         if stated.strip():
-            found.append(
-                Material(group.kind, group.ref, stated, group.other, group.browser)
-            )
+            ref = _kept_address(group.ref) if group.kind == "page" else group.ref
+            found.append(Material(group.kind, ref, stated, group.other, group.browser))
             if len(found) >= limit:
                 break
     found.reverse()
