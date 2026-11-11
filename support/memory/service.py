@@ -2809,8 +2809,10 @@ class ChatMemory:
         imported ones included); the notes of the project *workspace*; then the
         notes recalled for *objective* within those topics and projects. Never
         People or Decisions: a task browses and calls outside tools. Lines read
-        as the recall block's do. The lowest-ranked lines go first when
-        *budget_chars* is short, none is cut in half. No model call besides the
+        as the recall block's do, and the notes of one subject are ordered and
+        marked as recall does (:func:`records.newer_values_first`). The
+        lowest-ranked lines go first when *budget_chars* is short, none is cut in
+        half. No model call besides the
         query embedding, which falls back to words as recall does. A note whose
         key (``r:<id>``) is in *exclude* is left out: the task has it already.
         """
@@ -2859,9 +2861,12 @@ class ChatMemory:
                     and topic in (*about, "projects")
                 ):
                     chosen.append(item)
+        # As recall lists them: of one subject, the notes kept from replacement
+        # first and the older ones marked, so a short budget cuts a note from a page
+        # before the person's own.
         lines: list[str] = []
         size = len(PACK_HEADER)
-        for item in chosen:
+        for item in records.newer_values_first(chosen):
             if item.key in exclude:
                 continue
             line = f"- {item.prompt}"

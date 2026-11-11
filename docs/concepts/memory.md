@@ -293,7 +293,7 @@ Each of the first three parts sits between two fence lines of its own, and text 
 The context pack:
 
 - It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
-- In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out.
+- In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out. Notes of one subject with different values are ordered and marked as in the recall block (the notes of yours first, the older ones marked), so when the characters run short a note from a page, a file or a task's result goes before yours.
 - Never in it: People and Decisions notes. A worker browses and calls outside tools, so it gets the least that it needs.
 - At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. Building it asks no chat model; with an embedding model set up, the objective is matched by meaning too, with the 1.5 s limit above.
 
