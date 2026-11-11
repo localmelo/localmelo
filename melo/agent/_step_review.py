@@ -574,6 +574,11 @@ class StepReviewer:
         """Whether a message of the person's run holds a password and their words name *site*."""
         return self.holds_sign_in() and self.names_host(site)
 
+    def sign_in_handle(self, site: str) -> str | None:
+        """The run's one kept password handle when the person's words name *site*; ``None`` with none or several (#626)."""
+        kept = [h for h in self._live if VAULT.value(h) is not None]
+        return kept[0] if len(kept) == 1 and self.names_host(site) else None
+
     def holds_sign_in(self) -> bool:
         """Whether a message of the person's run holds a password melo can still type (#571)."""
         return any(VAULT.value(h) is not None for h in self._live)

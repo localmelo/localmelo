@@ -870,6 +870,10 @@ class _ToolAsk:
         """Whether melo has sign-in details of the person's to try on *site*."""
         return self._reviewer is not None and self._reviewer.signs_in(site)
 
+    def sign_in_handle(self, site: str) -> str | None:
+        """The run's one kept password handle for *site*, or None (:meth:`StepReviewer.sign_in_handle`)."""
+        return None if self._reviewer is None else self._reviewer.sign_in_handle(site)
+
     def holds_sign_in(self) -> bool:
         """Whether a password the person gave in this run can be typed in it (#571):
         work that moves elsewhere would hold it spent."""

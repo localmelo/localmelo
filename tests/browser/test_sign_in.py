@@ -12,7 +12,8 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.contracts.sign_in import HANDLE
+from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.contracts.sign_in import HANDLE, hide_passwords
 from localmelo.support.browser.driver import Element
 from localmelo.tests.browser.fakes import button, page
 from localmelo.tests.browser.test_acting import (
@@ -108,17 +109,49 @@ async def test_nothing_else_is_typed_into_a_secret_box(case: str) -> None:
     assert not driver.acts, case
 
 
-async def test_the_refusal_of_a_password_box_names_the_handle_by_its_shape_not_by_a_number() -> (
+class Reading(Asks):
+    """The run's policy over a real reviewer: what the gate says to the browser of the person's words."""
+
+    def __init__(self, reviewer: StepReviewer) -> None:
+        super().__init__()
+        self.reviewer = reviewer
+
+    def signs_in(self, site: str) -> bool:
+        return self.reviewer.signs_in(site)
+
+    def sign_in_handle(self, site: str) -> str | None:
+        return self.reviewer.sign_in_handle(site)
+
+
+async def test_the_refusal_of_a_password_box_names_the_one_live_handle_else_its_shape() -> (
     None
 ):
-    driver = world(password_box(), button("Check in"))
-    tools = await tools_of(driver)
-    with asking(Gave()):
-        await run(tools, "browser_open", url=HOME)
-        out = await run(tools, "browser_type", ref="e1", text=VALUE)
-    assert out.is_error and "([password-…], copied from their message)" in out.text
-    assert not HANDLE.search(out.text), "a number there would be copied (#626)"
-    assert not driver.acts
+    async def refusal(policy: Asks) -> str:
+        driver = world(password_box(), button("Check in"))
+        tools = await tools_of(driver)
+        with asking(policy):
+            await run(tools, "browser_open", url=HOME)
+            out = await run(tools, "browser_type", ref="e1", text=VALUE)
+        assert out.is_error and not driver.acts
+        return out.text
+
+    shape = "([password-…], copied from their message)"
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.begin_run()
+    first = hide_passwords("sign in to example.com, my password is old-Secret1")
+    [handle] = HANDLE.findall(first)
+    reviewer.user_message(first)
+    assert f"type its handle ({handle}) here" in await refusal(Reading(reviewer))
+    # Two live handles: the shape, never a guess between them (#626).
+    reviewer.user_message(hide_passwords("and my other password is new-Secret2"))
+    text = await refusal(Reading(reviewer))
+    assert shape in text and not HANDLE.search(text)
+    # A policy with no such answer: the shape too.
+    assert shape in await refusal(Gave())
+    # Words that name another site: the box's refusal holds no handle at all.
+    elsewhere = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    elsewhere.user_message(first.replace("example.com", "other.org"))
+    assert not HANDLE.search(await refusal(Reading(elsewhere)))
 
 
 async def test_a_handle_goes_only_into_a_password_box_and_only_on_https() -> None:

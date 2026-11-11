@@ -1771,10 +1771,13 @@ class BrowserToolProvider(BaseToolProvider):
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "payment cards or one-time codes, nor a password the user did not give."
         )
-        if kind == "password" and self._signs_in(_box_origin(snap, item)):
+        origin = _box_origin(snap, item)
+        if kind == "password" and self._signs_in(origin):
+            handle = self._sign_in_handle(origin)
             refusal += (
                 " The user gave a sign-in password in their message: type its "
-                "handle ([password-…], copied from their message) here, not a value."
+                f"handle ({handle or '[password-…], copied from their message'}) "
+                "here, not a value."
             )
             raise BrowserError(refusal)
         return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
@@ -1803,6 +1806,12 @@ class BrowserToolProvider(BaseToolProvider):
         find = getattr(TOOL_ASK.get(), "sign_in_value", None)
         value = find(handle, sites.host_of(origin)) if callable(find) else None
         return value if isinstance(value, str) and value else None
+
+    def _sign_in_handle(self, origin: str) -> str | None:
+        """The one password handle the run holds for the site *origin* (``TOOL_ASK``'s ``sign_in_handle``), or None."""
+        find = getattr(TOOL_ASK.get(), "sign_in_handle", None)
+        handle = find(sites.host_of(origin)) if callable(find) else None
+        return handle if isinstance(handle, str) and HANDLE.fullmatch(handle) else None
 
     def _signs_in(self, origin: str) -> bool:
         """Whether the person gave sign-in details for the site *origin* (https) in their newest message."""
