@@ -19,6 +19,7 @@ from localmelo.melo.contracts.sign_in import (
     Vault,
     handles_in,
     hide_passwords,
+    merged_spans,
     password_spans,
     spent,
     without_passwords,
@@ -144,6 +145,9 @@ def test_reading_where_a_text_gives_a_password_keeps_nothing() -> None:
     # Nothing was kept and no handle was made: the next one is the first.
     assert repr(VAULT) == "Vault(0 password(s))"
     assert hide_passwords("pw=first-one1") == "pw=[password-1]"
+    # A reader that cuts by place joins the spans that overlap or touch, and only those.
+    joined = merged_spans([(5, 9), (0, 3), (3, 5), (8, 10), (12, 14)])
+    assert joined == [(0, 10), (12, 14)]
 
 
 def test_the_same_value_has_one_handle_and_the_vault_is_bounded_and_shows_nothing() -> (
@@ -491,10 +495,10 @@ BESIDE = [
         "-----BEGIN RSA PRIVATE KEY-----\n[password-1]\n-----END RSA PRIVATE KEY-----",
     ),
     # A password word straight after a cut secret would read as one once the mark stands
-    # before it: it goes with the secret.
+    # before it: it takes the rest of its line, so no value of it stays.
     (
-        f"password: Bearer {TOKEN} and {KEY}密码 hunter22",
-        "password: [password-1] [redacted] and [redacted] hunter22",
+        f"password: Bearer {TOKEN} and {KEY}密码 hunter22\nthen otp 123456",
+        "password: [password-1] [redacted] and [redacted]\nthen otp [redacted]",
     ),
     # A cut place that held a line break keeps one: quotes are paired by line.
     (

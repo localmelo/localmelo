@@ -57,6 +57,8 @@ Text that is kept and never typed from is read by two functions that only
 read: :func:`password_spans` says where a text gives a password, for memory to
 refuse the text or leave it out, and :func:`without_passwords` cuts the values
 out, for chats loaded from a file. Neither keeps a value or makes a handle.
+A reader that cuts by place joins places with :func:`merged_spans` (spans that overlap
+or touch become one).
 
 This module imports only the standard library and :mod:`.attachments`, and the
 redaction's reader when :func:`_cut_secrets` first runs (the checker's package
@@ -90,9 +92,9 @@ HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
-# Password words straight after a secret: a word is none after a letter or a digit, so
-# the mark that replaces the secret would make it one (see :func:`_cut_secrets`).
-_WORDS_AFTER = re.compile(f"{_CUE}*", re.IGNORECASE)
+# A password word straight after a secret: none after a letter or a digit, but one once
+# the mark stands before it (see :func:`_cut_secrets`).
+_WORDS_AFTER = re.compile(_CUE, re.IGNORECASE)
 # The first characters of the words: a look-ahead for them lets the search skip the
 # text between words at once.
 _FIRST = "[" + "".join(dict.fromkeys(word[0] for word in CUES)) + "]"
@@ -357,7 +359,7 @@ def _splice(text: str, spans: Sequence[tuple[int, int]], marks: Sequence[str]) -
     return "".join(parts)
 
 
-def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+def merged_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """*spans* in order, each run of overlapping or touching ones as one span."""
     merged: list[tuple[int, int]] = []
     for start, end in sorted(spans):
@@ -375,7 +377,9 @@ def _cut_secrets(
     redaction still finds every secret of *text* in it (the same texts, counted, one
     per place); otherwise *text* cut once: the places of the passwords and of every
     secret of *text* joined where they overlap or touch, each joined place becoming
-    the handles of the passwords in it, or the redaction's mark when it holds none."""
+    the handles of the passwords in it, or the redaction's mark when it holds none. A
+    password word straight after a secret would become a cue once the secret is cut:
+    it takes its line with it, so nothing that might be its value stays."""
     # Imported here: the checker's package reaches the agent, which imports this module.
     from localmelo.melo.checker.redaction import REDACTED, secret_spans
 
@@ -385,9 +389,12 @@ def _cut_secrets(
         - Counter(hidden[start:end] for start, end in set(secret_spans(hidden)))
     ):
         return hidden
-    # A password word straight after a secret is none until the secret is cut: it goes too.
-    cut = [(a, m.end() if (m := _WORDS_AFTER.match(text, b)) else b) for a, b in found]
-    places = _merged(spans + cut)
+    memo: dict[re.Pattern[str], int] = {}  # by end, so each line end is found once
+    cut = [
+        (a, _next(text, _LINE, b, memo) if _WORDS_AFTER.match(text, b) else b)
+        for a, b in sorted(found, key=lambda place: place[1])
+    ]
+    places = merged_spans(spans + cut)
     marks: list[str] = []
     seen = 0
     for start, end in places:
