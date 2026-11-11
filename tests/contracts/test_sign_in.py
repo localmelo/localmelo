@@ -131,7 +131,7 @@ def test_a_vault_numbers_from_a_random_nine_digit_base_so_another_vaults_handle_
     [
         "{h} verification code",
         "verification code {h}",
-        "passcode (see below) {h}",
+        "passcode, see {h}",
         "{h}, then your passcode",
         "otp {h}",
         "{h} OTP",
