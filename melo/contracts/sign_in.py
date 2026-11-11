@@ -73,10 +73,14 @@ _CUE = "(?:" + "|".join(CUES) + ")"
 # these (not inside a longer word; "sign up" is none); the one reading of a text
 # for it. The Chinese ones need no boundary: a space is not written there.
 _SIGN_IN = re.compile(
-    rf"(?<![A-Za-z0-9_])(?:{_CUE}|(?:sign|log)[ -]?in(?:to)?|log[ -]?on)"
+    rf"(?<![A-Za-z0-9_])(?:{_CUE}|(?:sign|log)(?: me)?[ -]?in(?:to)?|log[ -]?on)"
     r"(?![A-Za-z0-9_])|登[录陆入]",
     re.IGNORECASE,
 )
+# "the log in the folder" says where a log is: "log in" between two determiners is
+# no sign-in word.
+_DET = "the|a|an|this|that|my|your|our|its|their"
+_PLACE = re.compile(rf"\b(?:{_DET})\s+log\s+in\s+(?:{_DET}|these|those)\b", re.I)
 # A quoted value runs to the first closing quote on its line, a bare one to the
 # next space, quote or backtick (or the end of the text): neither is ever cut short.
 _QUOTES = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("「", "」"))
@@ -357,8 +361,8 @@ def spent(text: str) -> str:
 
 def says_sign_in(words: str) -> bool:
     """Whether the person's *words* are about signing in: a password word
-    (:data:`CUES`) or a sign-in word (``sign in``, ``log in``, ``login``, ``登录``)."""
-    return _SIGN_IN.search(words) is not None
+    (:data:`CUES`) or a sign-in word (``sign in``, ``log me in``, ``login``, ``登录``)."""
+    return _SIGN_IN.search(_PLACE.sub(" ", words)) is not None
 
 
 def handles_in(text: str) -> frozenset[str]:
