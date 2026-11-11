@@ -135,6 +135,7 @@ class Gate:
             typed,
             holder=HOLDER,
             title="Planning",
+            typed_text=typed,
             new_session=None if session_id else NewSession(),
             composed=composed,
         )
@@ -522,6 +523,39 @@ async def test_a_pointed_turn_the_user_undid_is_no_source(
         "You have an MSc in Robotics at Carnegie Mellon University."
     )
     assert reply.startswith(note_gate.NOT_SUPPORTED)
+
+
+@pytest.mark.parametrize(
+    "block",
+    ["Contact: https://bob.example.com/profile", "I work at Acme Robotics in Leeds."],
+)
+async def test_the_text_of_a_file_block_in_a_stored_row_is_no_word_the_user_typed(
+    make: Any, block: str
+) -> None:
+    """A row stored before files were kept apart holds a file's block in its text:
+    the store's reader cuts it off, so neither an address nor a fact in the block
+    points to a page or supports a note."""
+    gate = make("pointed")
+    row = (
+        f'Please read my notes.\n\n<attachment name="notes.txt" chars="{len(block)}">'
+        f"\n{block}\n</attachment>"
+    )
+    first = await gate.store.begin_turn(
+        None, row, holder=HOLDER, new_session=NewSession()
+    )
+    assert not first.attachments and not first.typed_text
+    await gate.finish(first)
+    turn = await gate.turn("Which jobs fit me?", first.session_id)
+    await gate.fetch(
+        turn, "https://bob.example.com/profile", "You work at Acme Robotics in Leeds."
+    )
+    chat = CHAT_TURN.get()
+    assert chat is not None
+    assert await gate.memory._pointed(chat) == []
+    assert await gate.memory._said(chat) == ["Please read my notes."]
+    reply = await gate.remember("You work at Acme Robotics in Leeds.")
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert await gate.notes() == []
 
 
 @pytest.mark.parametrize("level", LEVELS)

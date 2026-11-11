@@ -72,6 +72,7 @@ async def _turn(
         typed,
         holder=HOLDER,
         title="Planning",
+        typed_text=typed,
         new_session=None if session_id else NewSession(),
     )
 

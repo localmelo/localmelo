@@ -161,6 +161,7 @@ from localmelo.support.memory.recall import (
     unit,
     whole_turn,
 )
+from localmelo.support.sessions.store import typed_words
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -1978,7 +1979,7 @@ class ChatMemory:
             if earlier.turn < turn.info.turn and not (
                 earlier.undone or is_owner_question(earlier)
             ):
-                typed[earlier.turn] = _typed_words(earlier)
+                typed[earlier.turn] = typed_words(earlier)
         typed[turn.info.turn] = turn.typed
         events: list[tuple[int | None, dict[str, Any]]] = []
         started: set[tuple[int | None, str]] = set()
@@ -2103,7 +2104,7 @@ class ChatMemory:
         All read from the store."""
         store, chat = turn.store, turn.info.session_id
         shown = {
-            t.turn: _typed_words(t)
+            t.turn: typed_words(t)
             for t in await store.list_turns(chat)
             if not t.undone and not is_owner_question(t)
         }
