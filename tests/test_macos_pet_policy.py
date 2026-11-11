@@ -45,6 +45,8 @@ def test_the_first_window_shows_a_still_of_the_moves_at_their_canvas() -> None:
     # blinking one.
     status = (APP / "StatusView.swift").read_text()
     assert "setAccessibilityElement(false)" in status
+    # The spinner is decoration too: the title and the step say what is going on, so a label would repeat them.
+    assert "spinner.setAccessibilityElement(false)" in status
     assert "poster-\\(next).webp" in status
     assert (
         "melo.png" not in status
