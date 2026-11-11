@@ -45,12 +45,23 @@ working folder is no password (``PWD=/tmp make``, ``$PWD``, ``pwd /tmp``: see
 ``_folder``), nor is a file block's tag. The reading takes time in proportion to
 the text: where a run or a quote ends is found once and kept (see :func:`_next`).
 
+A password given next to another secret hides both: when cutting the passwords
+takes the keyword or the first line of another secret (a key, a bearer token, a key
+block, a one-time code: what the redaction's ``secret_spans`` finds), so that the
+redaction no longer finds it in the cut text, every secret of the text given is cut
+with them, in one cut from that text (:func:`_cut_secrets`). A text with no
+password is not read for secrets, and a secret the redaction still finds after the
+cut stays readable.
+
 Text that is kept and never typed from is read by two functions that only
 read: :func:`password_spans` says where a text gives a password, for memory to
 refuse the text or leave it out, and :func:`without_passwords` cuts the values
 out, for chats loaded from a file. Neither keeps a value or makes a handle.
+A reader that cuts by place joins places with :func:`merged_spans` (spans that overlap
+or touch become one).
 
-This module imports only the standard library and :mod:`.attachments`.
+This module imports only the standard library, :mod:`.attachments` and the
+redaction's reader, :mod:`.redaction`, which imports only the standard library.
 """
 
 from __future__ import annotations
@@ -58,10 +69,12 @@ from __future__ import annotations
 import re
 import secrets
 import threading
+from collections import Counter
 from collections.abc import Sequence
 from typing import Final
 
 from localmelo.melo.contracts.attachments import is_file_tag
+from localmelo.melo.contracts.redaction import REDACTED, secret_spans
 
 # The words that say a value is a password.
 CUES: Final = ("password", "passwd", "pwd", "pw", "密码", "口令")
@@ -79,6 +92,9 @@ HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
+# A password word straight after a secret: none after a letter or a digit, but one once
+# the mark stands before it (see :func:`_cut_secrets`).
+_WORDS_AFTER = re.compile(_CUE, re.IGNORECASE)
 # The first characters of the words: a look-ahead for them lets the search skip the
 # text between words at once.
 _FIRST = "[" + "".join(dict.fromkeys(word[0] for word in CUES)) + "]"
@@ -343,6 +359,51 @@ def _splice(text: str, spans: Sequence[tuple[int, int]], marks: Sequence[str]) -
     return "".join(parts)
 
 
+def merged_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """*spans* in order, each run of overlapping or touching ones as one span."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _cut_secrets(
+    text: str, hidden: str, spans: list[tuple[int, int]], handles: list[str]
+) -> str:
+    """*hidden* (*text* with each password at *spans* replaced by its handle) when the
+    redaction still finds every secret of *text* in it (the same texts, counted, one
+    per place); otherwise *text* cut once: the places of the passwords and of every
+    secret of *text* joined where they overlap or touch, each joined place becoming
+    the handles of the passwords in it, or the redaction's mark when it holds none. A
+    password word straight after a secret would become a cue once the secret is cut:
+    it takes its line with it, so nothing that might be its value stays."""
+    found = {place for place in secret_spans(text) if place[0] < place[1]}
+    if not found or not (
+        Counter(text[start:end] for start, end in found)
+        - Counter(hidden[start:end] for start, end in set(secret_spans(hidden)))
+    ):
+        return hidden
+    memo: dict[re.Pattern[str], int] = {}  # by end, so each line end is found once
+    cut = [
+        (a, _next(text, _LINE, b, memo) if _WORDS_AFTER.match(text, b) else b)
+        for a, b in sorted(found, key=lambda place: place[1])
+    ]
+    places = merged_spans(spans + cut)
+    marks: list[str] = []
+    seen = 0
+    for start, end in places:
+        first = seen
+        while seen < len(spans) and spans[seen][0] < end:
+            seen += 1
+        mark = " ".join(handles[first:seen]) or REDACTED
+        # Quotes are paired by line: a place that held a line break keeps one.
+        marks.append(f"\n{mark}\n" if text.find("\n", start, end) >= 0 else mark)
+    return _splice(text, places, marks)
+
+
 class Vault:
     """The passwords the person gave, by handle; in this process's memory only.
 
@@ -395,7 +456,8 @@ class Vault:
         it replaced, and :data:`SPENT` when one was too long to keep. A
         handle-shaped text *text* already held is no value (it is left as it is),
         so it is never in the set, and a text hidden a second time has an empty
-        one.
+        one. A secret beside a password goes with it when the cut would hide it from
+        the redaction (:func:`_cut_secrets`).
         """
         spans = _values(text)
         if not spans:
@@ -405,7 +467,7 @@ class Vault:
                 self._handle(text[start:end]) if end - start <= MAX_CHARS else SPENT
                 for start, end in spans
             ]
-        hidden = _splice(text, spans, handles)
+        hidden = _cut_secrets(text, _splice(text, spans, handles), spans, handles)
         return hidden, frozenset(handles)
 
     def _handle(self, value: str) -> str:
