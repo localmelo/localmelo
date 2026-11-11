@@ -262,6 +262,101 @@ async def test_a_password_in_an_attached_file_gets_a_handle_and_the_same_checks_
     assert box.typed == [PASSWORD, None]
 
 
+# Typed words that end on a password word, then a file that holds a login of its own.
+CUE_WORDS = "sign in to forum.example for me, the login is in the file, the password:"
+LOGIN_FILE = TextAttachment(
+    "login.txt", "login at only-in-the-file.example\npassword: file-Secret2\n"
+)
+
+
+class _Note:
+    """One note of the person's, there once the run has made a request."""
+
+    def __init__(self, llm: FakeModel, text: str) -> None:
+        self.llm, self.text, self.accepted = llm, text, False
+
+    def validate(self, workspace: str | None = None) -> None:
+        return None
+
+    def poll(self) -> list[tuple[int, str]]:
+        ready = bool(self.llm.requests) and not self.accepted
+        return [(1, self.text)] if ready else []
+
+    def accept(self, offset: int) -> None:
+        self.accepted = True
+
+
+@pytest.mark.asyncio
+async def test_a_note_with_a_file_after_words_ending_on_a_password_word_keeps_its_file_apart(
+    tmp_path: Path,
+) -> None:
+    """The run's hiding stops where a file's block starts (#626): a password word at the end of the words cannot take the block's opener as its value, so the file stays data, not the person's words."""
+    box = PasswordBox()
+    hidden = hide_message(CUE_WORDS, (LOGIN_FILE,))
+    composed = compose_user_text(hidden.text, hidden.attachments)
+    assert HANDLE.findall(composed) == ["[password-1]"], "the file's, made at the door"
+    llm = FakeModel(
+        [
+            _type_call("forum.example", "[password-9]"),  # the note comes after it
+            _type_call("only-in-the-file.example", "[password-1]", 2),
+            _answer("done"),
+        ],
+        [verdict()] * 4,
+    )
+    agent = _agent(tmp_path, llm, box)
+
+    await agent.run_task(
+        "sign in for me", inbox=_Note(llm, composed), approval=AutoPolicy()
+    )
+
+    # Its words are the typed ones: the file's site is not named, its handle not live.
+    assert box.typed == [None, None]
+    assert agent._reviewer.names_host("forum.example")
+    assert not agent._reviewer.names_host("only-in-the-file.example")
+    # The model read the note as it was sent, block and all.
+    assert any(
+        m.role == "user" and m.content == composed for m in llm.requests[-1]
+    ), "the opener was replaced"
+
+
+@pytest.mark.asyncio
+async def test_a_message_with_a_file_and_no_words_given_apart_is_cut_at_the_file_too(
+    tmp_path: Path,
+) -> None:
+    """The same message as a run's own text with no *user_words*: hiding it does not remove the opener the words end at (#626)."""
+    box = PasswordBox()
+    hidden = hide_message(CUE_WORDS, (LOGIN_FILE,))
+    composed = compose_user_text(hidden.text, hidden.attachments)
+    llm = FakeModel(
+        [_type_call("only-in-the-file.example", "[password-1]"), _answer("done")],
+        [verdict()] * 3,
+    )
+    agent = _agent(tmp_path, llm, box)
+
+    await agent.run_task(composed, approval=AutoPolicy())
+
+    assert box.typed == [None]
+    assert agent._reviewer.names_host("forum.example")
+    assert not agent._reviewer.names_host("only-in-the-file.example")
+    assert _sent(llm) == composed, "the opener was replaced"
+
+
+@pytest.mark.asyncio
+async def test_the_run_hides_a_text_with_a_file_in_two_parts_and_any_other_text_as_it_was(
+    tmp_path: Path,
+) -> None:
+    """Hiding reads the words before the first file's block and the rest apart (#626); a text with no block comes out as the one function made it."""
+    agent = _agent(tmp_path, FakeModel([]), PasswordBox())
+    raw = compose_user_text(CUE_WORDS, (LOGIN_FILE,))
+    # The file's password is hidden as before; the opener is where it was.
+    assert agent.hide_passwords(raw) == raw.replace("file-Secret2", "[password-1]")
+    for text in (CUE_WORDS, f"{TASK}\n\n<attachment", "", f"pw: {PASSWORD}"):
+        assert agent.hide_passwords(text) == hide_passwords(text)
+    # A text that begins with the opener has no words: the whole of it is read as the rest.
+    only = compose_user_text("", (LOGIN_FILE,))
+    assert agent.hide_passwords(only) == only.replace("file-Secret2", "[password-1]")
+
+
 # What a caller appends after the person's text (a task's context block, a note): melo's.
 BLOCK = "\n\n[project notes]\nthe line of the file says password: other-Secret9"
 OTHER_SECRET = "other-Secret9"
