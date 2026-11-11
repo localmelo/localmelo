@@ -2835,8 +2835,10 @@ class ChatMemory:
         People or Decisions: a task browses and calls outside tools. Lines read
         as the recall block's do. The lowest-ranked lines go first when
         *budget_chars* is short, none is cut in half. No model call besides the
-        query embedding, which falls back to words as recall does. A note whose
-        key (``r:<id>``) is in *exclude* is left out: the task has it already.
+        query embedding, which falls back to words as recall does, or the chat
+        model's choice when that is the retriever that answers (:meth:`_answering`),
+        within :data:`SELECT_TIMEOUT_S`. A note whose key (``r:<id>``) is in
+        *exclude* is left out: the task has it already.
         """
         if not self.enabled:
             return ""
@@ -3289,8 +3291,9 @@ class ChatMemory:
     async def status(self) -> dict[str, Any]:
         store, index = self.stores()
         mode = self.retriever()
+        provider, model = self.embedding()
         # The words-only and chat-model retrievers make no embedding call.
-        model = "" if mode in ("bm25", "llm") else self.embedding()[1]
+        model = "" if mode in ("bm25", "llm") else model
         async with self._lock:
             counts = len(await store.active_entries()), await index.count()
         return {
@@ -3299,6 +3302,8 @@ class ChatMemory:
             "documents": counts[1],
             "embedding_model": model,
             "retriever": mode,
+            # What answers a recall now: the setting, or what ``auto`` becomes.
+            "answering": self._answering("" if provider else "no-embedding")[0],
             "last_error": self.last_error,
         }
 

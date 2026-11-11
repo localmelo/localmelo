@@ -86,6 +86,51 @@ def test_list_prints_the_notes_newest_first_and_status_counts_them(
     assert "by words only" in status and "~/.cache/localmelo/memory" in status
 
 
+@pytest.mark.parametrize(
+    ("chat", "embedding", "retriever", "says"),
+    [
+        (True, True, "auto", "by meaning with Qwen3-Embedding-0.6B, and by words"),
+        (
+            True,
+            False,
+            "auto",
+            "by words, and the chat model picks the notes that matter",
+        ),
+        (False, False, "auto", "by words only"),
+        (
+            True,
+            False,
+            "llm",
+            "by words, and the chat model picks the notes that matter",
+        ),
+        (True, True, "bm25", "by words only"),
+    ],
+)
+def test_status_says_how_it_searches_by_the_models_set_up(
+    capsys: pytest.CaptureFixture[str],
+    chat: bool,
+    embedding: bool,
+    retriever: str,
+    says: str,
+) -> None:
+    cfg = config.Config()
+    if chat:
+        cfg.use_chat_server(
+            "http://127.0.0.1:9/v1",
+            "chat-model",
+            embedding_model="Qwen3-Embedding-0.6B" if embedding else None,
+        )
+    cfg.memory.retriever = retriever
+    config.save(cfg)
+    assert memory_cli.main(["status"]) == 0
+    (row,) = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("search")
+    ]
+    assert row == f"{'search':<11} {says}"
+
+
 def test_an_empty_list_says_how_memory_starts(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -237,7 +282,7 @@ def test_setup_offers_the_embedding_model_a_server_lists_and_probes_it(
         assert chosen == (offered, False)
         text = seen(drawn)
         assert "Remember across chats with Qwen3-Embedding-0.6B?" in text
-        assert "❯ 1. Yes, with it" in text and "2. No, by words only" in text
+        assert "❯ 1. Yes, with it" in text and "2. No, without it" in text
         # Yes sends one real embeddings request to the server that lists the model.
         assert bool(server.embedded) is (offered is not None)
     finally:

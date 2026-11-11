@@ -6,7 +6,7 @@ In the web console and the app, today:
 
 - melo keeps a note about you when you ask it to, or when it judges one worth keeping; a line under your message says `Remembered: … · Undo`.
 - The **Memory** tab lists the notes, and you can reword or forget any of them.
-- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up; `Used … memory` under your message shows each source.
+- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Used … memory` under your message shows each source.
 
 ## What localmelo remembers
 
@@ -72,7 +72,7 @@ What code checks before a note is kept:
 
 **Recall.** Before a message goes to the model, melo searches both files and adds what it finds, quoted, with where it came from.
 
-- It searches by words always (BM25 over words and Chinese characters), and by meaning too when an embedding model is set up (see [Set up an embedding model](../guides/embedding.md); for example Qwen3-Embedding-0.6B on the same oMLX server as the chat model).
+- It searches by words always (BM25 over words and Chinese characters), and by meaning too when an embedding model is set up (see [Set up an embedding model](../guides/embedding.md); for example Qwen3-Embedding-0.6B on the same oMLX server as the chat model). Without one, your chat model picks among the notes the words find.
 - At most 3 notes and 2 earlier turns of other chats, within 4000 characters (a turn takes up to 900 of them), are added once to the end of your message.
 
 ```text
@@ -335,7 +335,7 @@ The other places:
 |---|---|
 | In the terminal | `/memory` lists the notes (type to filter). Enter on a note offers `Back`, `Edit it` and `Delete it`; the last row, `Forget everything…`, names what goes and offers `Keep everything` first. `/memory window` shows what it used to: the model's working window. |
 | On the command line | `melo memory list [-n N]` prints the notes. `melo memory forget [ID] [-y]` forgets one or, with no ID, everything after a question (a list on a terminal, a number when input is piped; `-y` skips it). `melo memory status` says whether memory is on, how many notes and indexed turns there are, and how it searches. `melo memory reindex` rebuilds the chat index from your chats and gives every note a vector of the embedding model now set. |
-| Setup | `melo setup` and the console's Settings ask `Remember across chats with <model>?` when the server lists an embedding model; `Yes, with it` saves it after one embeddings probe, and `No, by words only` leaves memory on without it. Without a listed model they say so plainly: melo remembers across chats by words only. |
+| Setup | `melo setup` and the console's Settings ask `Remember across chats with <model>?` when the server lists an embedding model; `Yes, with it` saves it after one embeddings probe, and `No, without it` leaves memory on without it. Without a listed model they say so plainly: melo remembers across chats by words. |
 
 - **A note outlives its chat.** Deleting a chat removes its entries from the chat index but keeps the notes it made, which then read `From a deleted chat, Oct 30`, because what melo learned about you does not stop being true when the chat is gone. When the chat has notes, the console asks `Also forget the 2 notes from this chat?` with `Keep the notes` first.
 - **Rewording and deleting are final.** A reworded note replaces the old wording in place (the old text is overwritten, not kept as history) and is embedded again; a wording that looks like a password or key is refused.

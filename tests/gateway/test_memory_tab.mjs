@@ -36,7 +36,7 @@ const note = (id, text, extra = {}) => ({id, text, topic: 'preferences', quote: 
   chat_gone: false, edited: false, session_id: 's1', created_at: id, ...extra});
 const item = (id, title, text, extra = {}) => ({id, title, text, kind: 'semantic', status: 'active', replaced_by: null, conflicts: [],
   from: 'from chat “Garden”, Oct 31', chat_gone: false, link: '#/s/s2', session_id: 's2', created_at: id, ...extra});
-const page = (records, extra = {}) => ({on: true, records, documents: 4, embedding_model: '', last_error: '', ...extra});
+const page = (records, extra = {}) => ({on: true, records, documents: 4, embedding_model: '', retriever: 'auto', answering: 'bm25', last_error: '', ...extra});
 
 function harness({records = [], items = [], developer = false, fail = {}, extra = {}} = {}) {
   const h = {calls: [], records, items, trash: [], now: 0};
@@ -68,13 +68,18 @@ test('the words: what a search matches, how memory searches, and what forgetting
   const row = note(1, 'You prefer short answers.', {from: 'from a deleted chat, Oct 30'});
   assert.ok(matches(row, 'short ANSWERS') && matches(row, 'preferences deleted') && matches(row, ''));
   assert.ok(!matches(row, 'tea'));
-  assert.match(searchLine(true, ''), /^Searching by words, and your chat model picks the notes that matter\. An embedding model/);
-  assert.equal(searchLine(true, 'Qwen3-Embedding-0.6B'), 'Searching by meaning with Qwen3-Embedding-0.6B, and by words.');
   assert.match(searchLine(false, 'x'), /^Off\./);
-  // A retriever that makes no embedding call says so, whatever model is set up.
-  assert.match(searchLine(true, '', 'bm25'), /^Searching by words only, as the memory retriever setting says\./);
-  assert.match(searchLine(true, '', 'llm'), /^Searching by words, and your chat model picks/);
-  assert.match(searchLine(true, 'Qwen3-Embedding-0.6B', 'embedding'), /by meaning with Qwen3-Embedding-0.6B/);
+  // The line follows the way that answers now, and says why when the setting names another.
+  const model = 'Qwen3-Embedding-0.6B';
+  const meaning = 'Searching by meaning with Qwen3-Embedding-0.6B, and by words.';
+  assert.equal(searchLine(true, model, 'auto', 'embedding'), meaning);
+  assert.equal(searchLine(true, model, 'embedding', 'embedding'), meaning);
+  const picks = 'Searching by words, and your chat model picks the notes that matter.';
+  assert.equal(searchLine(true, '', 'llm', 'llm'), picks);
+  assert.equal(searchLine(true, '', 'auto', 'llm'), `${picks} An embedding model in Settings adds search by meaning.`);
+  assert.equal(searchLine(true, '', 'bm25', 'bm25'), 'Searching by words only, as the memory retriever setting says.');
+  assert.equal(searchLine(true, '', 'auto', 'bm25'), 'Searching by words only. An embedding model in Settings adds search by meaning.');
+  assert.equal(searchLine(true, '', 'embedding', 'bm25'), 'Searching by words only. An embedding model in Settings adds search by meaning.');
   assert.equal(forgetLine(2, 5), "This removes 2 notes and melo's search index of 5 chat turns. Your chats stay. It cannot be undone.");
   assert.equal(forgetLine(1, 0), 'This removes 1 note. Your chats stay. It cannot be undone.');
   assert.equal(forgetLine(2, 5, 3), "This removes 2 notes, 3 memory items and melo's search index of 5 chat turns. Your chats stay. It cannot be undone.");
@@ -171,7 +176,7 @@ test('forget everything names what goes, keeps first, and empties the tab once c
 });
 
 test('the switch turns memory across chats off and on, and says how it searches', async () => {
-  const h = harness({records: [note(1, 'You prefer short answers.')], extra: {embedding_model: 'Qwen3-Embedding-0.6B'}});
+  const h = harness({records: [note(1, 'You prefer short answers.')], extra: {embedding_model: 'Qwen3-Embedding-0.6B', answering: 'embedding'}});
   await h.tab.show();
   const toggle = h.tab.root.findAll((node) => node.attributes.role === 'switch')[0];
   assert.equal(toggle.attributes['aria-checked'], 'true');
@@ -181,6 +186,21 @@ test('the switch turns memory across chats off and on, and says how it searches'
   assert.deepEqual(h.calls.at(-1), ['PUT', '/memory', {on: false}]);
   assert.equal(h.tab.root.findAll((node) => node.attributes.role === 'switch')[0].attributes['aria-checked'], 'false');
   assert.match(h.text(), /Off\. Notes stay on this computer/);
+});
+
+test('the line under the switch follows the way that answers, as the page reads it', async () => {
+  const lines = {
+    embedding: [{embedding_model: 'Qwen3-Embedding-0.6B', answering: 'embedding'}, /^Remember across chats Searching by meaning with Qwen3-Embedding-0.6B, and by words\./],
+    chat: [{answering: 'llm'}, /Searching by words, and your chat model picks the notes that matter\. An embedding model in Settings/],
+    named: [{retriever: 'llm', answering: 'llm'}, /Searching by words, and your chat model picks the notes that matter\. You prefer short answers/],
+    neither: [{}, /Searching by words only\. An embedding model in Settings adds search by meaning\./],
+    words: [{retriever: 'bm25'}, /Searching by words only, as the memory retriever setting says\./],
+  };
+  for (const [extra, shown] of Object.values(lines)) {
+    const h = harness({records: [note(1, 'You prefer short answers.')], extra});
+    await h.tab.show();
+    assert.match(h.text(), shown);
+  }
 });
 
 test('rebuilding the search index is a developer-mode link', async () => {

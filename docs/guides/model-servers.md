@@ -31,7 +31,7 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
   itself is not offered a skip: take `Use a server I already run` instead.
   Without the chat model or its backend melo_serve cannot chat yet, and
   `melo-serve get <pick>` finishes it later. Without the embedding model or its
-  backend, memory goes by words only. Without the login item, `melo serve`
+  backend, memory goes by words. Without the login item, `melo serve`
   starts melo_serve when needed. `Choose another model` plans another pick from
   the same catalog and starts the list again.
 - After the OK each step prints one line, with a bar for a download. Ctrl-C

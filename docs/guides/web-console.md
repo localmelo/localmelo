@@ -752,7 +752,7 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   **Replace** and **Remove**) and, for a service with a switch for it, **Let the model think
   before it answers**. **Test connection** then lists the service's models and tries one
   short chat with a tool. See [Hosted models](hosted-models.md).
-- **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
+- **Memory**: **Remember across chats**, how Melo finds notes (**By words, helped by your models** or
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's

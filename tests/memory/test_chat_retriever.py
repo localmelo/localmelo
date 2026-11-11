@@ -113,6 +113,43 @@ def test_the_retriever_that_answers(mode: str, failure: str, chat: bool) -> None
     assert memory_service._resolve(mode, failure, chat) == want
 
 
+@pytest.mark.parametrize(
+    ("mode", "embedding", "chat", "answering"),
+    [
+        ("auto", True, True, "embedding"),
+        ("auto", True, False, "embedding"),
+        ("auto", False, True, "llm"),
+        ("auto", False, False, "bm25"),
+        ("embedding", True, True, "embedding"),
+        ("embedding", False, True, "bm25"),
+        ("bm25", True, True, "bm25"),
+        ("llm", True, True, "llm"),
+    ],
+)
+async def test_status_names_the_retriever_that_answers_now(
+    tmp_path: Path,
+    store: SessionStore,
+    mode: str,
+    embedding: bool,
+    chat: bool,
+    answering: str,
+) -> None:
+    memory, _, _ = await made(
+        tmp_path, store, mode, FakeEmbedding() if embedding else None
+    )
+    if chat:
+        use(memory, FakeChat())
+    try:
+        status = await memory.status()
+        # The setting stays as it is; the model name is the embedding model's.
+        assert (status["retriever"], status["answering"]) == (mode, answering)
+        assert bool(status["embedding_model"]) == (
+            embedding and answering == "embedding"
+        )
+    finally:
+        await memory.aclose()
+
+
 @pytest.mark.parametrize("mode", ["llm", "auto"])
 async def test_llm_finds_what_the_model_picks_among_the_word_candidates(
     tmp_path: Path, store: SessionStore, mode: str

@@ -136,7 +136,7 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-melo remembers across chats by words only; melo setup adds search by meaning.
+melo remembers across chats by words; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -174,7 +174,7 @@ melo serve
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
 | `Save these settings?` | 在 `Save and continue` 上按 Enter，或选择 `Cancel setup`（管道输入时为 `Save and continue? [Y]:`）。 |
-| `Embedding backend` | `5. None (search by words only)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，默认选中第一个；选择一个即可。 |
+| `Embedding backend` | `5. None (no search by meaning)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，默认选中第一个；选择一个即可。 |
 | `Embedding endpoint URL`, `Embedding model name` | 仅当选择固定嵌入后端 `1`–`4` 之一，而不是检测到的模型时询问。 |
 
 对于云端 API，选择提供方。向导会改为询问 `API key env var`（你导出的变量名称）和 `Chat model`，而不是 `Base URL` 和 `Chat model name`。

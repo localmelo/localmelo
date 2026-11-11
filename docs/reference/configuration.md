@@ -500,7 +500,7 @@ and to the recall of the reasoning modes other than `legacy`; see
 [Set up an embedding model](../guides/embedding.md). With
 `embedding_backend = "none"`:
 
-- those searches go by words only;
+- those searches go by words, and in a chat your chat model picks among what the words find (see [How recall finds notes](../concepts/memory.md#memory-across-chats));
 - the run loop, tools, working memory and history work as usual.
 
 `GET /v1/health` on the gateway then shows `"embedding_backend": "none"`.

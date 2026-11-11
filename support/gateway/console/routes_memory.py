@@ -268,6 +268,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             "documents": status["documents"],
             "embedding_model": status["embedding_model"],
             "retriever": status["retriever"],
+            "answering": status["answering"],
             "last_error": status["last_error"],
         }
 
