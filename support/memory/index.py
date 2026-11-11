@@ -331,14 +331,27 @@ def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return merged
 
 
-def _clean(text: str) -> str:
-    """*text* without its secrets: a sentence that holds one is left out
+def _clean_once(text: str) -> str:
+    """One pass of :func:`_clean`: a sentence that holds a secret is left out
     (:func:`_kept`), the rest redacted. A private key block is redacted whole
     first: left out line by line, its header would go and its body stay."""
     text = text.strip()
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
     return redact_secrets(_kept(text))[0]
+
+
+def _clean(text: str) -> str:
+    """*text* without its secrets, cleaned until another pass changes nothing, at most
+    :data:`_PASSES` passes (:func:`_stable`).
+
+    A cut can make a secret readable that was not: a card wrapped over two lines is
+    no number while a digit of the line above is joined to it, and is the whole run
+    once that line is cut. A second pass changes the text only where the first made a
+    place readable, and a third only where the second did. A text that a third pass
+    still changes holds three such layers: the result of that pass is used, and what
+    a fourth would take out stays."""
+    return _stable(_clean_once, text.strip())
 
 
 def cleaned(text: str) -> str:

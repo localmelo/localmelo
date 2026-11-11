@@ -264,6 +264,18 @@ def test_finding_the_numbers_takes_time_in_proportion_to_the_text(unit: str) -> 
     assert_linear(_repeated(unit), records.number_spans)
 
 
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "The password is hunter2\n4111 1111\n1111 1111\nThanks.\n",  # two passes
+        "4111 1111\n1111 1111\n",
+        "1234 ",
+    ],
+)
+def test_cleaning_a_text_takes_time_in_proportion_to_the_text(unit: str) -> None:
+    assert_linear(_repeated(unit), cleaned)
+
+
 # ── The index cuts every place ──
 
 SAFE = ("The garden needs water.", "Basil grows fast.")
@@ -273,10 +285,14 @@ NUMBERS = {
     "digits-only line": "4111111111111111.",
     "ID number": "123-45-6789",
 }
+# A secret next to the number: after it, or on the line before it. A line before ends
+# in a digit, so a wrapped card under it is not the whole run until that line is cut.
 ELSEWHERE = {
-    "": "",
-    "password": "\nMy wifi password is hunter2 for the shed.",
-    "key": f"\nUse the key {KEY} for the build.",
+    "": ("", ""),
+    "password": ("", "\nMy wifi password is hunter2 for the shed."),
+    "key": ("", f"\nUse the key {KEY} for the build."),
+    "password line before": ("The password is hunter2\n", ""),
+    "key line before": (f"Use key {KEY}\n", ""),
 }
 
 
@@ -291,17 +307,17 @@ def grid() -> Iterator[tuple[str, str, str, str]]:
             "twice": f"{first}\n{number}\n{second}\n{number}",
         }
         for spot, text in spots.items():
-            for extra, more in ELSEWHERE.items():
-                yield f"{kind} / {spot} / {extra or 'no secret'}", kind, text, more
+            for extra, (before, after) in ELSEWHERE.items():
+                name = f"{kind} / {spot} / {extra or 'no secret'}"
+                yield name, kind, before + text + after, extra
 
 
 @pytest.mark.parametrize(
-    ("name", "kind", "text", "more"), list(grid()), ids=[g[0] for g in grid()]
+    ("name", "kind", "whole", "extra"), list(grid()), ids=[g[0] for g in grid()]
 )
 def test_a_number_is_never_in_what_the_index_keeps(
-    name: str, kind: str, text: str, more: str
+    name: str, kind: str, whole: str, extra: str
 ) -> None:
-    whole = text + more
     out = cleaned(whole)
     assert not re.search(r"\d{4}", out), out
     assert "6789" not in out and "hunter2" not in out and KEY not in out
@@ -309,6 +325,16 @@ def test_a_number_is_never_in_what_the_index_keeps(
     for sentence in SAFE:
         if sentence in whole:
             assert sentence in out, out
+    assert cleaned(out) == out
+
+
+@pytest.mark.parametrize("lead", ["The password is hunter2", f"Use key {KEY}"])
+def test_a_card_under_a_line_that_ends_in_a_digit_is_cut_in_one_call(lead: str) -> None:
+    # The line before it is cut first; only then does the card read as the whole run
+    # (a digit joined to it through a line break says it is a table's row). The cut
+    # is repeated, so one call cleans what the second would have.
+    out = cleaned(f"{lead}\n4111 1111\n1111 1111\nThanks.")
+    assert out == "[left out]\n[left out]\nThanks."
     assert cleaned(out) == out
 
 
