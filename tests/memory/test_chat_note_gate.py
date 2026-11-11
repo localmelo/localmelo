@@ -539,6 +539,7 @@ async def test_a_note_still_has_to_clear_the_secret_and_owner_checks(
         assert reply.startswith(
             "Not remembered: it looked like a password or key"
         ), note
+        assert "Do not write it anywhere" in reply, note
     assert await gate.notes() == []
     # "I" and "you" in one note stay refused.
     assert await gate.remember("I think you prefer tea.") == (
