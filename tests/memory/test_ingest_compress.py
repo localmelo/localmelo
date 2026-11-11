@@ -352,6 +352,39 @@ async def test_a_password_given_after_a_short_word_reaches_no_window_and_no_file
     assert held == []
 
 
+async def test_a_file_block_and_a_stand_in_for_files_reach_no_window(
+    tmp_path: Path,
+) -> None:
+    data = {
+        "sessions": [
+            {
+                "id": "files",
+                "title": "Formats",
+                "date": "2023-05-22T10:00:00",
+                "turns": [
+                    {
+                        "role": "user",
+                        "text": 'Keep this format\n\n<attachment name="x" in my own '
+                        "message, then I said more.",
+                    },
+                    {"role": "assistant", "text": "Noted."},
+                    {"role": "user", "text": "[1 file]"},
+                    {"role": "assistant", "text": "Got it."},
+                ],
+            }
+        ]
+    }
+    stub = StubEncoder(says([item("Format", "The user keeps a format.", "profile")]))
+    report, chats, memory = await compress(tmp_path, data, stub)
+    try:
+        (prompt,) = stub.prompts
+        assert "Keep this format" in prompt and "Got it." in prompt
+        assert "then I said more" not in prompt and "[1 file]" not in prompt
+        assert report.items == 1
+    finally:
+        await close(chats, memory)
+
+
 @pytest.mark.parametrize("parallel", [1, 2])
 async def test_a_password_and_a_card_number_reach_the_encoder_as_the_index_keeps_them(
     tmp_path: Path, parallel: int

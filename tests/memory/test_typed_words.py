@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,9 +24,9 @@ from typing import Any, cast
 import pytest
 
 from localmelo.melo.contracts.attachments import words_before_files
-from localmelo.support.memory import ChatMemory, sleep
+from localmelo.support.memory import ChatMemory, hippo_encode, sleep
 from localmelo.support.memory.recall import AGENT_EXCHANGE
-from localmelo.support.memory.service import ChatTurn, TurnMemory
+from localmelo.support.memory.service import ChatTurn, TurnMemory, recent_said
 from localmelo.support.sessions.attachments import (
     TextAttachment,
     compose_user_text,
@@ -324,6 +324,35 @@ async def test_a_rebuild_holds_only_the_words_of_a_row_stored_before_files_were_
     (document,) = await documents(memory, info)
     assert words_of(document) == "I keep bees."
     assert FILE.text not in document and FILE.name not in document
+
+
+async def test_the_words_a_follow_up_borrows_from_a_row_before_files_were_apart_hold_no_file(
+    store: SessionStore,
+) -> None:
+    first = await stored(store, None, **LEGACY)
+    later = await store.begin_turn(first.session_id, "continue", holder=HOLDER)
+    said = await recent_said(store, later, None)
+    assert said == ["I keep bees."]
+    assert FILE.text not in "\n".join(said) and FILE.name not in "\n".join(said)
+
+
+async def test_the_window_the_encoder_reads_holds_the_words_of_a_row_before_files_were_apart(
+    memory: ChatMemory, store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    info = await stored(store, None, **LEGACY)
+    handed: list[tuple[str, str]] = []
+
+    async def encoder_is_handed(
+        session_id: str, title: str, turns: Sequence[hippo_encode.Turn], **rest: Any
+    ) -> None:
+        handed.extend((t.typed, t.answer) for t in turns)
+
+    # No model request: the window is what compress_chat is handed.
+    monkeypatch.setattr(memory, "compress_chat", encoder_is_handed)
+    waiting = await memory.waiting_turns(store, info.session_id)
+    assert [t.turn for t in waiting] == [info.turn]
+    await memory.encode_window(store, info.session_id, "Hobbies", waiting)
+    assert handed == [("I keep bees.", "Noted.")]
 
 
 async def test_a_sleep_run_reads_the_typed_words_the_store_does(

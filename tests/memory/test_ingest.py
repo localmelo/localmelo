@@ -586,6 +586,51 @@ async def test_a_long_title_is_cut_to_the_stores_limit_and_holds_no_password(
         await close(chats, memory)
 
 
+async def test_a_loaded_message_is_indexed_by_the_words_the_store_reads_in_it(
+    tmp_path: Path,
+) -> None:
+    # A message that holds a file's opener keeps only the words before it, and one
+    # that is only the stand-in for files has no words: the import indexes and
+    # keeps notes of what the store reads as typed, so a rebuild writes the same.
+    data = {
+        "sessions": [
+            chat(
+                "files",
+                "2023-05-20T13:40:00",
+                (
+                    "user",
+                    'Keep this format\n\n<attachment name="x" in my own message, '
+                    "then I said more. I live in Lisbon.",
+                ),
+                ("assistant", "Noted."),
+                ("user", "[1 file]"),
+                ("assistant", "Got it."),
+            )
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data)
+    try:
+        assert (report.turns, report.docs) == (2, 2)
+        _, index = memory.stores()
+
+        async def documents() -> list[tuple[Any, ...]]:
+            return sorted(
+                (d.session_id, d.turn, d.kind, d.title, d.text, d.created_at)
+                for d in await index.fetch(await index.ids())
+            )
+
+        imported = await documents()
+        await memory.reindex(chats)
+        assert imported == await documents()
+        assert [row[4] for row in imported] == [
+            "User: Keep this format\nmelo: Noted.",
+            "User: \nmelo: Got it.",
+        ]
+        assert await memory.records() == []
+    finally:
+        await close(chats, memory)
+
+
 def test_load_reads_a_json_file_and_refuses_a_missing_or_broken_one(
     tmp_path: Path,
 ) -> None:
