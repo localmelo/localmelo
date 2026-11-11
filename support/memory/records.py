@@ -1296,9 +1296,12 @@ OWN_WORDS: Final = ("user_statement", "user_request")
 
 
 def by_person(entry: StoredEntry) -> bool:
-    """Whether the person's own words made *entry*: its signal is one of
-    :data:`OWN_WORDS` and its provenance names no other source (a note kept from a
-    page, a file or a result says so there, whatever signal it carries)."""
+    """Whether *entry* is the person's own: they edited it by hand, or their own
+    words made it (its signal is one of :data:`OWN_WORDS` and its provenance names
+    no other source; a note kept from a page, a file or a result says so there,
+    whatever signal it carries)."""
+    if entry.provenance.get("edited"):
+        return True
     return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
 
 

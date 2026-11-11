@@ -648,6 +648,17 @@ async def test_only_a_note_the_persons_own_words_made_is_theirs(
     }
 
 
+async def test_a_note_the_person_edited_is_theirs_and_a_page_does_not_replace_it(
+    memory: ChatMemory,
+) -> None:
+    page = await _put(memory, ALICE, "outcome", source="pointed")
+    edited = await memory.edit_record(page.id, BOB)
+    assert edited is not None and records.by_person(edited)
+    again = await _put(memory, ALICE, "outcome", source="pointed")
+    assert again.replaced is None
+    assert await _texts(memory) == [ALICE, BOB]
+
+
 async def test_a_delete_blanks_the_decision_text_and_logs_the_delete(
     memory: ChatMemory, store: SessionStore, tmp_path: Path
 ) -> None:
