@@ -24,11 +24,12 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.activity import _row, result_line
 from localmelo.support.gateway.console.cards import card_json
 from localmelo.support.gateway.console.routes_memory import (
-    _from_page,
     _from_words,
     _inferred_words,
+    _on,
 )
-from localmelo.support.gateway.i18n import said_text, using
+from localmelo.support.gateway.i18n import said_text, t, using
+from localmelo.support.memory.note_gate import where_from
 from localmelo.support.sessions.store import StoredEvent
 
 from .conftest import PORT
@@ -186,11 +187,18 @@ def test_a_note_s_source_reads_in_the_reader_s_language() -> None:
 
 def test_a_note_from_material_or_inferred_reads_in_the_reader_s_language() -> None:
     at = time.mktime((2026, 10, 30, 12, 0, 0, 0, 0, -1))
-    page = {"from": "https://www.jane.example.com/about"}
-    file = {"from": "resume.pdf"}
+    page = {"source": "pointed", "from": "https://www.jane.example.com/about"}
+    file = {"source": "pointed", "from": "resume.pdf"}
+    result = {"source": "result"}
     plans = Chat("chat", "Plans")
-    assert _from_page(page, at) == "from jane.example.com, Oct 30"
-    assert _from_page(file, at) == "from the file resume.pdf, Oct 30"
+
+    def from_material(prov: dict[str, str]) -> str:
+        return where_from(prov, t, _on(at))
+
+    assert from_material(page) == "from jane.example.com, Oct 30"
+    assert from_material(file) == "from the file resume.pdf, Oct 30"
+    assert from_material(result) == "from a finished task's result, Oct 30"
+    assert from_material({"chat": "Plans"}) == ""
     assert _inferred_words(plans, "", False, at, "web") == (
         "melo inferred it from chat “Plans”, Oct 30"
     )
@@ -198,8 +206,8 @@ def test_a_note_from_material_or_inferred_reads_in_the_reader_s_language() -> No
         "melo inferred it from a deleted chat, Oct 30"
     )
     with using("zh-Hans"):
-        assert _from_page(page, at) == "来自 jane.example.com，10月30日"
-        assert _from_page(file, at) == "来自文件 resume.pdf，10月30日"
+        assert from_material(page) == "来自 jane.example.com，10月30日"
+        assert from_material(file) == "来自文件 resume.pdf，10月30日"
         assert _inferred_words(plans, "", False, at, "web") == (
             "melo 根据对话“Plans”推断，10月30日"
         )

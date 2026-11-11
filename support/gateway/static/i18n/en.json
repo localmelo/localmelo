@@ -1255,6 +1255,7 @@
   "memoryRows.fromDeleted": "from a deleted chat, {day}",
   "memoryRows.fromFile": "from the file {name}, {day}",
   "memoryRows.fromPage": "from {name}, {day}",
+  "memoryRows.fromResult": "from a finished task's result, {day}",
   "memoryRows.inferred": "melo inferred it from {chat}, {day}",
   "memoryRows.inferredDeleted": "melo inferred it from a deleted chat, {day}",
   "memoryTab.ask.about": "Notes are facts melo learned about you there; they can stay after the chat is gone.",
