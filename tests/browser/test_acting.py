@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.support.browser import pagescript, render, safari
 from localmelo.support.browser.driver import (
     ActResult,
@@ -890,7 +891,8 @@ def test_the_note_tells_the_model_to_look_before_it_guesses() -> None:
     assert "read the current page and use its own links and buttons" in PAGE_NOTE
     assert "before you guess addresses" in PAGE_NOTE
     assert 'unless you pass tab="new"' in PAGE_NOTE
-    assert "[password-1]" in PAGE_NOTE and "melo types the real one" in PAGE_NOTE
+    assert "[password-…]" in PAGE_NOTE and "melo types the real one" in PAGE_NOTE
+    assert not HANDLE.search(PAGE_NOTE), "no number for a model to copy (#626)"
     assert (
         "Never type any other password, a card number or a one-time code" in PAGE_NOTE
     )

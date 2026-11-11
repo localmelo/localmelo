@@ -11,18 +11,23 @@ of them.
 from __future__ import annotations
 
 import asyncio
+import secrets
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
-from localmelo.melo.contracts.sign_in import VAULT
+from localmelo.melo.agent import Agent, _step_review
+from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.contracts import sign_in
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, Vault, hide_passwords
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.asks import _restored
 from localmelo.support.gateway.handover import words_of
 from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions import attachments
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import typed_words
 from localmelo.tests.agent.test_sign_in import LIKE_HEADING
@@ -472,6 +477,58 @@ async def test_a_turn_tried_again_twice_holds_its_typed_words_and_files_and_runs
             assert row.attachments and "[password-1]" in row.attachments[0].text
         assert given == [typed] * 3
         assert "quokka" not in stored(tmp_path / "sessions.db")
+
+
+def start_process(monkeypatch: pytest.MonkeyPatch, draw: int) -> Vault:
+    """A new process: its own vault, numbering from a base that the random draw *draw* picked."""
+    monkeypatch.setattr(secrets, "randbelow", lambda _: draw)
+    vault = Vault()
+    monkeypatch.setattr(sign_in, "VAULT", vault)
+    monkeypatch.setattr(_step_review, "VAULT", vault)
+    monkeypatch.setattr(attachments, "VAULT", vault)
+    return vault
+
+
+async def test_a_turn_tried_again_after_a_restart_cannot_type_a_password_given_since(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A handle kept in a stored message stands for nothing in a newer process, whatever that one's first handle is (#626)."""
+    start_process(monkeypatch, 0)
+    typed = "sign in to forum.example for me, my password is old-Secret1"
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")] * 2, run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        assert (await _post_turn(client, main, typed)).status_code == 202
+        turn = await _wait_turn(client, main)
+        [old] = await console.store.list_turns(main)
+        [stale] = HANDLE.findall(old.user_text)
+        assert stale == "[password-100000000]"
+        # The app restarts and the person gives another password in another message.
+        newer = start_process(monkeypatch, 7)
+        given = hide_passwords("on other.example my password is new-Secret9")
+        assert given.endswith("[password-100000007]") and newer.value(stale) is None
+        # Try again reads the old message back as the person's: its handle is not live.
+        typed_again: list[str | None] = []
+        real = StepReviewer.user_message
+
+        def user_message(
+            self: StepReviewer,
+            text: str,
+            recalled: str | None = None,
+            files: Collection[str] = (),
+        ) -> None:
+            real(self, text, recalled, files)
+            typed_again.append(self.sign_in_value(stale, "forum.example"))
+
+        monkeypatch.setattr(StepReviewer, "user_message", user_message)
+        retried = await client.post(
+            f"/api/sessions/{main}/retry", json={"turn_id": turn["id"]}
+        )
+        assert retried.status_code == 202, retried.text
+        await until(lambda: len(typed_again) == 1)
+        await _wait_turn(client, main)
+        assert typed_again == [None]
 
 
 @pytest.mark.parametrize(

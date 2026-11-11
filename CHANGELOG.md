@@ -91,6 +91,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 - A note melo cannot keep no longer costs you the answer: after its last refused try the note tool is not offered again in that turn, and melo answers the rest of what you asked.
+- A chat no longer stalls when the model sends again a note it has just saved: the note tool closes for that turn and melo goes on with its answer.
 - A file you send, and the "[1 file]" or "[1 picture]" mark for a message with no words, no longer count as something you said when melo searches your chats or checks a note.
 - A note that restates your fact with another form of your word ("kept" for "keep", "fluently" for "fluent") or a joining word you did not use is no longer refused.
 
@@ -147,6 +148,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
 - Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
+- A password placeholder kept in a message from before a restart (Try again, a queued message) no longer stands for a newer password; the number in `[password-…]` is new each time melo starts.
 - A token after "Bearer" is hidden after a Chinese character too, and a private key with a second end line is hidden to the last one in stored, logged and finished text.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
