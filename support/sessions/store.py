@@ -485,8 +485,9 @@ class TurnInfo:
     # another agent made): no reader takes it for the person's words.
     composed: bool = False
     # The caller gave the typed text apart from the turn's text, so ``typed_text``
-    # holds what the person typed. Without it ``typed_text`` may be only the
-    # session's first title (``begin_turn``): never read it as words (#626).
+    # holds the words that caller gave: the person's, for every turn that is not
+    # ``composed``. Without it ``typed_text`` may be only the session's first
+    # title (``begin_turn``): never read it as words (#626).
     typed_apart: bool = False
 
 
