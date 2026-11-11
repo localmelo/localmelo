@@ -640,17 +640,25 @@ def name_of(source: str) -> str:
 
 
 def where_from(provenance: Mapping[str, Any], say: Callable[..., str], on: str) -> str:
-    """Where a note kept from a page, a file or a finished task's result came from, as
-    the notes page words it: ``from jane.example.com, Oct 30``, ``from the file
-    resume.pdf, Oct 30`` or ``from a finished task's result, Oct 30``; ``""`` for any
-    other note. *say* gives the words of a ``memoryRows.*`` key of the console's
-    catalog for its parameters, and *on* is the day as the reader reads it."""
+    """Where a note kept from a page, a file or a finished task's result, or brought in
+    from a file, came from, as the notes page words it: ``from jane.example.com, Oct
+    30``, ``from the file resume.pdf, Oct 30`` or ``from a finished task's result,
+    Oct 30``; ``""`` for any other note. *say* gives the words of a ``memoryRows.*``
+    key of the console's catalog for its parameters, and *on* is the day as the
+    reader reads it."""
     how, ref = str(provenance.get("source") or ""), str(provenance.get("from") or "")
     if how == POINTED and ref:
         key = "memoryRows.fromPage" if "://" in ref else "memoryRows.fromFile"
         return say(key, name=name_of(ref), day=on)
     if how == RESULT:
         return say("memoryRows.fromResult", day=on)
+    if how == "import":
+        file = os.path.basename(str(provenance.get("path") or "").rstrip("/\\"))
+        return say(
+            "memoryRows.fromFile",
+            name=file or str(provenance.get("chat") or ""),
+            day=on,
+        )
     return ""
 
 

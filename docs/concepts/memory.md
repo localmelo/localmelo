@@ -355,7 +355,7 @@ melo can read what other coding assistants on this computer already know about y
 - **One choice per file** (a checkbox, on by default), never a question per note. **Bring them in** writes the checked files, then says `Brought in 12 notes · Undo`. In the terminal the choice is a list: `Bring in 12 notes from 2 files`, `Show what they say`, `Not now`.
 - **Ask any time:** the Memory tab's **From other assistants** → **Look for notes**, `/memory import` in a terminal chat, or `melo memory import`.
 - **Undo takes the whole batch back** (each batch has its own **Undo** in the Memory tab; in a terminal, `melo memory import --undo BATCH`), and a note a changed line replaced is current again. A note you reworded since is yours now: Undo keeps it and says how many (`Taken back. Kept 1 note you edited.`).
-- **Imported notes are recalled like any note**, in their own language, but never pinned to every chat; they read as notes, not instructions. In the Memory tab each says where it came from: `From the file CLAUDE.md, Oct 31`.
+- **Imported notes are recalled like any note**, in their own language, but never pinned to every chat; they read as notes, not instructions. In the Memory tab each says where it came from: `From the file CLAUDE.md, Oct 31`; `melo memory list` and `/memory` in the terminal say it in the same words.
 - **Scan again any time.** A line that is a note already is skipped; a line you changed in the same place replaces the note of its old wording.
 
 What it reads, only inside your home folder and never through a link that leaves it:

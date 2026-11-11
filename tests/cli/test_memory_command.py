@@ -99,6 +99,11 @@ SOURCES: list[tuple[str, dict[str, str], str]] = [
         "from the file resume.pdf",
     ),
     ("Your desk is D4.", {"source": "result"}, "from a finished task's result"),
+    (
+        "Your editor is vim.",
+        {"source": "import", "path": "/home/jane/.tools/prefs.md"},
+        "from the file prefs.md",
+    ),
     ("Your team is Atlas.", {"source": "inferred"}, "melo inferred it from Main chat"),
     ("Your cat is Mo.", {}, "from Main chat"),
 ]
@@ -136,6 +141,7 @@ def test_the_list_says_where_a_note_from_a_page_a_file_or_a_result_came_from(
     out = capsys.readouterr().out
     assert f"      from jane.example.com, {origins[SOURCES[0][0]][1]}\n" in out
     assert "from a finished task's result" in out and "from Main chat" in out
+    assert f"      from the file prefs.md, {origins['Your editor is vim.'][1]}\n" in out
 
 
 def test_an_empty_list_says_how_memory_starts(
