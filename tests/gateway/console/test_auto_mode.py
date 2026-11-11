@@ -580,6 +580,7 @@ async def test_try_again_on_the_go_ahead_turn_stays_melos_and_renews_nothing(
         await wait_turn(client, sid)
         assert ran.codes == [KEYS]
         sentence = allowed.json()["turn"]["user_text"]
+        cards = len(await approvals(console, sid))
         again = await client.post(
             f"/api/sessions/{sid}/retry", json={"turn_id": allowed.json()["turn"]["id"]}
         )
@@ -596,8 +597,9 @@ async def test_try_again_on_the_go_ahead_turn_stays_melos_and_renews_nothing(
         # Try again renews nothing: the allowance was used, so the step is blocked
         # again and its card comes back; it did not run a second time.
         assert ran.codes == [KEYS]
-        again_block = (await approvals(console, sid))[-1]
-        assert (again_block["origin"], again_block["allowed"]) == ("auto", False)
+        after = await approvals(console, sid)
+        assert len(after) == cards + 1  # exactly one new card
+        assert (after[-1]["origin"], after[-1]["allowed"]) == ("auto", False)
 
 
 @pytest.mark.asyncio

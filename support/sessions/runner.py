@@ -535,12 +535,14 @@ class SessionRunner:
         title: str | None = None,
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
+        composed: bool = False,
     ) -> RunResult:
         """Run a turn of *text* in this task and return its RunResult.
 
         *title* is the typed text, for the session's first title. *routine*
         names the run's routine (``Agent.run_task``'s ``routine=``), passed
-        only when given. A turn that this runner stopped (:meth:`cancel`,
+        only when given. *composed*: *text* is melo's wording, with no words
+        of the person's. A turn that this runner stopped (:meth:`cancel`,
         :meth:`close`, a takeover) returns the ``cancelled`` RunResult of
         its ``run.finished``, or, when it was stopped before its run
         began, a ``cancelled`` RunResult with the stop's reason and no
@@ -550,7 +552,15 @@ class SessionRunner:
         the turn ends, which then ends on its own.
         """
         turn = await self._start(
-            text, approval, title, None, routine, tuple(attachments), own_task=False
+            text,
+            approval,
+            title,
+            None,
+            routine,
+            tuple(attachments),
+            own_task=False,
+            words="" if composed else None,
+            composed=composed,
         )
         if turn.finish is not None:  # stopped before its run began
             task = asyncio.current_task()

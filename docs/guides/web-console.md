@@ -1049,7 +1049,7 @@ commands and file changes.
   once, within 30 minutes, and sends "Go ahead with the step melo blocked:
   use your passwords or keys." to melo. It is melo's sentence, not your
   words: the chat shows it as a folded line (`Not typed by you`), and
-  nothing, in a chat or in a task, reads it as something you typed, and it
+  nothing, in a chat or in a task, stores, remembers or counts it as something you typed, and it
   never answers a question a task waits on: that still waits for you. While melo works the
   button waits; afterwards the card reads `Allowed once · ran at 14:02`. An
   allowance that ran out unused says `Allowance expired` beside **Allow

@@ -660,9 +660,15 @@ async def test_melos_go_ahead_does_not_answer_a_question_the_task_waits_on(
     sentence = "Go ahead with the step melo blocked: install software."
     main: list[Reply] = [asks_person, answer("The task needs your answer.")]
     heard: list[StoredEvent] = []
+    kept: list[str] = []
     async with ask_console(
         tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done with B")]]
     ) as (console, client, models):
+
+        async def index_exchange(task_id: str, request: str, answer: str) -> None:
+            kept.append(answer)
+
+        monkeypatch.setattr(console.memory, "index_exchange", index_exchange)
         console.asks.add_listener(heard.append)
         task_id = await start(console, "a job")
         await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
@@ -680,6 +686,8 @@ async def test_melos_go_ahead_does_not_answer_a_question_the_task_waits_on(
         assert result == "[answer from the user, in their own words]\nB, please"
         [answered] = [e for e in heard if e.event["type"] == "task.answer"]
         assert answered.event["data"]["by"] == "person"
+        await console.asks.settle()
+    assert kept == ["B, please"]  # the sentence was never kept as an answer
 
 
 async def test_a_stop_ends_the_wait_and_the_chats_turn_on_it_at_once(
