@@ -71,7 +71,7 @@ def test_a_comment_added_to_the_rules_file_changes_nothing(
 # newline, redaction.py is read for any regex use that walk would not see, and
 # the Python between the matches is compared with whole-text redaction on
 # streamed splits.
-RULES = {"_PEM_BEGIN", "_PEM_END", "_KEY", "_BEARER", "_CODE_KEYWORD", "_CODE"}
+RULES = {"PEM_BEGIN", "PEM_END", "_KEY", "_BEARER", "_CODE_KEYWORD", "_CODE"}
 SPANNING_BY_DESIGN = {"_BEARER"}
 
 
@@ -151,14 +151,14 @@ def test_only_the_bearer_pattern_can_match_across_lines() -> None:
 # once more where ``secret_spans`` reads the same places, the key block lines
 # once for both (``_pem_blocks``), and nowhere else.
 RULE_SITES = [
+    ("PEM_BEGIN", "finditer"),
+    ("PEM_END", "finditer"),
     ("_BEARER", "finditer"),
     ("_BEARER", "subn"),
     ("_CODE", "finditer"),
     ("_CODE_KEYWORD", "finditer"),
     ("_KEY", "finditer"),
     ("_KEY", "subn"),
-    ("_PEM_BEGIN", "finditer"),
-    ("_PEM_END", "finditer"),
 ]
 MATCH_METHODS = {
     "match",

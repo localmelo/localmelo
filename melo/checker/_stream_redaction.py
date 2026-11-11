@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker.redaction import BEARER_WORD, redact_secrets
+from localmelo.melo.checker.redaction import (
+    BEARER_WORD,
+    PEM_BEGIN,
+    PEM_END,
+    redact_secrets,
+)
 
 # Why releasing a complete line at a time is safe: key shapes start at
 # sk-/gh.../github_pat_/AKIA/ASIA and end at their first non-token character;
@@ -15,8 +20,10 @@ from localmelo.melo.checker.redaction import BEARER_WORD, redact_secrets
 # marker for a PRIVATE KEY label, anywhere in a line, and is held here to the
 # next END marker, or to the end of the text; it spans lines. Whole-text
 # redaction ends a block at the last of a run of END markers
-# (redaction._pem_blocks); this release does not follow that yet. Every other
-# rule stays within one line. Tests in
+# (redaction._pem_blocks), which this release does not follow: holding to the
+# last one would keep the rest of a reply from streaming after any key block
+# until the reply ends, so for a malformed block with two END markers the text
+# between them streams. Every other rule stays within one line. Tests in
 # tests/checker/test_stream_redaction.py fail the build when a rule can match
 # across lines, when redaction.py matches with a regex they do not inspect, or
 # when a streamed split gives other text than the whole redaction, so this
@@ -26,11 +33,6 @@ from localmelo.melo.checker.redaction import BEARER_WORD, redact_secrets
 # still to come, so its line is held back.
 _OPEN_BEARER = re.compile(BEARER_WORD + r"\s*\Z", re.IGNORECASE)
 
-# The same markers as redaction._PEM_BEGIN and _PEM_END, to find an open block.
-_PEM_BEGIN = re.compile(
-    r"-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----"
-)
-_PEM_END = re.compile(r"-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----")
 # The longest END marker: 9 + 3 * 17 + 11 + 6 + 5 characters, with room to spare.
 _PEM_END_MAX = 96
 
@@ -76,7 +78,7 @@ class LineRedactor:
 
     def _drop_body(self) -> str:
         """Skip a dropped key body; at its END marker, restore the newline."""
-        stop = _PEM_END.search(self._pending)
+        stop = PEM_END.search(self._pending)
         if stop is None:
             self._pending = self._pending[-(_PEM_END_MAX - 1) :]
             return ""
@@ -113,8 +115,8 @@ class LineRedactor:
         pending = self._pending
         closed: list[tuple[int, int]] = []
         pos = 0
-        while (begin := _PEM_BEGIN.search(pending, pos)) is not None:
-            stop = _PEM_END.search(pending, begin.end())
+        while (begin := PEM_BEGIN.search(pending, pos)) is not None:
+            stop = PEM_END.search(pending, begin.end())
             if stop is None or stop.end() > end:
                 hold = pending.rfind("\n", 0, begin.start()) + 1
                 for start, stop_end in reversed(closed):

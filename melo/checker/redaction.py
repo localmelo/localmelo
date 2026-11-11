@@ -22,10 +22,11 @@ REDACTED: Final = "[redacted]"
 # code, in _pem_blocks. Only labels that end in PRIVATE KEY match (RSA, EC, DSA,
 # OPENSSH, ENCRYPTED, plain PKCS#8), and the PGP armor's PRIVATE KEY BLOCK, the
 # same for both lines; a label has at most 3 words of at most 16 characters
-# before PRIVATE KEY, so a scan for a line stays linear.
+# before PRIVATE KEY, so a scan for a line stays linear. The stream release
+# reads the same two line patterns.
 _PEM_LABEL = r" (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----"
-_PEM_BEGIN = re.compile("-----BEGIN" + _PEM_LABEL)
-_PEM_END = re.compile("-----END" + _PEM_LABEL)
+PEM_BEGIN = re.compile("-----BEGIN" + _PEM_LABEL)
+PEM_END = re.compile("-----END" + _PEM_LABEL)
 
 # Pass 2, key shapes, each match whole: an "sk-" key, a GitHub token, an
 # AWS access key id. Each takes the whole run of its characters and starts
@@ -98,7 +99,13 @@ def redact_secrets(text: str) -> tuple[str, int]:
        ``验证码``. Only the code is replaced.
 
     A replaced span never has an ASCII letter or digit next to it, and
-    :data:`REDACTED` matches no pattern, so a second call replaces nothing.
+    :data:`REDACTED` matches no pattern, so a second call replaces nothing,
+    with one exception: an ``sk-`` key or a bearer token that stands directly
+    against a BEGIN line, with no white space between (their characters include
+    ``-`` and letters, so they take the line's dashes and the word ``BEGIN``),
+    breaks that line. When a block closed earlier in the text, a second call
+    then reads that block's END line and the next END line as one run and
+    replaces the text between them. A second call only ever hides more.
     No pattern repeats an unbounded repetition (the PEM label's are capped at
     3 words of 16 characters) and the key block lines are read in one pass in
     code, so the passes take linear time.
@@ -164,8 +171,8 @@ def _pem_blocks(text: str) -> list[tuple[int, int, bool]]:
     if "PRIVATE KEY" not in text:
         return []
     markers = sorted(
-        [(m.start(), m.end(), True) for m in _PEM_BEGIN.finditer(text)]
-        + [(m.start(), m.end(), False) for m in _PEM_END.finditer(text)]
+        [(m.start(), m.end(), True) for m in PEM_BEGIN.finditer(text)]
+        + [(m.start(), m.end(), False) for m in PEM_END.finditer(text)]
     )
     found: list[tuple[int, int, bool]] = []
     body = -1  # where the open block's body starts; -1 when none is open

@@ -70,19 +70,32 @@ def test_count_is_one_per_block_and_second_call_changes_nothing() -> None:
 BEGIN = "-----BEGIN PRIVATE KEY-----"
 END = "-----END PRIVATE KEY-----"
 SHAPE = f"{BEGIN}\n[redacted]\n{END}"
-# (text, result, count): a block runs to the last of a run of END lines.
+# (text, result, count): a block runs to the last of a run of END lines; the
+# text after the last one stays.
 RUNS = [
     # a second BEGIN line is body, and so is the text between two END lines
-    (f"{BEGIN}\nbody-a\n{BEGIN}\nbody-b\n{END}\nbody-c\n{END}", SHAPE, 1),
-    (f"{BEGIN}\nbody-a\n{END}\nbody-b\n{END}", SHAPE, 1),
+    (
+        f"{BEGIN}\nbody-a\n{BEGIN}\nbody-b\n{END}\nbody-c\n{END}\nafter",
+        f"{SHAPE}\nafter",
+        1,
+    ),
+    (f"{BEGIN}\nbody-a\n{END}\nbody-b\n{END}\nafter", f"{SHAPE}\nafter", 1),
     (
         "-----BEGIN RSA PRIVATE KEY-----\nbody-a\n-----END EC PRIVATE KEY-----\n"
-        "body-b\n-----END RSA PRIVATE KEY-----",
-        "-----BEGIN RSA PRIVATE KEY-----\n[redacted]\n-----END RSA PRIVATE KEY-----",
+        "body-b\n-----END RSA PRIVATE KEY-----\nafter",
+        "-----BEGIN RSA PRIVATE KEY-----\n[redacted]\n"
+        "-----END RSA PRIVATE KEY-----\nafter",
         1,
     ),
     # two complete blocks one after the other stay two
-    (f"{BEGIN}\nbody-a\n{END}\n{BEGIN}\nbody-b\n{END}", f"{SHAPE}\n{SHAPE}", 2),
+    (
+        f"{BEGIN}\nbody-a\n{END}\n{BEGIN}\nbody-b\n{END}\nafter",
+        f"{SHAPE}\n{SHAPE}\nafter",
+        2,
+    ),
+    # an END line that shares its dashes with the BEGIN line before it is not a
+    # line of its own: the block has no END line, and nothing of it stays
+    (f"{BEGIN}END PRIVATE KEY-----\nbody-a", f"{BEGIN}\n[redacted]", 1),
     # a block already in its shape, with nothing after it, is left alone
     (SHAPE, SHAPE, 0),
 ]
@@ -92,10 +105,7 @@ RUNS = [
 def test_a_block_runs_to_the_last_of_a_run_of_end_lines(
     text: str, result: str, count: int
 ) -> None:
-    assert redaction.redact_secrets(f"before\n{text}\nafter") == (
-        f"before\n{result}\nafter",
-        count,
-    )
+    assert redaction.redact_secrets(f"before\n{text}") == (f"before\n{result}", count)
     assert redaction.redact_secrets(result) == (result, 0)
 
 
