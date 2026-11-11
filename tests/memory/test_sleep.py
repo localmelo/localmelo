@@ -63,15 +63,19 @@ async def put(
     edited: bool = False,
     topic: str = "about",
     quote: str = "",
+    page: bool = False,
 ) -> int:
-    """A note, written as it is (no supersede), kept *at* that time."""
+    """A note, written as it is (no supersede), kept *at* that time; with *page*, as
+    a note from a page the person pointed to is."""
     store, _ = memory.stores()
     provenance = {"session_id": session, "turn": turn, "topic": topic, "quote": quote}
+    if page:
+        provenance |= {"source": "pointed", "from": "https://jane.example.com/team"}
     entry_id, _ = await store.apply(
         text=text,
         kind=records.TOPIC_KINDS[topic],
         source="user",
-        admitted_by="user_statement",
+        admitted_by="outcome" if page else "user_statement",
         provenance=provenance,
         task_id="",
         session_id=session,
@@ -189,6 +193,46 @@ async def test_a_note_the_user_reworded_is_not_merged_away(memory: ChatMemory) -
     await put(memory, "You live in Utrecht.", LONG_AGO + 5)
     assert (await memory.sleep()).changes == []
     assert await texts(memory) == {"You live in Lisbon.", "You live in Utrecht."}
+
+
+async def test_a_newer_note_from_a_page_does_not_merge_away_the_persons_own_note(
+    memory: ChatMemory,
+) -> None:
+    mine = await put(memory, "Your manager is Bob.", LONG_AGO)
+    page = await put(memory, "Your manager is Alice Wu.", LONG_AGO + 5, page=True)
+    report = await memory.sleep()
+    assert report.changes == [] and report.aborted == ""
+    assert [(i, s) for i, _, s in rows(memory)] == [(mine, "active"), (page, "active")]
+    notes = await memory.stores()[0].active_entries()
+    assert sleep.duplicates(notes) == []
+    assert sleep.replacements(notes, {}) == []
+
+
+async def test_two_notes_the_person_typed_of_one_subject_still_merge(
+    memory: ChatMemory,
+) -> None:
+    older = await put(memory, "Your manager is Bob.", LONG_AGO)
+    newer = await put(memory, "Your manager is Carol Ng.", LONG_AGO + 5)
+    (change,) = (await memory.sleep()).changes
+    assert (change.op, change.before_ids, change.after_id) == ("O1", [older], newer)
+
+
+async def test_a_newer_note_from_a_page_still_merges_away_an_older_one_from_a_page(
+    memory: ChatMemory,
+) -> None:
+    older = await put(memory, "Your manager is Bob.", LONG_AGO, page=True)
+    newer = await put(memory, "Your manager is Alice Wu.", LONG_AGO + 5, page=True)
+    (change,) = (await memory.sleep()).changes
+    assert (change.op, change.before_ids, change.after_id) == ("O1", [older], newer)
+
+
+async def test_a_newer_note_of_the_person_still_merges_away_an_older_one_from_a_page(
+    memory: ChatMemory,
+) -> None:
+    older = await put(memory, "Your manager is Alice Wu.", LONG_AGO, page=True)
+    newer = await put(memory, "Your manager is Bob.", LONG_AGO + 5)
+    (change,) = (await memory.sleep()).changes
+    assert (change.op, change.before_ids, change.after_id) == ("O1", [older], newer)
 
 
 # ── O2: a newer typed value supersedes ──

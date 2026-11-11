@@ -1308,6 +1308,12 @@ def kept_from_replacement(entry: StoredEntry) -> bool:
     return by_person(entry) or bool(entry.provenance.get("edited"))
 
 
+def may_replace(admitted_by: str, old: StoredEntry) -> bool:
+    """Whether a note admitted as *admitted_by* may replace *old*: not when it is
+    from a page, a file or a result (``outcome``) and *old* is kept from replacement."""
+    return admitted_by != "outcome" or not kept_from_replacement(old)
+
+
 def decide(
     text: str,
     active: Sequence[StoredEntry],
@@ -1527,14 +1533,12 @@ async def write(
         action, target = decide(
             cand.text, active, kind=cand.kind, vector=vector, embed_model=embed_model
         )
-        if (
-            action == "UPDATE"
-            and cand.admitted_by == "outcome"
-            and any(e.id == target and kept_from_replacement(e) for e in active)
+        if action == "UPDATE" and any(
+            e.id == target and not may_replace(cand.admitted_by, e) for e in active
         ):
             action, target = decide(
                 cand.text,
-                [e for e in active if not kept_from_replacement(e)],
+                [e for e in active if may_replace(cand.admitted_by, e)],
                 kind=cand.kind,
                 vector=vector,
                 embed_model=embed_model,

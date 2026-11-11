@@ -30,7 +30,9 @@ words and is ``admitted_by="sleep"`` with provenance
 ``{source: "sleep", run_id, session_id, turn}`` (the turn it read); recall may
 list them, but they are never pinned into a prompt. Nothing is deleted: the older
 note is superseded. A note the user reworded is left alone unless a
-newer typed statement of its subject contradicts it. A watermark
+newer typed statement of its subject contradicts it. A note from a page, a file or
+a result never supersedes one the person's own words made
+(:func:`records.may_replace`). A watermark
 (``meta.sleep_until`` of ``index.db``) keeps a second run from redoing a turn;
 a run that hit the cap leaves it, and the next run goes on. :func:`undo` puts a
 run back: what it superseded is current again; what it wrote becomes inactive
@@ -293,7 +295,9 @@ def duplicates(notes: Sequence[StoredEntry]) -> list[tuple[StoredEntry, list[int
     """O1: each note to keep and the older notes it makes redundant, newest first.
 
     A note the user reworded is never merged away, nor one an undo separated
-    from the note to keep (:func:`separated`).
+    from the note to keep (:func:`separated`), nor one the person's own words made
+    when the note to keep is from a page, a file or a result
+    (:func:`records.may_replace`).
     """
     newest = sorted(notes, key=lambda n: (n.created_at, n.id), reverse=True)
     gone: set[int] = set()
@@ -306,6 +310,7 @@ def duplicates(notes: Sequence[StoredEntry]) -> list[tuple[StoredEntry, list[int
             for old in newest[at + 1 : MAX_NOTES]
             if old.id not in gone
             and not _edited(old)
+            and records.may_replace(keep.admitted_by, old)
             and not separated(keep, old)
             and _same(keep, old)
         ]
@@ -619,11 +624,15 @@ def replaced_by(
     """Whether the active note *newer* states what *older* says with another value.
 
     Neither was edited by the user, an undo did not separate them
-    (:func:`separated`), *newer* was said later, both are about the same person
-    (or the user), one subject (by :func:`records.subject_key`, or
-    :func:`records.decide`) and each holds a value the other lacks.
+    (:func:`separated`), *newer* may replace *older* (:func:`records.may_replace`:
+    a note from a page, a file or a result does not replace one the person's own
+    words made), *newer* was said later, both are about the same person (or the
+    user), one subject (by :func:`records.subject_key`, or :func:`records.decide`)
+    and each holds a value the other lacks.
     """
     if newer.id == older.id or _edited(newer) or _edited(older):
+        return False
+    if not records.may_replace(newer.admitted_by, older):
         return False
     if separated(newer, older):
         return False
