@@ -107,6 +107,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `melo -h` shows the everyday options; `melo -h all` shows every option and setting.
 - Come back to a chat with `melo -c` or `melo -r`, and name, undo or copy it.
 - Shift+Tab switches the chat between Ask and Auto.
+- In the terminal too, your next message goes to the one task that asked for you last, and a plain yes allows its blocked step once.
 - Every question with fixed answers is a list you move through and confirm with Enter.
 - Colour tells kinds of output apart, and `NO_COLOR` or `LOCALMELO_ASCII=1` lose nothing.
 - Attach a text file with `/attach`, and run a shell command with `!`.
