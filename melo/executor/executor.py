@@ -576,6 +576,7 @@ class Executor:
                     error_category=ErrorCategory.TOOL_ERROR,
                     duration_ms=duration,
                     images=list(output.images),
+                    no_more_calls=output.no_more_calls,
                 )
             text, images = output.text, list(output.images)
             no_more_calls = output.no_more_calls

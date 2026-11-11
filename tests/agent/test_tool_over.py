@@ -207,16 +207,40 @@ async def test_a_call_to_an_over_tool_is_not_run_and_the_answer_is_next() -> Non
     assert f"Result of keep: Error: {TOOL_OVER}" in request[-1].content
     assert outcome.status == "completed"
     assert outcome.result == "Here is your intro. I could not keep the note."
-    # The call that did not run is refused, not failed, and not a kept note.
+    # The call that did not run carries the executor's own pair for a tool not offered.
     skipped = [
         event.data
         for event in events
         if event.type == "tool.finished" and event.data["error"] == TOOL_OVER
     ]
     assert len(skipped) == 1
-    assert skipped[0]["status"] == ExecutionStatus.BLOCKED.value
+    assert skipped[0]["status"] == ExecutionStatus.ERROR.value
     assert skipped[0]["error_category"] == ErrorCategory.TOOL_NOT_OFFERED.value
     assert skipped[0]["output"] == ""
+
+
+async def test_a_call_in_the_step_that_ends_the_tool_does_not_end_the_run() -> None:
+    events: list[AgentEvent] = []
+    llm = FakeLLM(
+        _step(("keep", "a")),
+        # The second call is the last one the tool takes; the third is in the same step.
+        _step(("look", "x"), ("keep", "b"), ("keep", "c")),
+        _step(("look", "y")),
+        _say("done"),
+    )
+    tools = Tools()
+    (outcome,) = await _run(llm, tools, "keep my notes", events=events)
+    assert tools.ran == ["keep:a", "look:x", "keep:b", "look:y"]
+    # The third call read the fixed reply, and no request asked for the answer:
+    # the run went on with the other tools until the model answered.
+    assert llm.offered() == [ALL, ALL, ["chatty", "look"], ["chatty", "look"]]
+    assert (outcome.status, outcome.result) == ("completed", "done")
+    (skipped,) = [
+        event.data
+        for event in events
+        if event.type == "tool.finished" and event.data["error"] == TOOL_OVER
+    ]
+    assert skipped["name"] == "keep"
 
 
 async def test_the_answer_has_a_fixed_text_when_its_request_gives_none() -> None:

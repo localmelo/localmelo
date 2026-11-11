@@ -560,8 +560,7 @@ HAND_OFF_ALONE = (
 # person sees beside the step; the model reads both.
 TOOL_OVER = (
     "This tool takes no more calls in this turn, so this call did not run.\n"
-    "Do not call it again: answer the user now, and say in one sentence what you "
-    "could not do."
+    "Do not call it again; go on without it."
 )
 # The answer of such a run when the request for its answer gives none.
 TOOL_OVER_ANSWER = (
@@ -2307,18 +2306,15 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run: _RunState,
         why: str,
         *,
-        status: ExecutionStatus = ExecutionStatus.ERROR,
         category: ErrorCategory = ErrorCategory.INVALID_ARGUMENTS,
     ) -> ToolResult:
         """*call*, refused before it ran: its events and an error result saying *why*.
 
-        The event carries *status* and *category*; a refusal that is no failure
-        of the call (a tool that takes no more calls) is ``blocked``, which
-        every surface shows as refused, not as an error.
+        The event carries *category*, the reason the call did not run.
         """
         outcome = ExecutionOutcome(
             tool_name=call.tool_name,
-            status=status,
+            status=ExecutionStatus.ERROR,
             error=why,
             error_category=category,
         )
@@ -3234,6 +3230,10 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             handed: list[str] = []
             handed_slot = CALL_HANDS_OFF.set(handed if handing and not mixed else None)
             over_again = False
+            # The tools that were over before this step: the model was not offered
+            # them, so a call to one ends the run with its answer. A call in the
+            # step that made a tool over only does not run; the run goes on.
+            over_before = frozenset(run.withdrawn)
             try:
                 for call in calls:
                     # Counted when handed over, so a call that timeout_s cuts
@@ -3242,16 +3242,14 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                     if mixed:
                         result, cut = self._not_run(call, run, HAND_OFF_ALONE), 0
                     elif call.tool_name in run.withdrawn:
-                        # The tool said it takes no more calls in this run: this
-                        # one does not run, and the next request is the answer.
                         result = self._not_run(
                             call,
                             run,
                             TOOL_OVER,
-                            status=ExecutionStatus.BLOCKED,
                             category=ErrorCategory.TOOL_NOT_OFFERED,
                         )
-                        cut, over_again = 0, True
+                        cut = 0
+                        over_again = over_again or call.tool_name in over_before
                     else:
                         result, cut = await self._do_execute(
                             call, allowed=allowed, run=run
@@ -3274,8 +3272,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 await self._end_with_answer(task, run)
                 return step + 1, ""
             if over_again:
-                # The model called a tool that takes no more calls in this run:
-                # its next request offers no tool and asks for the answer.
+                # The model called a tool that took no more calls before this
+                # step: its next request offers no tool and asks for the answer.
                 await self._end_with_answer(
                     task,
                     run,

@@ -84,6 +84,17 @@ async def test_plain_string_output_unchanged() -> None:
     assert outcome.images == []
 
 
+async def test_a_tool_reported_error_keeps_no_more_calls() -> None:
+    async def broken() -> ToolOutput:
+        return ToolOutput(text="gone", is_error=True, no_more_calls=True)
+
+    outcome = await _executor("broken", broken).execute_structured(
+        ExecutionRequest(tool_name="broken")
+    )
+    assert outcome.status == ExecutionStatus.ERROR
+    assert outcome.no_more_calls and outcome.to_tool_result().no_more_calls
+
+
 async def test_no_more_calls_is_set_by_the_tool_alone() -> None:
     async def last() -> ToolOutput:
         return ToolOutput(text="Not kept.", no_more_calls=True)
