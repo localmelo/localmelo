@@ -53,7 +53,7 @@ from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.inbox import MAX_NOTES
 from localmelo.melo.schema import ImagePart
 from localmelo.support.gateway.i18n import said, t, t_in
-from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.attachments import TextAttachment, is_stand_in
 from localmelo.support.sessions.display import ActivityText
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -411,7 +411,10 @@ class OwnerAsks:
         echo = await self._echo(ask, "ask_end", "ask.replied", how="person",
                                 text=text, of=ask.person_row or ask.row)  # fmt: skip
         self._emit(ANSWER_EVENT, ask, by="person")
-        self._index(ask, words_before_files(text))
+        # Files alone (no words, or only their stand-in) are no answer to keep.
+        words = words_before_files(text)
+        if words.strip() and not is_stand_in(words):
+            self._index(ask, words)
         return echo
 
     # ── The person's words in the chat ──

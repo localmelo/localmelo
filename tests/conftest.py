@@ -33,6 +33,18 @@ def _no_setting_overrides() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_gateway_ports_kept() -> Iterator[None]:
+    """The gateways registered and the ports expected belong to the process: no test inherits another's."""
+    yield
+    from localmelo.melo.contracts import own_gateway
+
+    own_gateway.expect()
+    # No public call drops every registered gateway: a test that started one and
+    # did not stop it leaves it for the next.
+    own_gateway._registered.clear()
+
+
+@pytest.fixture(autouse=True)
 def _empty_password_vault() -> Iterator[None]:
     """The passwords a test's person gave stay in that test (#547)."""
     from localmelo.melo.contracts.sign_in import VAULT
