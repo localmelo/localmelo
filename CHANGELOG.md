@@ -80,6 +80,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
+- A note melo cannot keep no longer costs you the answer: after its last refused try the note tool is not offered again in that turn, and melo answers the rest of what you asked.
 
 ### App and web console
 

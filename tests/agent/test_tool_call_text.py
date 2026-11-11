@@ -792,7 +792,7 @@ async def test_the_explanation_of_a_block_is_never_a_tool_call_written_as_text(
     run = _RunState(task_id="t")
     try:
         task = cast(Any, SimpleNamespace(task_id="t", query="q"))
-        await agent._answer_on_block(task, run)
+        await agent._end_with_answer(task, run)
     finally:
         await agent.close()
     assert run.status == "completed"
