@@ -1,12 +1,14 @@
 """How recall finds notes: ``[memory] retriever`` and the timings of every recall.
 
 The fixed set of notes and turns of ``test_chat_recall`` (the #309 recall set),
-with a fake embedding model and a fake chat model. ``auto`` and ``embedding``
-are the hybrid; ``bm25`` is words only; ``llm`` lets words pick up to 20
-candidates and the chat model choose among them, falling back to the words-only
-order on a timeout, an error or a reply it cannot read, and making no embedding
-call at all. Every recall reports ``retriever``, ``fallback``, its timings,
-the tokens of the choice, ``candidates`` and ``used``.
+with a fake embedding model and a fake chat model. ``auto`` with an embedding
+model, and ``embedding``, are the hybrid; ``bm25`` is words only; ``llm`` lets words
+pick up to 20 candidates and the chat model choose among them, falling back to the
+words-only order on a timeout, an error or a reply it cannot read, and making no
+embedding call at all. ``auto`` with no embedding model is ``llm`` when a chat model
+is set up (the tests of ``llm`` run for it too) and words only when none is. Every
+recall reports ``retriever``, ``fallback``, its timings, the tokens of the choice,
+``candidates`` and ``used``.
 """
 
 from __future__ import annotations
@@ -81,11 +83,42 @@ def use(memory: ChatMemory, chat: FakeChat) -> None:
     memory.chat_provider = lambda: chat  # type: ignore[method-assign]
 
 
+FAILURES = ("", "no-embedding", "timeout", "error")
+# What answers, and its fallback, for a mode and what the query embedding said,
+# with or without a chat model set up: the chat model changes only `auto` with no
+# embedding model.
+ANSWERS = {
+    **{("bm25", failure): ("bm25", "none") for failure in FAILURES},
+    **{("llm", failure): ("llm", "none") for failure in FAILURES},
+    ("embedding", ""): ("embedding", "none"),
+    ("embedding", "no-embedding"): ("bm25", "no-embedding"),
+    ("embedding", "timeout"): ("embedding", "timeout"),
+    ("embedding", "error"): ("embedding", "error"),
+    ("auto", ""): ("embedding", "none"),
+    ("auto", "timeout"): ("embedding", "timeout"),
+    ("auto", "error"): ("embedding", "error"),
+}
+AUTO_WITHOUT_EMBEDDING = {True: ("llm", "none"), False: ("bm25", "none")}
+
+
+@pytest.mark.parametrize("chat", [True, False])
+@pytest.mark.parametrize("failure", FAILURES)
+@pytest.mark.parametrize("mode", ["auto", "bm25", "embedding", "llm"])
+def test_the_retriever_that_answers(mode: str, failure: str, chat: bool) -> None:
+    want = (
+        AUTO_WITHOUT_EMBEDDING[chat]
+        if (mode, failure) == ("auto", "no-embedding")
+        else ANSWERS[(mode, failure)]
+    )
+    assert memory_service._resolve(mode, failure, chat) == want
+
+
+@pytest.mark.parametrize("mode", ["llm", "auto"])
 async def test_llm_finds_what_the_model_picks_among_the_word_candidates(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
     assert set(NEEDLES) == BY_WORDS
-    memory, _, keys = await made(tmp_path, store, "llm")
+    memory, _, keys = await made(tmp_path, store, mode)
     try:
         for question, needle in NEEDLES.items():
             chat = FakeChat(needle)
@@ -102,10 +135,11 @@ async def test_llm_finds_what_the_model_picks_among_the_word_candidates(
         await memory.aclose()
 
 
+@pytest.mark.parametrize("mode", ["llm", "auto"])
 async def test_the_model_decides_not_the_word_order(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
-    memory, _, keys = await made(tmp_path, store, "llm")
+    memory, _, keys = await made(tmp_path, store, mode)
     try:
         question = "when is my group meeting?"
         use(memory, FakeChat("meeting"))
@@ -122,10 +156,11 @@ async def test_the_model_decides_not_the_word_order(
         await memory.aclose()
 
 
+@pytest.mark.parametrize("mode", ["llm", "auto"])
 async def test_llm_sends_nothing_when_no_word_matches(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
-    memory, _, _ = await made(tmp_path, store, "llm")
+    memory, _, _ = await made(tmp_path, store, mode)
     try:
         chat = FakeChat("meeting")
         use(memory, chat)
@@ -138,11 +173,13 @@ async def test_llm_sends_nothing_when_no_word_matches(
         await memory.aclose()
 
 
+@pytest.mark.parametrize("mode", ["llm", "auto"])
 @pytest.mark.parametrize("failure", ["timeout", "error", "unreadable"])
 async def test_llm_falls_back_to_the_words_only_order(
     tmp_path: Path,
     store: SessionStore,
     monkeypatch: pytest.MonkeyPatch,
+    mode: str,
     failure: str,
 ) -> None:
     memory, cfg, _ = await made(tmp_path, store, "bm25")
@@ -156,7 +193,7 @@ async def test_llm_falls_back_to_the_words_only_order(
         for question in NEEDLES:
             cfg.memory.retriever = "bm25"
             words = [item.key for item in await memory.search(question)]
-            cfg.memory.retriever = "llm"
+            cfg.memory.retriever = mode
             use(memory, chat)
             recall = Recall()
             assert [
@@ -176,11 +213,12 @@ async def test_llm_falls_back_to_the_words_only_order(
 async def test_these_two_make_no_embedding_call(
     tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
-    embedding = FakeEmbedding()
+    embedding, chat = FakeEmbedding(), FakeChat("meeting")
     memory, _, _ = await made(tmp_path, store, mode, embedding)
-    use(memory, FakeChat("meeting"))
+    use(memory, chat)
     try:
         embedding.calls.clear()
+        chat.calls.clear()
         typed = "I prefer tea. When is my group meeting?"
         turn = await _turn(store, "Ask")
         found = await teach(memory, store, turn, typed)
@@ -188,6 +226,7 @@ async def test_these_two_make_no_embedding_call(
         await memory.drain()
         await memory.search("where do I live?")
         assert embedding.calls == []
+        assert bool(chat.calls) == (mode == "llm")  # `bm25` makes no model request
         assert [note.text for note in found.remembered] == ["You prefer tea."]
         assert found.recall is not None and found.recall.embed_ms == 0
         assert found.recall.retriever == mode and found.recall.used == len(found.used)
@@ -199,8 +238,9 @@ async def test_these_two_make_no_embedding_call(
 async def test_auto_and_embedding_are_the_hybrid(
     tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
-    embedding = FakeEmbedding()
+    embedding, chat = FakeEmbedding(), FakeChat("meeting")
     memory, _, keys = await made(tmp_path, store, mode, embedding)
+    use(memory, chat)
     try:
         assert await recall_at_3(memory, keys) == set(QUESTIONS)
         recall = Recall()
@@ -208,6 +248,9 @@ async def test_auto_and_embedding_are_the_hybrid(
         assert (recall.retriever, recall.fallback) == ("embedding", "none")
         assert recall.candidates >= 1 and recall.used >= 1 and recall.select_ms == 0
         assert recall.embed_ms >= 0 and recall.search_ms >= 0
+        assert (
+            chat.calls == []
+        )  # an embedding model set up: the chat model is not asked
     finally:
         await memory.aclose()
 
@@ -215,15 +258,37 @@ async def test_auto_and_embedding_are_the_hybrid(
 @pytest.mark.parametrize(
     ("mode", "fallback"), [("auto", "none"), ("embedding", "no-embedding")]
 )
-async def test_without_an_embedding_model_recall_is_words_only(
+async def test_with_neither_an_embedding_nor_a_chat_model_recall_is_words_only(
     tmp_path: Path, store: SessionStore, mode: str, fallback: str
 ) -> None:
     memory, _, keys = await made(tmp_path, store, mode)
+    try:
+        assert memory.chat_provider() is None
+        assert await recall_at_3(memory, keys) == BY_WORDS
+        recall = Recall()
+        await memory.search("when is my group meeting?", recall=recall)
+        assert (recall.retriever, recall.fallback) == ("bm25", fallback)
+        assert recall.select_ms == 0
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("mode", "fallback"), [("bm25", "none"), ("embedding", "no-embedding")]
+)
+async def test_these_make_no_chat_request_without_an_embedding_model(
+    tmp_path: Path, store: SessionStore, mode: str, fallback: str
+) -> None:
+    memory, _, keys = await made(tmp_path, store, mode)
+    chat = FakeChat("meeting")
+    use(memory, chat)
     try:
         assert await recall_at_3(memory, keys) == BY_WORDS
         recall = Recall()
         await memory.search("when is my group meeting?", recall=recall)
         assert (recall.retriever, recall.fallback) == ("bm25", fallback)
+        assert (recall.select_ms, recall.select_tokens["prompt"]) == (0, 0)
+        assert chat.calls == []
     finally:
         await memory.aclose()
 
@@ -249,10 +314,11 @@ async def test_a_failing_embedding_is_named_in_the_recall(
         await memory.aclose()
 
 
+@pytest.mark.parametrize("mode", ["llm", "auto"])
 async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, mode: str
 ) -> None:
-    memory, cfg, _ = await made(tmp_path, store, "llm")
+    memory, cfg, _ = await made(tmp_path, store, mode)
     use(memory, FakeChat("meeting"))
     try:
         for typed in ("hi", "", "when is my group meeting?"):

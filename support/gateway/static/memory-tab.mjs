@@ -34,12 +34,12 @@ export function matches(row, query) {
   return words.every((word) => hay.includes(word));
 }
 
-/** What melo says about how it searches: by meaning with the embedding model, else by words only. */
+/** What melo says about how it searches: by meaning with the embedding model, else by words with the chat model's choice. */
 export function searchLine(on, model, retriever = 'auto') {
   if (!on) return t('memoryTab.search.off');
   if (retriever === 'bm25') return t('memoryTab.search.words');
   if (retriever === 'llm') return t('memoryTab.search.model');
-  return model ? t('memoryTab.search.meaning', {model}) : t('memoryTab.search.wordsOnly');
+  return model ? t('memoryTab.search.meaning', {model}) : t('memoryTab.search.noEmbedding');
 }
 
 /** What "Forget everything" will remove, in the confirm's words. */

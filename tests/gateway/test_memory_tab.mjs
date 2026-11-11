@@ -68,7 +68,7 @@ test('the words: what a search matches, how memory searches, and what forgetting
   const row = note(1, 'You prefer short answers.', {from: 'from a deleted chat, Oct 30'});
   assert.ok(matches(row, 'short ANSWERS') && matches(row, 'preferences deleted') && matches(row, ''));
   assert.ok(!matches(row, 'tea'));
-  assert.match(searchLine(true, ''), /^Searching by words only\./);
+  assert.match(searchLine(true, ''), /^Searching by words, and your chat model picks the notes that matter\. An embedding model/);
   assert.equal(searchLine(true, 'Qwen3-Embedding-0.6B'), 'Searching by meaning with Qwen3-Embedding-0.6B, and by words.');
   assert.match(searchLine(false, 'x'), /^Off\./);
   // A retriever that makes no embedding call says so, whatever model is set up.

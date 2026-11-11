@@ -77,6 +77,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Tidying notes while you are away is built and off by default while it is tested; one tap undoes a tidy.
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
+- With no embedding model set up, melo now finds a note you ask about in other words: the chat model picks among the notes that share a word with your message, within 4 seconds.
 - A note from a page, a file or a task's result is never shown to the model as your words.
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.

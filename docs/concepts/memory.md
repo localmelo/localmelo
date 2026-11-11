@@ -218,7 +218,7 @@ These levels are developer settings because they have not been measured to keep 
 
 | Value | How it finds notes | What it costs |
 |---|---|---|
-| `auto` (default) | By words, and by meaning too when an embedding model is set up. | One small embedding request per message, with the 1.5 s limit above. Nothing extra without an embedding model. |
+| `auto` (default) | By words, and by meaning too when an embedding model is set up. With no embedding model and a chat model set up, the same as `llm`; with neither, by words only. | With an embedding model: one small embedding request per message, with the 1.5 s limit above. Without one: one chat request per message that shares a word with a note or earlier chat, about a second with a thinking model, and the words alone if it takes over 4 s. |
 | `bm25` | By words only. | Nothing: no model request at all. It misses a question that shares no word with the note. |
 | `embedding` | The same as `auto` with a model; `melo serve` refuses to start without one. | The same as `auto`. |
 | `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. |
@@ -322,7 +322,7 @@ The **Memory** tab of the console's panel, `/memory` in the terminal and `melo m
 
 The **Memory** tab:
 
-- The switch **Remember across chats** turns memory on or off (`[memory] across_chats`); a line under it says how melo searches: by meaning with the embedding model and by words, or by words only.
+- The switch **Remember across chats** turns memory on or off (`[memory] across_chats`); a line under it says how melo searches: by meaning with the embedding model and by words, or by words with your chat model picking the notes that matter.
 - Then come the notes, newest first, each with its topic and where it came from (`From chat “Planning”, Oct 30`); the search box filters the list.
 - **Edit** rewords a note; **Delete** asks `Forget this note?` first.
 - **Forget everything…** names what goes (the notes and melo's search index of your chat turns; your chats stay) with `Keep everything` as the first answer.

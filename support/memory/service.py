@@ -17,9 +17,10 @@ With the developer setting ``[memory] sleep`` (:mod:`.sleep`),
 :meth:`ChatMemory.undo_sleep` puts a run back.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
-``auto`` (words, and meaning too with an embedding model), ``bm25``,
-``embedding`` or ``llm`` (words pick :data:`CANDIDATES`, the chat model chooses
-among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). With the
+``auto`` (words, and meaning too with an embedding model; with none, ``llm`` when a
+chat model is set up, else words only), ``bm25``, ``embedding`` or ``llm`` (words
+pick :data:`CANDIDATES`, the chat model chooses among them within
+:data:`SELECT_TIMEOUT_S`, no embedding calls). With the
 developer setting ``[memory] recall_form = "list"`` the recall block and the
 search tool show each chat turn as one line, not an excerpt, and the chat's model
 opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`). In the
@@ -304,12 +305,21 @@ class Recall:
         return data
 
 
-def _resolve(mode: str, failure: str) -> tuple[str, str]:
-    """The retriever that answers and its ``fallback``, for a configured *mode*."""
+def _resolve(mode: str, failure: str, chat: bool) -> tuple[str, str]:
+    """The retriever that answers and its ``fallback``, for a configured *mode*.
+
+    *failure* is what the query embedding said (``no-embedding`` when no embedding
+    model is set up) and *chat* says a chat model is set up. ``auto`` without an
+    embedding model is the chat model's choice among the word candidates (``llm``),
+    or words only (``bm25``) when no chat model is set up either; ``embedding``
+    without a model is words only, with the reason in ``fallback``.
+    """
     if mode in ("bm25", "llm"):
         return mode, "none"
-    if failure == "no-embedding":  # `auto` without a model is just words
-        return "bm25", "none" if mode == "auto" else failure
+    if failure == "no-embedding":
+        if mode == "auto":
+            return ("llm" if chat else "bm25"), "none"
+        return "bm25", failure
     return "embedding", failure or "none"
 
 
@@ -1015,6 +1025,11 @@ class ChatMemory:
         mode = cfg.memory.retriever if cfg is not None else "auto"
         return mode if mode in ("bm25", "embedding", "llm") else "auto"
 
+    def _answering(self, failure: str) -> tuple[str, str]:
+        """:func:`_resolve` for the settings now: the retriever that answers a recall
+        and its ``fallback``, given what the query embedding said (*failure*)."""
+        return _resolve(self.retriever(), failure, self.chat_provider() is not None)
+
     def recall_settings(self, reading: Reading | None = None) -> RecallSettings:
         """The recall settings of the settings now.
 
@@ -1335,12 +1350,13 @@ class ChatMemory:
         """Rank for *query* as the retriever says; the numbers go to *recall*.
 
         *min_cosine* and *min_coverage* are the bars of the ranking; the loose
-        candidates of the ``llm`` retriever take no coverage bar and no vectors.
+        candidates of the ``llm`` retriever (named, or what ``auto`` becomes with no
+        embedding model and a chat model set up) take no coverage bar and no vectors.
         With *listing* (the list form) no cap on a chat's turns applies, and a turn
         matched by meaning carries its cosine (:attr:`Item.similarity`).
         """
-        mode = self.retriever()
-        recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
+        recall.retriever, recall.fallback = self._answering(embedded.failure)
+        by_chat = recall.retriever == "llm"
         started = time.perf_counter()
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
@@ -1368,13 +1384,13 @@ class ChatMemory:
                     keep_from_turn=keep_from_turn,
                     coverage=0.0,
                 )[:CANDIDATES]
-                if mode == "llm"
+                if by_chat
                 else []
             )
             replaced = self._replaced(corpus)
             followed = self._derived(corpus)[1]
         recall.search_ms = elapsed_ms(started)
-        recall.candidates = len(loose) if mode == "llm" else len(found)
+        recall.candidates = len(loose) if by_chat else len(found)
         if loose and records_k + docs_k:
             found = await self._select(
                 query, loose, found, recall, k=records_k + docs_k
@@ -1681,7 +1697,7 @@ class ChatMemory:
         if not query.strip():
             recall.query_from = "none"
             failure = "" if self.embedding()[0] else "no-embedding"
-            recall.retriever, recall.fallback = _resolve(self.retriever(), failure)
+            recall.retriever, recall.fallback = self._answering(failure)
             return TurnMemory(recall=recall)
         started = time.perf_counter()
         embedded = await self._embed(
