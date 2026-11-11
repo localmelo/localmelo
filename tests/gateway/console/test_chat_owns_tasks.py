@@ -1231,7 +1231,7 @@ async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor
         assert "also add a short summary" in fresh.spec["objective"]
 
 
-@pytest.mark.parametrize("by", ["person", "melo"])
+@pytest.mark.parametrize("by", ["person", "melo", "both"])
 async def test_an_allow_once_still_unread_at_the_end_goes_on_as_the_allowance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by: str
 ) -> None:
@@ -1265,14 +1265,25 @@ async def test_an_allow_once_still_unread_at_the_end_goes_on_as_the_allowance(
             ["install"],
             "python_exec",
         )
-        _, how = await workers.message(task_id, "Go ahead.", same_job=True, by=by)
+        if by == "both":  # the person's note too: they are never joined
+            await workers.message(task_id, "also add a summary")
+        _, how = await workers.message(
+            task_id,
+            "Go ahead.",
+            same_job=True,
+            by="person" if by == "person" else "melo",
+        )
         assert how == "queued"
         release.set()
         fresh = await _went_on(console, task_id)
         await until(lambda: _is(console, fresh.task_id, "done"), timeout=15.0)
         assert ran.codes == [INSTALL]
-        # The successor keeps the person's words only: melo's go-ahead is data there.
+        # The successor keeps the person's words only: melo's go-ahead is data there,
+        # in its note, or in its inbox beside the person's own note.
         assert ("Go ahead." in fresh.spec["user_words"]) is (by == "person")
+        assert ("also add a summary" in fresh.spec["user_words"]) is (by == "both")
+        seen = [m.content for r in models["workers"][1].requests for m in r]
+        assert any("Go ahead." in str(text) for text in seen)  # the model hears it
 
 
 async def test_a_message_whose_successor_cannot_start_is_said_in_the_chat(

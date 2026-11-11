@@ -1399,7 +1399,11 @@ class ConsoleSessions:
             # again.
             pictures = await self._store.turn_images(session_id, undone.turn)
             text, words = undone.user_text, None
-            if undone.attachments:
+            if undone.composed:
+                words = (
+                    ""  # melo's own wording again, as melo's (Allow once's sentence)
+                )
+            elif undone.attachments:
                 text = undone.typed_text
             else:
                 head = words_before_files(text)
@@ -1410,6 +1414,7 @@ class ConsoleSessions:
                 attachments=undone.attachments or (),
                 words=words,
                 images=pictures,
+                composed=undone.composed,
             )
             entry.last_used = self._clock()
             return turn, resumed

@@ -551,6 +551,56 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
 
 
 @pytest.mark.asyncio
+async def test_try_again_on_the_go_ahead_turn_stays_melos_and_renews_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[tuple[str, str | None]] = []
+    run_task = Agent.run_task
+
+    async def spy(self: Agent, query: str, **kwargs: Any) -> Any:
+        runs.append((query, kwargs.get("user_words")))
+        return await run_task(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", spy)
+    plans = [
+        step(KEYS),
+        _answer("I left .git as it is."),
+        step(KEYS, "call_2"),
+        _answer("Done."),
+        step(KEYS, "call_3"),
+        _answer("Blocked again."),
+    ]
+    async with auto_console(tmp_path, plans) as (console, client, ran, _):
+        sid = await create(client, tmp_path, "Tidy the notes", approvals="auto")
+        await wait_turn(client, sid)
+        [block] = await approvals(console, sid)
+        allowed = await client.post(
+            f"/api/sessions/{sid}/blocks/{block['request_id']}/allow"
+        )
+        await wait_turn(client, sid)
+        assert ran.codes == [KEYS]
+        sentence = allowed.json()["turn"]["user_text"]
+        again = await client.post(
+            f"/api/sessions/{sid}/retry", json={"turn_id": allowed.json()["turn"]["id"]}
+        )
+        assert again.status_code == 202, again.text
+        await wait_turn(client, sid)
+        # The sentence is tried again as melo's: no words of the person's, composed.
+        tried = (await console.store.list_turns(sid))[-1]
+        assert (tried.user_text, tried.composed, typed_words(tried)) == (
+            sentence,
+            True,
+            "",
+        )
+        assert runs[-1] == (sentence, "")
+        # Try again renews nothing: the allowance was used, so the step is blocked
+        # again and its card comes back; it did not run a second time.
+        assert ran.codes == [KEYS]
+        again_block = (await approvals(console, sid))[-1]
+        assert (again_block["origin"], again_block["allowed"]) == ("auto", False)
+
+
+@pytest.mark.asyncio
 async def test_a_step_that_changes_localmelo_itself_cannot_be_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
