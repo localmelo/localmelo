@@ -1925,7 +1925,7 @@ Create a session, usually with its first turn.
   stays) and adds it to the message as an `<attachment>` block, so the turn's `user_text`
   holds the words and the files. When the words give no password and the files hold
   exactly one, the run of that turn may type it on a site the words name; a turn sent
-  again (`retry`), a message that waited in the queue and a task never get one.
+  again (`retry`), a message that waited through a restart and a task never get one.
 - `images` are the pictures the person added: ids from [`POST /api/uploads`](#post-apiuploads),
   at most 4, none twice. An id that is gone is 400 `picture_gone`; more than 4 is 400 `invalid_request`;
   a chat model known not to read pictures is 409 `model_text_only`. A message with pictures goes to

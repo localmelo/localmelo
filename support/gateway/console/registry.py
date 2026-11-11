@@ -245,7 +245,8 @@ class TurnExtras:
 
     ``file_handles`` are the handles the door made from values in the files as the
     message arrived (``hide_message``): data beside the message, never read from a
-    text. A message that waited, a retry and a task have none (#626).
+    text. A queued message keeps them in memory only; a retry, a stored row read back
+    and a task have none (#626).
     """
 
     attachments: tuple[TextAttachment, ...] = ()

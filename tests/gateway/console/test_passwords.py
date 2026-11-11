@@ -20,6 +20,7 @@ import pytest
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console.asks import _restored
 from localmelo.support.gateway.handover import words_of
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
@@ -328,6 +329,48 @@ async def test_the_one_password_of_a_sent_file_is_typed_for_that_run_and_no_retr
         assert VAULT.value("[password-1]") == secret
         assert review.sign_in_value("[password-1]", "forum.example") is None
         assert secret not in stored(tmp_path / "sessions.db")
+
+
+async def test_a_queued_message_carries_its_files_handles_in_memory_and_a_stored_row_has_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The set waits with the message in this process; the stored row holds no set, so a row read back after a restart has none (#626)."""
+    seen: list[Any] = []
+    real = Agent.run_task
+
+    async def run_task(self: Agent, query: str, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("file_handles"))
+        return await real(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", run_task)
+    release = asyncio.Event()
+    main = [held(release, answer("First.")), answer("Second.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        assert (await _post_turn(client, chat, "start the job")).status_code == 202
+        await until(lambda: len(models["main"].requests) == 1)
+        queued = await _post_turn(
+            client,
+            chat,
+            "sign in to forum.example for me",
+            attachments=[a_file("login.txt", "password: quokka-5541")],
+            client_request_id="q-1",
+        )
+        assert queued.json()["echo"]["echo"] == "queued", queued.text
+        info = await console.store.get_session(chat)
+        assert info is not None
+        [row] = info.meta["queued"]
+        assert "[password-1]" in row["attachments"][0]["text"]
+        assert "file_handles" not in row and not _restored(row).file_handles
+        release.set()
+        await until(lambda: len(seen) == 2)
+        await console.asks.settle()
+        await _wait_turn(client, chat)
+        assert seen == [None, {"[password-1]"}]
 
 
 async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_sent_one_does(
