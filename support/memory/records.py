@@ -272,7 +272,25 @@ _SECRET_WORDS = re.compile(
 # What a cut-out password's mark is read as: a value by its shape.
 _STOOD_FOR: Final = "0000"
 _ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
+# A card number is 13 to 19 digits that pass the checksum. Read plainly, one space or
+# hyphen may stand between two digits.
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+# Read as it is really written: between two digits one hyphen, dot, tab or Unicode
+# space (no-break, thin, ideographic ...), or one to three spaces, or a line break
+# with a few spaces around it (a wrapped line). A match may hold more than one
+# line break; :func:`_card_like` allows one. Every count is bounded (12 to 18
+# digits, 3 spaces, 8 spaces around a break), so no repetition is nested
+# unbounded and a match takes time in proportion to the text.
+_FILL = (
+    "\N{NO-BREAK SPACE}\N{OGHAM SPACE MARK}\N{EN QUAD}-\N{HAIR SPACE}"
+    "\N{NARROW NO-BREAK SPACE}\N{MEDIUM MATHEMATICAL SPACE}\N{IDEOGRAPHIC SPACE}"
+)
+_BETWEEN = (
+    rf"(?:[-.\t{_FILL}]| {{1,3}}"
+    rf"|[ \t{_FILL}]{{0,8}}(?:\r\n|[\r\n])[ \t{_FILL}]{{0,8}})?"
+)
+_CARD_WRITTEN = re.compile(rf"(?<!\d)(?:\d{_BETWEEN}){{12,18}}\d(?!\d)")
+_LINE_BREAK = re.compile(r"\r\n|[\r\n]")
 
 # A plain statement: the user's own words about themselves, at most this long
 # once a lead-in ("By the way, …", "对了，…") is set aside.
@@ -415,13 +433,35 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _card_like(match: str) -> bool:
+    """Whether *match* of a card pattern is a card number: at most one line break in
+    it, and the checksum passes."""
+    return len(_LINE_BREAK.findall(match)) <= 1 and _luhn(re.sub(r"\D", "", match))
+
+
+def number_spans(text: str) -> list[tuple[int, int]]:
+    """Where *text* holds an ID number or a card number: the ``(start, end)`` of each,
+    sorted, in *text* as given.
+
+    An ID number is ``123-45-6789`` or 17 digits and a check character. A card number
+    is read both ways (:data:`_CARD`, :data:`_CARD_WRITTEN`): the written reading
+    can join a card to the digits next to it (an expiry after two spaces, the line
+    above) into one longer number that fails the checksum, and the plain reading
+    then still finds the card. It is for a reader that takes text out by its place,
+    as :func:`~localmelo.melo.checker.redaction.secret_spans` is: a number alone on
+    a line, or one that crosses a line, belongs to no sentence.
+    """
+    places = [match.span(1) for match in _ID_NUMBER.finditer(text)]
+    for pattern in (_CARD, _CARD_WRITTEN):
+        places += [m.span() for m in pattern.finditer(text) if _card_like(m.group())]
+    return sorted(set(places))
+
+
 def holds_secret_value(text: str) -> bool:
     """Whether *text* holds the value of a secret: a key or token, a code next to its
     word, a private key, a card or ID number. The words alone (``password``) do not count.
     """
-    if redact_secrets(text)[1] or _ID_NUMBER.search(text):
-        return True
-    return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _CARD.finditer(text))
+    return bool(redact_secrets(text)[1]) or bool(number_spans(text))
 
 
 def gives_password(text: str) -> bool:

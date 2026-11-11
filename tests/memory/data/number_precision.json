@@ -1,0 +1,257 @@
+[
+ {
+  "kind": "years",
+  "text": "Revenue by year: 2019 2020 2021 2022 2023 2024",
+  "before": false
+ },
+ {
+  "kind": "years",
+  "text": "Years covered: 2015 2016 2017 2018 2019 2020 2021 2022",
+  "before": true
+ },
+ {
+  "kind": "years",
+  "text": "Timeline 1999 2000 2001 2002 2003 2004 2005",
+  "before": false
+ },
+ {
+  "kind": "years",
+  "text": "Cohorts 2012-2013-2014-2015",
+  "before": false
+ },
+ {
+  "kind": "years",
+  "text": "Seasons 2010.2011.2012.2013",
+  "before": false
+ },
+ {
+  "kind": "years",
+  "text": "Release years\t2016\t2017\t2018\t2019",
+  "before": false
+ },
+ {
+  "kind": "years",
+  "text": "Leap years in range: 1996 2000 2004 2008 2012 2016 2020 2024",
+  "before": true
+ },
+ {
+  "kind": "amounts",
+  "text": "Amounts (USD)\n1200 3400\n5600 7800 9000",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "Totals\n1500 2500 3500\n4500 5500 6500",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "Region EU:\n 1200 3400 5600\n 7800 9100 2300",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "Q1 and Q2 amounts\n120 340 560 780\n910 230 450 670",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "Costs:\n15 25 35 45\n55 65 75 85",
+  "before": false
+ },
+ {
+  "kind": "amounts",
+  "text": "Region\tQ1\tQ2\tQ3\tQ4\nEU\t1200\t3400\t5600\t7800",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Call +86 138 0013 8000 after nine.",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Whatsapp +55 11 91234 5678 or the office line.",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Mobile +62 812 3456 7890",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Reach me at +33 1 23 45 67 89",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Phone: +44 20 7946 0958, fax +44 20 7946 0959",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Hotline +49 30 12345678 ext 90",
+  "before": false
+ },
+ {
+  "kind": "phone",
+  "text": "Dial 001 415 555 2671 and ask for the front desk.",
+  "before": false
+ },
+ {
+  "kind": "order",
+  "text": "Order 2024-0315-0012-4471 shipped yesterday.",
+  "before": false
+ },
+ {
+  "kind": "order",
+  "text": "Order number 1234567890123 is delayed.",
+  "before": false
+ },
+ {
+  "kind": "order",
+  "text": "Part 4571-2230-8812-0045 is back in stock.",
+  "before": false
+ },
+ {
+  "kind": "order",
+  "text": "Student ID 2021 0315 0012 is on the form.",
+  "before": false
+ },
+ {
+  "kind": "order",
+  "text": "Case ref 3301 7745 2290 1163 was closed on Friday.",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "Logged at 20240315123045 by the batch job.",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "Build 20241109153022 passed.",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "Epoch in milliseconds: 1731196800000",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "Window 20240315 123045 123 in the trace.",
+  "before": false
+ },
+ {
+  "kind": "timestamp",
+  "text": "Sprint 2024 03 15 2024 03 29",
+  "before": true
+ },
+ {
+  "kind": "tracking",
+  "text": "Tracking 6129 8765 4321 0987 left the depot.",
+  "before": false
+ },
+ {
+  "kind": "tracking",
+  "text": "Parcel 9400 1118 9922 3347 8512 91 is in transit.",
+  "before": false
+ },
+ {
+  "kind": "tracking",
+  "text": "Tracking number 7712 3456 7890 arrives Monday.",
+  "before": false
+ },
+ {
+  "kind": "isbn",
+  "text": "ISBN 978-0-306-40615-7",
+  "before": false
+ },
+ {
+  "kind": "isbn",
+  "text": "ISBN 978-3-16-148410-0",
+  "before": false
+ },
+ {
+  "kind": "isbn",
+  "text": "ISBN-13: 978-1-4028-9462-6",
+  "before": true
+ },
+ {
+  "kind": "isbn",
+  "text": "Two books: 978-0-13-110362-7 and 978-0-596-52068-7",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "415-555-2671\n415-555-8899",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "+1 415 555 2671\n+1 415 555 8899",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "Office\n415 555 2671\n415 555 8899",
+  "before": false
+ },
+ {
+  "kind": "adjacent",
+  "text": "020 7946 0958\n020 7946 0959",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Scores 12 15 18 20 22 25 27 30",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Lottery numbers 04 11 23 35 42 17 29",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Pi starts 3.14159 26535 89793",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "GPS 37.774929 122.419418",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Fibonacci: 1 1 2 3 5 8 13 21 34 55 89 144",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Population 1 234 567 890 123",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Population 1\u00a0234\u00a0567\u00a0890\u00a0123",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Serial 0042 0043 0044 0045 0046",
+  "before": false
+ },
+ {
+  "kind": "numbers",
+  "text": "Pages 101 102 103 104 105 106 107",
+  "before": true
+ },
+ {
+  "kind": "numbers",
+  "text": "Seats 12 14 16 18 20 22 24 26",
+  "before": false
+ }
+]

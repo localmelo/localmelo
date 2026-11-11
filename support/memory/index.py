@@ -1,7 +1,9 @@
 """The conversation index: the documents of every finished turn of every session.
 
 A turn's text is the user's typed words and the answer without its thinking,
-passed through ``redact_secrets``; a task's carries its title too. A turn that
+cleaned of secrets (:func:`cleaned`: a sentence a note would refuse is left out, the
+rest redacted); a task's carries its title too, and the stored title is cleaned
+the same way. A turn that
 fits in :data:`DOC_CHARS` is one document. A longer one becomes up to
 :data:`MAX_CHUNKS` documents of the same session and turn (:func:`document_chunks`):
 chunk 0 is its head, each later chunk repeats a short head of what the user
@@ -46,7 +48,7 @@ from localmelo.melo.memory._sqlite import (
     secure_deletes,
 )
 from localmelo.melo.memory.notes import split_sentences
-from localmelo.support.memory.records import sensitive
+from localmelo.support.memory.records import number_spans, sensitive
 
 DOC_CHARS: Final = 2_000
 # A turn's text over DOC_CHARS becomes at most this many chunks, each at most
@@ -260,16 +262,17 @@ def _kept(text: str) -> str:
     password, a card number), each sentence a secret's place reaches into, and the
     place itself.
 
-    A secret's place is a password's value or what the redaction replaces. It can
-    lie outside the sentence that makes it one, or cross a sentence's end: a quoted
-    value with a full stop in it, a value or a token on the line after its word, a
-    code in the sentence before its keyword. Neither sentence then reads as a
-    secret by itself. So everything is found in the text as given and taken out in
-    one pass at the end. A cut made first hides what is left of a secret from every
+    A secret's place is a password's value, what the redaction replaces, or a card
+    or ID number. It can lie outside the sentence that makes it one, or cross a
+    sentence's end: a quoted value with a full stop in it, a value or a token on the
+    line after its word, a code in the sentence before its keyword, a card number
+    wrapped over two lines or alone on one. Neither sentence then reads as a secret
+    by itself. So everything is found in the text as given and taken out in one
+    pass at the end. A cut made first hides what is left of a secret from every
     later test: the rest of a key after a password word, a code once its keyword's
     sentence is gone, a long sentence once a shorter one inside it was replaced.
     """
-    places = _merged([*password_spans(text), *secret_spans(text)])
+    places = _merged([*password_spans(text), *secret_spans(text), *number_spans(text)])
     # By its place too: a piece the splitter gives no sentence for. An empty place
     # (a key block with no body) holds nothing to cut.
     out = [place for place in places if place[0] < place[1]]
@@ -337,8 +340,8 @@ def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
     """A turn's task line (``""`` for a chat), typed text and answer, each cleaned
     (:func:`_clean`). Each is cleaned whole, before any cut, so no half of a key
     or key block is left at a chunk's edge."""
-    lead = f"Task: {title.strip()}\n" if title.strip() else ""
-    return redact_secrets(lead)[0], _clean(typed), _clean(answer)
+    task = _clean(title)
+    return (f"Task: {task}\n" if task else ""), _clean(typed), _clean(answer)
 
 
 def _fences(text: str) -> list[tuple[int, int]]:
@@ -542,6 +545,50 @@ async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
+# The ``meta`` key that says every stored title has been through :func:`cleaned`.
+_TITLES_CLEANED: Final = "titles_cleaned"
+
+
+async def _clean_titles(conn: aiosqlite.Connection) -> None:
+    """Rewrite the titles an older index.db kept as given through :func:`cleaned`, once.
+
+    A document's title is cleaned when it is stored; this is for the rows stored
+    before that. Only titles change (the texts were always cleaned, and a rebuild
+    redoes them). The old titles are overwritten in the file and the log, as a
+    forget does it. Running it again changes nothing."""
+    async with conn.execute(
+        "SELECT 1 FROM meta WHERE key = ?", (_TITLES_CLEANED,)
+    ) as cur:
+        if await cur.fetchone() is not None:
+            return
+    async with secure_deletes(conn):
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            clean: dict[str, str] = {}
+            rewrites: list[tuple[str, int]] = []
+            async with conn.execute(
+                "SELECT id, title FROM documents WHERE title != ''"
+            ) as cur:
+                for row_id, title in await cur.fetchall():
+                    if title not in clean:
+                        clean[title] = cleaned(title)
+                    if clean[title] != title:
+                        rewrites.append((clean[title], row_id))
+            await conn.executemany(
+                "UPDATE documents SET title = ? WHERE id = ?", rewrites
+            )
+            await conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, 1)",
+                (_TITLES_CLEANED,),
+            )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+    if rewrites:
+        await checkpoint_wal(conn)
+
+
 def _document(row: Sequence[Any]) -> Document:
     blob = row[8]
     return Document(
@@ -578,6 +625,7 @@ class ConversationIndex:
                     await prepare_connection(conn, _SCHEMA)
                     await _add_chunks(conn)
                     await _empty_removed_table(conn)
+                    await _clean_titles(conn)
                 except BaseException:
                     with contextlib.suppress(Exception):
                         await conn.close()
@@ -599,6 +647,8 @@ class ConversationIndex:
                     "DELETE FROM documents WHERE session_id = ? AND turn = ?",
                     (session_id, turn),
                 )
+            # A title is cleaned as a text is, wherever the document came from.
+            titles = {doc.title: cleaned(doc.title) for doc in docs}
             for doc in docs:
                 vector = (
                     None if doc.vector is None else np.asarray(doc.vector, np.float32)
@@ -612,7 +662,7 @@ class ConversationIndex:
                         doc.turn,
                         doc.surface,
                         doc.kind,
-                        doc.title,
+                        titles[doc.title],
                         doc.text,
                         doc.created_at or time.time(),
                         None if vector is None else vector.tobytes(),
