@@ -122,9 +122,6 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.tool_images_retire": "#280",
     "memory.sleep": "#363",
     "memory.sleep_lock": "#363",
-    "memory.recall_min_cosine": "#349",
-    "memory.recall_min_coverage": "#349",
-    "memory.recall_excerpt": "#349",
     "memory.recall_form": "#428",
     "memory.recall_list_max": "#428",
     "memory.recall_open_chars": "#428",
@@ -176,6 +173,11 @@ SETTINGS = (
     Setting("endpoint.reasoning_field", "--reasoning-field", False, "auto"),
 )
 
+_ONE_PAIR_OF_BARS = (
+    "recall uses one pair of bars now: a turn or note is recalled when its meaning "
+    "is at least 0.45 close or it holds at least 0.4 of the message's words"
+)
+
 # Settings that no longer exist, each with what holds now. A config file that still has
 # one loads (the line is ignored and ``melo config`` names it); ``-X KEY=VALUE`` and the
 # key's option (``--fixed-prefix``) exit 2 and say it was removed.
@@ -216,6 +218,12 @@ REMOVED_SETTINGS: dict[str, str] = {
         "page or file you pointed to, or in a finished task's result"
     ),
     "memory.note_min_cosine": "the note gate checks no closeness of meaning now",
+    "memory.recall_min_cosine": _ONE_PAIR_OF_BARS,
+    "memory.recall_min_coverage": _ONE_PAIR_OF_BARS,
+    "memory.recall_excerpt": (
+        "a recalled turn always shows the start of each part, not the sentences that "
+        "match the message"
+    ),
 }
 
 # The two settings whose option takes no value: the option means the key has this one.

@@ -31,12 +31,7 @@ from localmelo.support.memory.recall import (
     asks_to_gather,
     day,
 )
-from localmelo.support.memory.service import (
-    CHAT_TURN,
-    MemoryTools,
-    Recall,
-    RecallSettings,
-)
+from localmelo.support.memory.service import CHAT_TURN, MemoryTools, Recall
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.test_followup_query import chat_of, now_in
 from localmelo.tests.memory.test_hippo_recall import put
@@ -190,8 +185,7 @@ def test_a_generic_prompt_a_plain_message_and_a_word_inside_a_word_do_not(
 
 
 def test_the_constants() -> None:
-    assert GATHER_COSINE == 0.40 and MIN_COSINE == 0.55
-    assert RecallSettings().wide_floor == 0.40
+    assert GATHER_COSINE == 0.40 and MIN_COSINE == 0.45
     assert GATHER_GUIDE == (
         "This asks for a count, total or comparison: open every listed item that "
         "may belong, search again with other words for each kind not listed yet, "
@@ -199,30 +193,15 @@ def test_the_constants() -> None:
     )
 
 
-async def test_the_wide_bar_is_never_above_the_recall_bar_read_each_turn(
-    tmp_path: Path,
-) -> None:
-    cfg = config()
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
-    try:
-        assert memory.recall_settings().wide_floor == 0.40
-        cfg.memory.recall_min_cosine = 0.25  # a lower recall bar is never raised
-        assert memory.recall_settings().wide_floor == 0.25
-        cfg.memory.recall_min_cosine = 0.60
-        assert memory.recall_settings().wide_floor == 0.40
-    finally:
-        await memory.aclose()
-
-
 # ── A memory whose evidence sits under the vector bar ──
 
 # The far question has "zebra": its vector is [1, 0, 0], and a turn's stored vector
-# is at the cosine given. Only the first turn is at or above the default 0.55.
+# is at the cosine given. Only the first turn is at or above the default 0.45.
 TURNS = [
     ("My cardiologist moved my appointment.", "Moved to Friday.", 0.70),
-    ("I got fitted for hearing aids.", "Good to hear it went well.", 0.52),
-    ("I bought a glucose meter.", "Handy for daily checks.", 0.45),
-    ("My ENT doctor said the ear is fine.", "Glad to hear it.", 0.42),
+    ("I got fitted for hearing aids.", "Good to hear it went well.", 0.43),
+    ("I bought a glucose meter.", "Handy for daily checks.", 0.42),
+    ("My ENT doctor said the ear is fine.", "Glad to hear it.", 0.41),
     ("The sofa arrived on Tuesday.", "Enjoy the new sofa.", 0.30),
 ]
 GATHER = "How many zebra yodel clinics did I visit in total?"
@@ -290,7 +269,7 @@ def listed(*rows: tuple[int, str], gather: bool = False) -> str:
 
 
 STRONG = (0, "0.70")
-EVIDENCE = [(1, "0.52"), (2, "0.45"), (3, "0.42")]
+EVIDENCE = [(1, "0.43"), (2, "0.42"), (3, "0.41")]
 AS_ALWAYS = f"\n\n{BLOCK_HEADER}\n"
 
 
@@ -330,14 +309,14 @@ async def test_a_plain_question_keeps_the_default_bar_and_no_sentence(
         assert found.block == AS_ALWAYS + listed(STRONG)
         assert GATHER_GUIDE not in found.block
         assert found.recall is not None
-        assert found.recall.gather is False and found.recall.floor == 0.55
+        assert found.recall.gather is False and found.recall.floor == 0.45
         data = found.event()["recall"]  # type: ignore[index]
-        assert data["gather"] is False and data["floor"] == 0.55
+        assert data["gather"] is False and data["floor"] == 0.45
         assert data["used"] == 1
         # Nothing to search for: still no gathering, and the default bar.
         blank = await ask(memory, store, "   ")
         assert blank.recall is not None and blank.recall.query_from == "none"
-        assert blank.recall.gather is False and blank.recall.floor == 0.55
+        assert blank.recall.gather is False and blank.recall.floor == 0.45
     finally:
         await memory.aclose()
 
@@ -357,28 +336,9 @@ async def test_the_excerpt_form_has_no_wider_bar_and_no_sentence(
             assert found.block == f"{AS_ALWAYS}- {said}"
             assert GATHER_GUIDE not in found.block
             # The detector fires on GATHER, but the excerpt form has no bar to lower.
-            assert found.recall is not None and found.recall.floor == 0.55
+            assert found.recall is not None and found.recall.floor == 0.45
             assert found.recall.gather is (question == GATHER)
         assert await MemoryTools(memory).search(query=WORDS) == f"1. {said}"
-    finally:
-        await memory.aclose()
-
-
-async def test_the_wide_bar_is_never_above_the_recall_bar(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    memory, ids, cfg = await memory_of(tmp_path, store, recall_form="list")
-    try:
-        # A recall bar below the gather bar wins: the bar is never raised.
-        cfg.memory.recall_min_cosine = 0.35
-        low = await ask(memory, store, GATHER)
-        assert ids_of(low.block) == ids[:4]
-        assert low.recall is not None and low.recall.floor == 0.35
-        cfg.memory.recall_min_cosine = 0.30
-        all_five = await ask(memory, store, GATHER)
-        assert ids_of(all_five.block) == ids  # the sofa (0.30) is at the bar
-        assert all_five.recall is not None and all_five.recall.floor == 0.30
-        assert lines_of(all_five.block)[-1].endswith(" · 0.30")
     finally:
         await memory.aclose()
 
@@ -421,7 +381,7 @@ async def test_a_follow_up_is_checked_with_the_words_it_is_searched_with(
             found = await memory.before_turn(store, info, "go look it up")
             assert found.recall is not None and found.recall.query_from == "recent"
             assert found.recall.gather is gathers
-            assert found.recall.floor == (0.40 if gathers else 0.55)
+            assert found.recall.floor == (0.40 if gathers else 0.45)
             assert len(ids_of(found.block)) == count
     finally:
         await memory.aclose()
@@ -538,18 +498,18 @@ async def test_the_sentence_follows_the_item_guide_of_the_items_arm(
         )
         session_id = (await _turn(store, "Clinics")).session_id
         number = await put(
-            memory, session_id, "Hearing aid fitting", "Fitted last week.", cosine=0.45
+            memory, session_id, "Hearing aid fitting", "Fitted last week.", cosine=0.43
         )
         found = await ask(memory, store, GATHER)
         lines = found.block.split("\n")
         assert lines[3] == f"{ITEM_LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}"
-        assert lines[4].startswith(f"[m{number}] ") and lines[4].endswith(" · 0.45")
+        assert lines[4].startswith(f"[m{number}] ") and lines[4].endswith(" · 0.43")
         reply = await MemoryTools(memory).search(query=WORDS)
         assert reply.split("\n")[0] == (
             f"{ITEM_LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}"
         )
         plain = await ask(memory, store, PLAIN)
-        assert plain.block == ""  # an item at 0.45 is under the default bar
+        assert plain.block == ""  # an item at 0.43 is under the default bar
     finally:
         await memory.aclose()
 

@@ -40,6 +40,9 @@ open_sources = "on"
 keep_statements = true
 note_gate = "meaning"
 note_min_cosine = 0.5
+recall_min_cosine = 0.5
+recall_min_coverage = 0.8
+recall_excerpt = "match"
 recall_form = "list"
 """
 
@@ -107,9 +110,17 @@ def test_the_setter_of_a_removed_setting_exits_2_and_says_so(
 
 
 @pytest.mark.parametrize(
-    "line", ['note_gate = "meaning"', 'note_gate = "typed"', "note_min_cosine = 0.5"]
+    "line",
+    [
+        'note_gate = "meaning"',
+        'note_gate = "typed"',
+        "note_min_cosine = 0.5",
+        "recall_min_cosine = 0.5",
+        "recall_min_coverage = 1",
+        'recall_excerpt = "match"',
+    ],
 )
-def test_a_file_with_an_old_note_gate_key_loads_with_a_note_and_the_default(
+def test_a_file_with_one_removed_memory_key_loads_with_a_note_and_the_default(
     line: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

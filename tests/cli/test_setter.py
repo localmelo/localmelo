@@ -306,10 +306,7 @@ def test_keys_lists_value_default_and_source(
         "retrieval.kinds": ["[]", "[]", "default"],
         "retrieval.placement": ['"tool"', '"tool"', "default"],  # save() writes only k
         "retrieval.min_score": ["0.5", "0.35", "-X"],
-        # The memory recall settings (#349) have "recall" in their names too.
-        "memory.recall_min_cosine": ["0.55", "0.55", "default"],
-        "memory.recall_min_coverage": ["0.6", "0.6", "default"],
-        "memory.recall_excerpt": ['"head"', '"head"', "default"],
+        # The memory recall settings (#428) have "recall" in their names too.
         "memory.recall_form": ['"excerpt"', '"excerpt"', "default"],
         "memory.recall_list_max": ["20", "20", "default"],
         "memory.recall_open_chars": ["4000", "4000", "default"],

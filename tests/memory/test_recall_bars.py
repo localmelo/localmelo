@@ -1,10 +1,9 @@
 """The recall bars: how close in meaning, and how many of the question's words.
 
-``[memory] recall_min_cosine`` (default 0.55) is the least similarity a vector
-needs to join the vector list and ``recall_min_coverage`` (default 0.6) the
-share of the question's content words an item must hold to join the word list.
-Both apply to the recall block and to the memory search tool, and a default
-changes no ranking. Synthetic notes, turns and fixed vectors, no model.
+``MIN_COSINE`` (0.45) is the least similarity a vector needs to join the vector
+list and ``MIN_COVERAGE`` (0.4) the share of the question's content words an item
+must hold to join the word list. Both apply to the recall block and to the memory
+search tool. Synthetic notes, turns and fixed vectors, no model.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from localmelo.support.memory.recall import (
     Item,
     ranked,
 )
-from localmelo.support.memory.service import MemoryTools, RecallSettings
+from localmelo.support.memory.service import MemoryTools
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeChat, teach
 
@@ -40,6 +39,10 @@ NOTHING_FOUND = "Nothing in melo's memory matches that."
 FAR_QUESTION = "zebra yodel"
 # Half of this question's four content words are in the turn and the note below.
 HALF_QUESTION = "tomato garden zebra yodel"
+# One of this question's four content words is in the turn and the note below.
+FEW_QUESTION = "tomato zebra yodel quartz"
+# A vector just above the cosine bar and one just below it.
+ABOVE, BELOW = 0.47, 0.43
 TURN = ("Which tomato garden bed gets the sun?", "Bed one faces south all day.")
 NOTE = "I stake the tomato garden with bamboo."
 
@@ -137,39 +140,34 @@ def doc_item(key: str, text: str, cosine: float | None = None) -> Item:
 QUERY_VECTOR = np.asarray([1.0, 0.0, 0.0], np.float32)
 
 
-def test_ranked_takes_a_vector_at_half_the_cosine_only_under_a_lower_bar() -> None:
-    far = doc_item("d:1", "the cat sleeps on the sofa", 0.50)
+def test_ranked_takes_a_vector_above_the_cosine_bar_and_leaves_one_below() -> None:
+    above = doc_item("d:1", "the cat sleeps on the sofa", ABOVE)
+    below = doc_item("d:2", "a dog barks in the yard", BELOW)
     corpus = Corpus()
-    corpus.add(far)
+    corpus.add(above)
+    corpus.add(below)
     now = NOW + 1
-    assert ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now) == []
-    assert (
-        ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now, min_cosine=0.55)
-        == []
-    )
-    low = ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now, min_cosine=0.45)
-    assert low == [far]
-    # A higher bar than the default takes away what the default keeps.
-    near = doc_item("d:2", "a dog barks in the yard", 0.60)
-    corpus.add(near)
-    both = ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now, min_cosine=0.45)
-    assert both == [near, far]  # the closer one first
-    assert ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now) == [near]
+    assert ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now) == [above]
+    # A lower bar takes what the default leaves, the closer one first.
+    low = ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now, min_cosine=0.40)
+    assert low == [above, below]
+    # A higher bar takes away what the default keeps.
     assert (
         ranked(corpus, FAR_QUESTION, QUERY_VECTOR, MODEL, now=now, min_cosine=0.65)
         == []
     )
 
 
-def test_ranked_takes_half_the_question_words_only_under_a_lower_coverage() -> None:
+def test_ranked_takes_half_the_question_words_and_leaves_a_quarter() -> None:
     held = doc_item("d:1", "I stake the tomato garden with bamboo.")
     corpus = Corpus()
     corpus.add(held)
     now = NOW + 1
-    assert ranked(corpus, HALF_QUESTION, None, "", now=now) == []
-    assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=MIN_COVERAGE) == []
-    assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=0.4) == [held]
-    assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=0.0) == [held]
+    assert ranked(corpus, HALF_QUESTION, None, "", now=now) == [held]
+    assert ranked(corpus, FEW_QUESTION, None, "", now=now) == []
+    # A stricter share takes away what the default keeps, a zero share lets all in.
+    assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=0.6) == []
+    assert ranked(corpus, FEW_QUESTION, None, "", now=now, coverage=0.0) == [held]
     # Every word of the question is a bar of 1.0.
     assert ranked(corpus, "tomato garden", None, "", now=now, coverage=1.0) == [held]
     assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=1.0) == []
@@ -214,94 +212,56 @@ def test_ranked_with_the_default_bars_is_ranked_with_the_constants() -> None:
         )
 
 
-def test_the_settings_read_the_bars_each_time_and_a_bad_one_is_the_default(
-    tmp_path: Path,
-) -> None:
-    assert ChatMemory(lambda: None).recall_settings() == RecallSettings()
-    cfg = config()
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
-    assert memory.recall_settings().min_cosine == MIN_COSINE
-    assert memory.recall_settings().min_coverage == MIN_COVERAGE
-    cfg.memory.recall_min_cosine = 0.45
-    cfg.memory.recall_min_coverage = 1  # a whole number is a number
-    bars = memory.recall_settings()
-    assert (bars.min_cosine, bars.min_coverage) == (0.45, 1.0)
-    assert isinstance(bars.min_coverage, float)
-    for bad in (0.19, 0.96, True, "0.5", math.nan, math.inf, None):
-        cfg.memory.recall_min_cosine = bad  # type: ignore[assignment]
-        assert memory.recall_settings().min_cosine == MIN_COSINE, bad
-    for bad in (0.09, 1.01, False, "0.5", math.nan, -math.inf, None):
-        cfg.memory.recall_min_coverage = bad  # type: ignore[assignment]
-        assert memory.recall_settings().min_coverage == MIN_COVERAGE, bad
-    # The bounds themselves are allowed.
-    cfg.memory.recall_min_cosine, cfg.memory.recall_min_coverage = 0.2, 0.1
-    bars = memory.recall_settings()
-    assert (bars.min_cosine, bars.min_coverage) == (0.2, 0.1)
-    cfg.memory.recall_min_cosine, cfg.memory.recall_min_coverage = 0.95, 1.0
-    bars = memory.recall_settings()
-    assert (bars.min_cosine, bars.min_coverage) == (0.95, 1.0)
-
-
-async def test_a_turn_at_cosine_half_joins_the_block_only_under_a_lower_bar(
+async def test_a_turn_joins_the_block_above_the_cosine_bar_and_not_below_it(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, cosine=0.50)
-    try:
-        ask = await _turn(store, "Ask")
-        assert (await memory.before_turn(store, ask, FAR_QUESTION)).used == ()
-        cfg.memory.recall_min_cosine = 0.45
-        found = await memory.before_turn(
-            store, await _turn(store, "Ask 2"), FAR_QUESTION
+    for cosine, joins in ((ABOVE, True), (BELOW, False)):
+        memory = await memory_with(
+            tmp_path / str(cosine), store, config(), cosine=cosine
         )
-        assert [item.key[:2] for item in found.used] == ["d:"]
-        assert TURN[0] in found.block
-        # The setting is read again each turn.
-        cfg.memory.recall_min_cosine = 0.55
-        again = await memory.before_turn(
-            store, await _turn(store, "Ask 3"), FAR_QUESTION
-        )
-        assert again.used == ()
-    finally:
-        await memory.aclose()
+        try:
+            found = await memory.before_turn(
+                store, await _turn(store, "Ask"), FAR_QUESTION
+            )
+            assert [item.key[:2] for item in found.used] == (["d:"] if joins else [])
+            assert (TURN[0] in found.block) is joins
+        finally:
+            await memory.aclose()
 
 
 async def test_the_search_tool_honours_the_cosine_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, cosine=0.50)
-    tools = MemoryTools(memory)
-    try:
-        assert await memory.search(FAR_QUESTION) == []
-        assert await tools.search(query=FAR_QUESTION) == NOTHING_FOUND
-        cfg.memory.recall_min_cosine = 0.45
-        found = await memory.search(FAR_QUESTION)
-        assert [item.key[:2] for item in found] == ["d:"]
-        text = await tools.search(query=FAR_QUESTION, scope="chats")
-        assert text.startswith("1. ") and TURN[0] in text
-        cfg.memory.recall_min_cosine = 0.55
-        assert await tools.search(query=FAR_QUESTION) == NOTHING_FOUND
-    finally:
-        await memory.aclose()
+    for cosine, joins in ((ABOVE, True), (BELOW, False)):
+        memory = await memory_with(
+            tmp_path / str(cosine), store, config(), cosine=cosine
+        )
+        tools = MemoryTools(memory)
+        try:
+            found = await memory.search(FAR_QUESTION)
+            assert [item.key[:2] for item in found] == (["d:"] if joins else [])
+            text = await tools.search(query=FAR_QUESTION, scope="chats")
+            if joins:
+                assert text.startswith("1. ") and TURN[0] in text
+            else:
+                assert text == NOTHING_FOUND
+        finally:
+            await memory.aclose()
 
 
-async def test_half_the_question_words_join_the_block_only_under_a_lower_coverage(
+async def test_half_the_question_words_join_the_block_and_a_quarter_does_not(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, note=True)
-    asked = f"which {HALF_QUESTION}?"
+    memory = await memory_with(tmp_path, store, config(), note=True)
     try:
-        none = await memory.before_turn(store, await _turn(store, "Ask"), asked)
-        assert none.used == ()
-        cfg.memory.recall_min_coverage = 0.4
-        found = await memory.before_turn(store, await _turn(store, "Ask 2"), asked)
+        found = await memory.before_turn(
+            store, await _turn(store, "Ask"), f"which {HALF_QUESTION}?"
+        )
         assert sorted(item.key[:2] for item in found.used) == ["d:", "r:"]
-        cfg.memory.recall_min_coverage = MIN_COVERAGE
-        assert (
-            await memory.before_turn(store, await _turn(store, "Ask 3"), asked)
-        ).used == ()
+        few = await memory.before_turn(
+            store, await _turn(store, "Ask 2"), f"which {FEW_QUESTION}?"
+        )
+        assert few.used == ()
     finally:
         await memory.aclose()
 
@@ -309,19 +269,15 @@ async def test_half_the_question_words_join_the_block_only_under_a_lower_coverag
 async def test_the_search_tool_honours_the_coverage_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
-    memory = await memory_with(tmp_path, store, cfg, note=True)
+    memory = await memory_with(tmp_path, store, config(), note=True)
     tools = MemoryTools(memory)
     try:
-        assert await memory.search(HALF_QUESTION) == []
-        assert await tools.search(query=HALF_QUESTION) == NOTHING_FOUND
-        cfg.memory.recall_min_coverage = 0.4
         found = await memory.search(HALF_QUESTION)
         assert sorted(item.key[:2] for item in found) == ["d:", "r:"]
         assert (await tools.search(query=HALF_QUESTION)).startswith("1. ")
         assert len((await tools.search(query=HALF_QUESTION)).splitlines()) == 2
-        cfg.memory.recall_min_coverage = 0.6
-        assert await tools.search(query=HALF_QUESTION) == NOTHING_FOUND
+        assert await memory.search(FEW_QUESTION) == []
+        assert await tools.search(query=FEW_QUESTION) == NOTHING_FOUND
     finally:
         await memory.aclose()
 
@@ -329,14 +285,14 @@ async def test_the_search_tool_honours_the_coverage_bar(
 async def test_the_llm_retriever_keeps_its_loose_candidates_whatever_the_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    """The model chooses among candidates that took no coverage bar; a strict
-    ``recall_min_coverage`` does not remove them."""
-    cfg = config(retriever="llm", recall_min_coverage=1.0)
+    """The model chooses among candidates that took no coverage bar, so a question
+    that holds too few of the turn's words for the bar still has them."""
+    cfg = config(retriever="llm")
     memory = await memory_with(tmp_path, store, cfg)
     chat = FakeChat(needle="tomato")
     memory.chat_provider = lambda: chat  # type: ignore[method-assign]
     try:
-        found = await memory.search(HALF_QUESTION)
+        found = await memory.search(FEW_QUESTION)
         assert [item.key[:2] for item in found] == ["d:"]
         assert chat.calls  # the model was asked about the loose candidates
     finally:
