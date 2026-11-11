@@ -21,7 +21,7 @@ said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
 Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
 kept, not recalled, and comes back with an undo of the new one; a note from a page, a
-file or a result never replaces one the user's own words made, and both stand
+file or a result replaces only an older note of that kind, and both stand otherwise
 (:func:`write`). The subject is
 what a note is about without its value (:func:`subject`); with an embedding
 model, a note close in meaning that differs from an old one in one short span
@@ -1289,6 +1289,16 @@ def _near(vector: Sequence[float] | None, model: str, entry: StoredEntry) -> boo
     return mine.shape == theirs.shape and float(np.dot(mine, theirs)) >= NEAR_COSINE
 
 
+# The sources the note gate tags a note with (``provenance["source"]``), most
+# trusted first. A note the person's own words made has none.
+TYPED: Final = "typed"
+POINTED: Final = "pointed"
+RESULT: Final = "result"
+INFERRED: Final = "inferred"
+# The sources of a note from material: a page or file, a finished task's result, or
+# the model's own inference.
+FROM_MATERIAL: Final = (POINTED, RESULT, INFERRED)
+
 # What ``admitted_by`` is for a record the person's own words made: their message
 # asked for it (``user_request``) or stated it (``user_statement``). Any other
 # signal (a note from a page, a file or a result is ``outcome``) is not their words.
@@ -1304,8 +1314,15 @@ def by_person(entry: StoredEntry) -> bool:
 
 def kept_from_replacement(entry: StoredEntry) -> bool:
     """Whether a note from a page, a file or a result must not replace *entry*: the
-    person's own words made it (:func:`by_person`), or they reworded it by hand."""
-    return by_person(entry) or bool(entry.provenance.get("edited"))
+    person reworded it by hand, or it is not from material itself (its signal is not
+    ``outcome`` and its source is none of :data:`FROM_MATERIAL`): a note they typed
+    or asked for, one sleep wrote, an imported one. An older note from a page, a
+    file or a result, also one kept before sources were written, is replaced."""
+    from_material = (
+        entry.admitted_by == "outcome"
+        or entry.provenance.get("source") in FROM_MATERIAL
+    )
+    return not from_material or bool(entry.provenance.get("edited"))
 
 
 def may_replace(admitted_by: str, old: StoredEntry) -> bool:
@@ -1451,10 +1468,10 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
     as older already (:func:`~localmelo.support.memory.recall.newer_first`) is
     left as it is. Other items stay where they were.
 
-    A record from a page, a file or a result (``how`` is set) never replaces one of
-    the person's own (:func:`write`), so it is never the value that marks theirs
-    older: the person's own records come first, the newest of them current, and the
-    others follow, each showing its source. A record of the person's own does
+    A record from a page, a file or a result replaces only an older one of that kind
+    (:func:`write`), so it is never the value that marks a kept one (``kept``:
+    :func:`kept_from_replacement`) older: the kept records come first, the newest of
+    them current, and the others follow, each showing its source. A kept record does
     replace an older one from a page, so that one is marked as ever.
     """
     groups: dict[str, list[int]] = {}
@@ -1469,17 +1486,17 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
             continue
         ranked = sorted(
             found,
-            key=lambda item: (not item.how, item.created_at, _record_number(item.key)),
+            key=lambda item: (item.kept, item.created_at, _record_number(item.key)),
             reverse=True,
         )
-        # What replaces a record: for the person's own, their newest own; for the
-        # others, the newest of all.
+        # What replaces a record: for a kept one, the newest kept; for the others,
+        # the newest of all.
         mine = normalise(ranked[0].text)
         latest = normalise(
             max(found, key=lambda i: (i.created_at, _record_number(i.key))).text
         )
         for at, item in zip(slots, ranked, strict=True):
-            current = latest if item.how else mine
+            current = mine if item.kept else latest
             same = normalise(item.text) == current
             out[at] = item if same else dataclasses.replace(item, older=OLDER)
     return out
@@ -1522,10 +1539,11 @@ async def write(
     time; sleep writes as ``sleep``, at the time of the turn it read.
 
     A candidate admitted as ``outcome`` (a note from a page, a file or a result)
-    never replaces a record the person's own words made or one they reworded by hand
-    (:func:`kept_from_replacement`): it is written beside it, each with its source.
-    It still replaces an older note from a page, a file or a result, and a note of
-    the person's own still replaces any older note of its subject.
+    replaces only an older note that is itself from a page, a file or a result and
+    was not reworded by hand (:func:`kept_from_replacement`); beside any other note
+    (one the person typed or asked for, one sleep wrote, an imported one) it is
+    written as a note of its own, each with its source. Any other candidate still
+    replaces any older note of its subject.
     """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):

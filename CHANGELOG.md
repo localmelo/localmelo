@@ -79,7 +79,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
 - A note from a page, a file or a task's result is never shown to the model as your words.
 - What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused. A saved `note_gate = "typed"` reads as `pointed`.
-- A note melo takes from a page, a file or a task's result no longer replaces a note of the same subject that you typed or reworded: both are kept, each with its source, and yours is listed first when melo recalls them.
+- A note melo takes from a page, a file or a task's result now replaces only an older note of that kind: one you typed, reworded or imported, or that sleep wrote, is kept beside it with its source and listed first when melo recalls them.
 - An ask that points at something elsewhere ("remember her email and where she works") no longer leaves a note that only repeats the ask, and a note from "remember that …" no longer starts with those words.
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.

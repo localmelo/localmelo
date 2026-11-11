@@ -70,11 +70,12 @@ from localmelo.melo.agent._step_review import named_sites
 from localmelo.support.memory import markup, records
 from localmelo.support.memory.index import CHUNK_OVERLAP
 
-# The sources a note is tagged with, most trusted first.
-TYPED: Final = "typed"
-POINTED: Final = "pointed"
-RESULT: Final = "result"
-INFERRED: Final = "inferred"
+# The sources a note is tagged with, most trusted first (named in :mod:`records`,
+# which the replacement rules read).
+TYPED: Final = records.TYPED
+POINTED: Final = records.POINTED
+RESULT: Final = records.RESULT
+INFERRED: Final = records.INFERRED
 
 # The default bar for the meaning of a note against its source.
 MIN_COSINE: Final = 0.55

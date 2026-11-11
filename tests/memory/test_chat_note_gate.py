@@ -701,6 +701,29 @@ async def test_recall_marks_a_page_s_note_older_when_the_typed_note_came_later(
     assert "older" not in line
 
 
+async def test_recall_lists_a_page_note_the_person_edited_first_and_unmarked(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn(f"Read {URL} and tell me who runs the lab.")
+    await gate.fetch(first, URL, "Manager: Alice Wu. Lab: robotics.")
+    await gate.remember("Your manager is Alice Wu.", "people")
+    (page,) = await gate.notes()
+    edited = await gate.memory.edit_record(page.id, "Your manager is Alice Wu-Reyes.")
+    assert edited is not None and edited.provenance["source"] == "pointed"
+    await gate.finish(first)
+    second = await gate.turn(f"Read {URL} again, who runs the lab?")
+    await gate.fetch(second, URL, "Manager: Carla Reyes. Lab: robotics.")
+    reply = await gate.remember("Your manager is Carla Reyes.", "people")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST}): ")
+    chat = CHAT_TURN.get()
+    assert chat is not None and [w.replaced for w in chat.kept] == [None]
+    mine, newer = await recalled(gate, "Who is my manager?")
+    assert "Alice Wu-Reyes" in mine and "Carla Reyes" in newer
+    assert "older" not in mine and "older" not in newer
+    assert HOST in mine and HOST in newer  # each still says where it came from
+
+
 @pytest.mark.parametrize("level", LEVELS)
 async def test_a_page_the_user_called_someone_else_s_supports_no_note_about_them(
     make: Any, level: str

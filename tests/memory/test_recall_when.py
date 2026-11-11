@@ -38,7 +38,10 @@ def at(year: int, month: int, mday: int, hour: int = 12, minute: int = 0) -> flo
 
 
 def note(key: int, text: str, when: float, chat: str = "chat A") -> Item:
-    return Item(f"r:{key}", text, f"{chat}, {day(when)}", "s", key, when, quote=text)
+    """A note the person's own words made: nothing from a page replaces it."""
+    return Item(
+        f"r:{key}", text, f"{chat}, {day(when)}", "s", key, when, quote=text, kept=True
+    )
 
 
 def turn(key: int, typed: str, answer: str, when: float) -> Item:
@@ -197,6 +200,7 @@ def source_note(key: int, text: str, when: float, how: str = "pointed") -> Item:
     return dataclasses.replace(
         note(key, text, when),
         how=how,
+        kept=False,
         quote="",
         where=f"from jane.example.com, {day(when)}",
     )
@@ -254,6 +258,22 @@ def test_notes_of_one_kind_are_ordered_and_marked_as_before() -> None:
     ]
     ordered = records.newer_values_first(pages)
     assert [(i.key, i.older) for i in ordered] == [("r:4", ""), ("r:3", OLDER)]
+
+
+def test_a_note_kept_from_replacement_is_listed_first_whatever_its_source_label() -> (
+    None
+):
+    """A note from a page that the person reworded is kept beside a newer page note:
+    ``kept``, not ``how``, tells recall."""
+    edited = dataclasses.replace(source_note(1, BOB, at(2026, 10, 27)), kept=True)
+    newer = source_note(2, ALICE, at(2026, 10, 28))
+    for items in ([edited, newer], [newer, edited]):
+        ordered = records.newer_values_first(items)
+        assert [(i.key, i.older) for i in ordered] == [("r:1", ""), ("r:2", "")]
+    # A note with no source label that nothing keeps is replaced like a page's.
+    plain = dataclasses.replace(note(3, BOB, at(2026, 10, 27)), kept=False)
+    ordered = records.newer_values_first([plain, newer])
+    assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:3", OLDER)]
 
 
 def test_a_turn_says_who_said_what() -> None:

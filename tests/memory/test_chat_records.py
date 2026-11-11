@@ -532,7 +532,7 @@ async def test_different_preferences_are_both_kept(
     assert len(await memory.records()) == 2
 
 
-# ── a note from a page, a file or a result never replaces the person's own note ──
+# ── a note from a page, a file or a result replaces only a note of that kind ──
 
 OWN_SIGNALS = ["user_statement", "user_request"]
 BOB, ALICE, CARLA = (
@@ -543,14 +543,15 @@ BOB, ALICE, CARLA = (
 
 
 async def _put(
-    memory: ChatMemory, text: str, signal: str, **provenance: str
+    memory: ChatMemory, text: str, signal: str, topic: str = "people", **provenance: str
 ) -> records.Written:
-    """Write one note of the people topic as *signal* admits it; *provenance* adds
-    to its source (``source="pointed"``, as a note from a page has it)."""
+    """Write one note of the people topic (or *topic*) as *signal* admits it;
+    *provenance* adds to its source (``source="pointed"``, as a note from a page
+    has it)."""
     where = {"session_id": "s1", "turn": 1, "chat": "Main chat", **provenance}
     (written,) = await records.write(
         memory.stores()[0],
-        [records.Candidate(text, "", "people", signal)],
+        [records.Candidate(text, "", topic, signal)],
         [None],
         source=where,
         embed_model="",
@@ -646,6 +647,62 @@ async def test_only_a_note_the_persons_own_words_made_is_theirs(
         "You run on Fridays.": False,
         "Your team is Atlas.": False,
     }
+
+
+async def test_a_note_from_a_page_does_not_replace_an_imported_note(
+    memory: ChatMemory, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "CLAUDE.md").write_text(
+        "## Me\n- My weekly sync is on Wednesday.\n", encoding="utf-8"
+    )
+    plan = await memory.import_scan(home=home)
+    await memory.import_apply(plan, [s["id"] for s in plan.sources])
+    (imported,) = await memory.records()
+    assert imported.admitted_by == "import"
+    page = await _put(
+        memory, "Your weekly sync is on Friday.", "outcome", "about", source="pointed"
+    )
+    assert page.replaced is None
+    assert await _texts(memory) == [
+        "Your weekly sync is on Friday.",
+        "Your weekly sync is on Wednesday.",
+    ]
+
+
+async def test_a_note_kept_before_sources_were_written_is_replaced_by_a_page_note(
+    memory: ChatMemory,
+) -> None:
+    old = await _put(memory, ALICE, "outcome")
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [CARLA]
+
+
+@pytest.mark.parametrize(
+    ("signal", "provenance", "kept"),
+    [
+        ("user_statement", {}, True),
+        ("user_request", {}, True),
+        ("sleep", {"source": "sleep"}, True),
+        ("import", {"source": "import"}, True),
+        ("outcome", {}, False),
+        ("outcome", {"source": "pointed"}, False),
+        ("outcome", {"source": "result"}, False),
+        ("outcome", {"source": "inferred"}, False),
+        ("user_statement", {"source": "pointed"}, False),
+    ],
+)
+async def test_a_note_is_kept_from_replacement_unless_it_is_from_material(
+    memory: ChatMemory, signal: str, provenance: dict[str, str], kept: bool
+) -> None:
+    await _put(memory, ALICE, signal, **provenance)
+    (entry,) = await memory.records()
+    assert records.kept_from_replacement(entry) is kept
+    # An edited note is kept, whatever it came from.
+    edited = await memory.edit_record(entry.id, BOB)
+    assert edited is not None and records.kept_from_replacement(edited)
 
 
 async def test_a_note_the_person_edited_is_kept_from_a_page_s_replacement_but_is_not_their_own_words(

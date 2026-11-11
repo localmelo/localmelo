@@ -627,9 +627,7 @@ def _record_item(entry: StoredEntry) -> Item:
     # or inferred, says so; a note from the user's own words, an import or sleep
     # reads as it always did.
     how = str(provenance.get("source") or "")
-    how = (
-        how if how in (note_gate.POINTED, note_gate.RESULT, note_gate.INFERRED) else ""
-    )
+    how = how if how in records.FROM_MATERIAL else ""
     if how == note_gate.POINTED and provenance.get("from"):
         place = f"from {note_gate.name_of(str(provenance['from']))}"
     elif how == note_gate.RESULT:
@@ -641,6 +639,7 @@ def _record_item(entry: StoredEntry) -> Item:
         text=entry.text,
         where=f"{place}, {day(entry.created_at)}",
         how=how,
+        kept=records.kept_from_replacement(entry),
         session_id=entry.session_id,
         turn=int(provenance.get("turn") or 0),
         created_at=entry.created_at,

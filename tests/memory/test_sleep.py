@@ -208,6 +208,39 @@ async def test_a_newer_note_from_a_page_does_not_merge_away_the_persons_own_note
     assert sleep.replacements(notes, {}) == []
 
 
+async def test_a_note_from_a_page_does_not_replace_a_note_sleep_wrote_from_the_persons_words(
+    memory: ChatMemory, chats: SessionStore
+) -> None:
+    await chat(chats, "My manager is Bob.")
+    (change,) = (await memory.sleep(chats=chats)).changes
+    assert change.op == "O3"
+    (wrote,) = await memory.records()
+    assert (wrote.text, wrote.admitted_by) == ("Your manager is Bob.", "sleep")
+    (page,) = await records.write(
+        memory.stores()[0],
+        [
+            records.Candidate(
+                "Your manager is Alice Wu.", "", wrote.provenance["topic"], "outcome"
+            )
+        ],
+        [None],
+        source={
+            "session_id": "s2",
+            "turn": 1,
+            "source": "pointed",
+            "from": "x.example",
+        },
+        embed_model="",
+    )
+    assert page.replaced is None
+    both = {e.id: e for e in await memory.records()}
+    assert set(both) == {wrote.id, page.id}
+    assert "replaces" not in both[page.id].provenance
+    # The sleep rules leave the pair as it is, too.
+    assert (await memory.sleep(chats=chats)).changes == []
+    assert {e.id for e in await memory.records()} == {wrote.id, page.id}
+
+
 async def test_two_notes_the_person_typed_of_one_subject_still_merge(
     memory: ChatMemory,
 ) -> None:
