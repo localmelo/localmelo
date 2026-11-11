@@ -64,13 +64,15 @@ def test_a_comment_added_to_the_rules_file_changes_nothing(
 # The streamed answer is redacted one complete line at a time, which is the
 # same as redacting it whole only if no rule matches across a line break
 # (or looks at text past one). Two rules do by design, and LineRedactor
-# holds what they need: a PEM block from its BEGIN line to its END line,
-# and the bearer word and its white space until the token arrives. Three
-# tests keep that true: the patterns are walked for a newline, redaction.py
-# is read for any regex use that walk would not see, and the Python between
-# the matches is compared with whole-text redaction on streamed splits.
-RULES = {"_PEM", "_KEY", "_BEARER", "_CODE_KEYWORD", "_CODE"}
-SPANNING_BY_DESIGN = {"_PEM", "_BEARER"}
+# holds what they need: a PEM block from its BEGIN line to its END line (its
+# lines are one-line patterns; the block between them is read in code, by
+# redaction._pem_blocks), and the bearer word and its white space until the
+# token arrives. Three tests keep that true: the patterns are walked for a
+# newline, redaction.py is read for any regex use that walk would not see, and
+# the Python between the matches is compared with whole-text redaction on
+# streamed splits.
+RULES = {"PEM_BEGIN", "PEM_END", "_KEY", "_BEARER", "_CODE_KEYWORD", "_CODE"}
+SPANNING_BY_DESIGN = {"_BEARER"}
 
 
 def _can_see_a_newline(nodes: Sequence[Any], dotall: bool) -> bool:
@@ -126,7 +128,7 @@ def _set_has_a_newline(items: Sequence[Any]) -> bool:
     return not inside if negated else inside
 
 
-def test_only_the_two_rules_the_stream_holds_can_match_across_lines() -> None:
+def test_only_the_bearer_pattern_can_match_across_lines() -> None:
     rules = {
         name: value
         for name, value in vars(redaction).items()
@@ -145,17 +147,18 @@ def test_only_the_two_rules_the_stream_holds_can_match_across_lines() -> None:
     assert spanning == SPANNING_BY_DESIGN
 
 
-# Where redaction.py matches: each rule at the call that replaces, three of them
-# once more where ``secret_spans`` reads the same places, and nowhere else.
+# Where redaction.py matches: each rule at the call that replaces, two of them
+# once more where ``secret_spans`` reads the same places, the key block lines
+# once for both (``_pem_blocks``), and nowhere else.
 RULE_SITES = [
+    ("PEM_BEGIN", "finditer"),
+    ("PEM_END", "finditer"),
     ("_BEARER", "finditer"),
     ("_BEARER", "subn"),
     ("_CODE", "finditer"),
     ("_CODE_KEYWORD", "finditer"),
     ("_KEY", "finditer"),
     ("_KEY", "subn"),
-    ("_PEM", "finditer"),
-    ("_PEM", "sub"),
 ]
 MATCH_METHODS = {
     "match",
@@ -199,7 +202,7 @@ def test_redaction_matches_with_no_regex_the_walk_above_cannot_see() -> None:
         if isinstance(target, ast.Name)
     }
     assert set(top) == RULES
-    # Every use of the re module is one of those five compiles.
+    # Every use of the re module is one of those six compiles.
     every = {id(call) for call in ast.walk(tree) if _is_re_call(call)}
     assert every == {id(call) for call in top.values()}
     assert all(call.func.attr == "compile" for call in top.values())  # type: ignore[attr-defined]
@@ -234,6 +237,7 @@ def test_any_split_of_the_secret_fixtures_streams_to_the_whole_redaction() -> No
     # random places, inside lines and inside secrets, and at every line end.
     fixtures = [text + "\n" for text, _, _ in EXAMPLES] + [
         "Bearer\n  " + "x" * 30 + "\n",
+        "令牌Bearer\n  " + "x" * 30 + "\n",
         block("RSA PRIVATE KEY") + "\n",
         block("PRIVATE KEY") + "\n",
     ]

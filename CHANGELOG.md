@@ -135,11 +135,13 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
 - Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
+- A token after "Bearer" is hidden after a Chinese character too, and a private key with a second end line is hidden to the last one in stored, logged and finished text.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
 - A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
 - A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
 - A text file you send on to a task, running or finished, is data too: only the words you typed with it count as yours.
+- A password longer than 128 characters is cut out whole, not in part; hiding a message twice gives the same text, and a shell's `PWD=/folder` or `pwd /folder` is no longer taken for a password.
 
 ### Scripts and API
 

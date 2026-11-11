@@ -274,12 +274,13 @@ redaction of secrets, which replaces each with `[redacted]`:
 
 - the body of a PEM private key block, from `-----BEGIN … PRIVATE KEY-----`
   (RSA, EC, DSA, OPENSSH, ENCRYPTED or plain; also PGP's `PRIVATE KEY BLOCK`)
-  to its END line, or to the end of
+  to its END line (the last of a run of END lines with no BEGIN line between
+  them), or to the end of
   the text when the END line is missing: the two marker lines stay and the
   body becomes one `[redacted]` line. Public keys and certificates stay;
 - well-known key shapes: `sk-` keys, GitHub tokens (`ghp_…`,
   `github_pat_…` and the like) and AWS access key ids (`AKIA…`, `ASIA…`);
-- the token after `Bearer`;
+- the token after `Bearer`, unless an ASCII letter, digit or underscore stands right before the word;
 - a code of 4 to 8 digits within 20 characters of `verification code`,
   `passcode`, `OTP` or `验证码`, on the same line.
 
