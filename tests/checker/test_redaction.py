@@ -39,6 +39,14 @@ EXAMPLES = [
     ),
     (f"Bearer sk-{LETTERS}", "Bearer [redacted]", 1),
     ("the bearer of bad news", "the bearer of bad news", 0),
+    # Only an ASCII letter, digit or underscore right before the word hides it.
+    (
+        "请用Bearer abcdefghijklmnop1234登录系统",
+        "请用Bearer [redacted]登录系统",
+        1,
+    ),
+    ("cafébearer abcdefghijklmnop1234", "cafébearer [redacted]", 1),
+    ("torchbearer abcdefghijklmnop1234", "torchbearer abcdefghijklmnop1234", 0),
     (f"OTP 1234sk-{LETTERS}", f"OTP 1234sk-{LETTERS}", 0),
     (f"{AWS}1234 OTP", f"{AWS}1234 OTP", 0),
     (

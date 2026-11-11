@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.redaction import BEARER_WORD, redact_secrets
 
 # Why releasing a complete line at a time is safe: key shapes start at
 # sk-/gh.../github_pat_/AKIA/ASIA and end at their first non-token character;
 # OTP codes/keywords are line-local and have a 20-character reach. Bearer
-# starts at a word-boundary "bearer" and ends at the first non-token character
-# after its whitespace and token. The bearer keyword and whitespace can span
-# lines. A PEM block starts at a BEGIN marker for a PRIVATE KEY label,
-# anywhere in a line, and ends at the next END marker, or at the end of the
-# text; it spans lines. Every other rule stays within one line. Tests in
+# starts at "bearer" with no ASCII letter, digit or underscore before it and
+# ends at the first non-token character after its whitespace and token. The
+# bearer keyword and whitespace can span lines. A PEM block starts at a BEGIN
+# marker for a PRIVATE KEY label, anywhere in a line, and is held here to the
+# next END marker, or to the end of the text; it spans lines. Whole-text
+# redaction ends a block at the last of a run of END markers
+# (redaction._pem_blocks); this release does not follow that yet. Every other
+# rule stays within one line. Tests in
 # tests/checker/test_stream_redaction.py fail the build when a rule can match
 # across lines, when redaction.py matches with a regex they do not inspect, or
 # when a streamed split gives other text than the whole redaction, so this
@@ -21,9 +24,9 @@ from localmelo.melo.checker.redaction import redact_secrets
 
 # A bearer keyword (and any white space) at the end of the text: its token is
 # still to come, so its line is held back.
-_OPEN_BEARER = re.compile(r"\bbearer\s*\Z", re.IGNORECASE)
+_OPEN_BEARER = re.compile(BEARER_WORD + r"\s*\Z", re.IGNORECASE)
 
-# The same markers as redaction._PEM, split so an open block can be found.
+# The same markers as redaction._PEM_BEGIN and _PEM_END, to find an open block.
 _PEM_BEGIN = re.compile(
     r"-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----"
 )
