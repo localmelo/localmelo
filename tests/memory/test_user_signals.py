@@ -175,6 +175,45 @@ def test_an_indirect_question_leaves_no_note(text: str) -> None:
     assert signals.request_facts == ()
 
 
+@pytest.mark.parametrize(
+    ("text", "note"),
+    [
+        (
+            "Remember, when I travel I prefer window seats.",
+            "when I travel I prefer window seats.",
+        ),
+        (
+            "Remember: when I work from home I use the blue desk.",
+            "when I work from home I use the blue desk.",
+        ),
+        ("Remember it: my locker number is 14.", "my locker number is 14."),
+        ("Remember those: my desk is 4B.", "my desk is 4B."),
+        ("记住这个：我的柜子号是14。", "我的柜子号是14。"),
+        ("Remember who my doctor is: Ana Lin.", "who my doctor is: Ana Lin."),
+    ],
+)
+def test_a_comma_or_colon_leads_a_statement_and_a_pointing_word_is_cut(
+    text: str, note: str
+) -> None:
+    signals = classify_user_text(text)
+    assert signals.request_facts == (note,)
+    assert signals.facts == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Remember: her email and where she works.",
+        "记住，她的邮箱。",
+        "Remember, they call me Ana at work and my desk is 4B.",
+    ],
+)
+def test_a_comma_or_colon_does_not_name_who_a_pronoun_means(text: str) -> None:
+    signals = classify_user_text(text)
+    assert signals.request_facts == ()
+    assert signals.facts == ()
+
+
 def test_a_request_note_cuts_the_marker_and_keeps_the_rest() -> None:
     assert request_note("Remember that I'm allergic to peanuts.") == (
         "I'm allergic to peanuts."
