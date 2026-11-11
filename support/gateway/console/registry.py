@@ -58,7 +58,11 @@ from localmelo.support.sessions.approvals import (
     ChatPolicy,
     chat_mode,
 )
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    words_before_files,
+)
 from localmelo.support.sessions.grants import (
     STORED_KINDS,
     Grant,
@@ -1291,9 +1295,9 @@ class ConsoleSessions:
         """Start a turn in *session_id*; return it and the open's resume.
 
         *extras* are the files and pictures the message carries. *words* are
-        the person's own words when *composed* holds more than they typed (a
-        queued message's files are already part of its text): the run reads
-        these as theirs, never a file's text (#626).
+        the person's own words when *composed* holds more than they typed (an
+        older queued message has its files in its text): the run reads these
+        as theirs, never a file's text (#626).
 
         The resume is the ``ResumeInfo`` of an open this call made, for the
         route's 202, else ``None``. The key is checked before the session is
@@ -1387,13 +1391,23 @@ class ConsoleSessions:
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
             self._note_turn_start(session_id)
-            # The person's words, not the attachments the text carries; the
-            # pictures they added go with the words again.
+            # The same message again, as it was sent: its typed words and its files
+            # apart, and the pictures they added (#626). A turn stored before files
+            # were kept apart has them in its text: its words are what comes before
+            # the first of them, never a file's text, however many times it is tried
+            # again.
             pictures = await self._store.turn_images(session_id, undone.turn)
+            text, words = undone.user_text, None
+            if undone.attachments:
+                text = undone.typed_text
+            else:
+                head = words_before_files(text)
+                words = None if head == text else head
             turn = await entry.runner.start_turn(
-                undone.user_text,
+                text,
                 approval=entry.policy,
-                words=undone.typed_text or None,
+                attachments=undone.attachments or (),
+                words=words,
                 images=pictures,
             )
             entry.last_used = self._clock()

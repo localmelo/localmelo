@@ -53,9 +53,12 @@ test('the text files of a stored message are read back from the gateway\'s own c
 test('words that merely look like attachments stay the person\'s words', () => {
   const lookalike = 'hello\n\n<attachment name="x" chars="3">\nnot closed';
   assert.deepEqual(splitAttachments(lookalike), {words: lookalike, files: []});
-  assert.equal(isStandIn('[attached: notes.md]'), true);
+  assert.equal(isStandIn('[1 file]'), true);
   assert.equal(isStandIn('[2 pictures]'), true);
-  assert.equal(isStandIn('[1 picture] [attached: a.txt, b.md]'), true);
+  assert.equal(isStandIn('[1 picture] [3 files]'), true);
+  // A message sent before the stand-in held only counts names its files.
+  assert.equal(isStandIn('[attached: notes.md]'), true);
+  assert.equal(isStandIn('[1 picture] [attached: a.txt, b]c.md]'), true);
   assert.equal(isStandIn('what is [1 picture]?'), false);
   assert.equal(isStandIn(''), false);
 });

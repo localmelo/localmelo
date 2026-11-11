@@ -43,7 +43,7 @@ from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.handover import READING_HEAD
 from localmelo.support.memory.service import NO_MORE_TRIES, TRY_ONCE_MORE
 from localmelo.support.sessions.agents import session_options
-from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from .conftest import HOLDER, PORT, FakeProbe, make_cfg, quiet_gate, run_result
@@ -342,8 +342,22 @@ def _four_steps() -> list[Message]:
     ]
 
 
+@pytest.mark.parametrize(
+    "sent",
+    [
+        {},
+        # A file keeps its words and its snapshot on every retry (#626).
+        {
+            "attachments": [{"name": "notes.txt", "text": "the notes", "chars": 9}],
+            "client_request_id": "page-key",
+        },
+        # A message queued before files were kept apart: its file is in its text.
+        {"older": True},
+    ],
+    ids=["words", "words and a file", "queued before files were kept apart"],
+)
 async def test_a_retried_turn_admits_its_work_once_whatever_the_model_writes(
-    tmp_path: Path,
+    tmp_path: Path, sent: dict[str, Any]
 ) -> None:
     first = {"title": "Slides", "objective": "Make 6 slides"}
     again = {"title": "Other words", "objective": "Make ten slides now"}
@@ -357,9 +371,15 @@ async def test_a_retried_turn_admits_its_work_once_whatever_the_model_writes(
     )
     typed = "make slides from my notes"
     async with front_console(tmp_path, *replies) as (console, client, _):
-        await _say(client, console, typed)
-        turn = await _wait_turn(client, str(console.main_id))
         chat = str(console.main_id)
+        if sent.get("older"):
+            whole = compose_user_text(typed, (TextAttachment("a.txt", "the notes"),))
+            await console.sessions.start_turn(
+                chat, typed, whole, client_request_id="queued-key", words=typed
+            )
+        else:
+            await _say(client, console, typed, **sent)
+        turn = await _wait_turn(client, chat)
         for _ in range(2):
             # What a restart forgets: only the stored turn and the task's key are left.
             console.front.made.clear()

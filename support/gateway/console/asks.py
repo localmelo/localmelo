@@ -52,6 +52,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.inbox import MAX_NOTES
 from localmelo.melo.schema import ImagePart
 from localmelo.support.gateway.i18n import said, t, t_in
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.display import ActivityText
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -62,6 +63,7 @@ from localmelo.support.sessions.submissions import SubmissionRepeated
 from localmelo.support.words import said_in
 
 from .errors import ApiError
+from .registry import TurnExtras
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import SessionRunner
@@ -152,6 +154,8 @@ class _Held:
 @dataclass
 class _Queued:
     typed: str
+    # The words the turn runs, files not in them. A row written before a queued
+    # message kept its files as attachments has them in its text, and no ``attachments``.
     composed: str
     # The submission key its turn starts with: the client's, else one of its
     # own, so a turn started before a restart is found, not run again.
@@ -169,6 +173,31 @@ class _Queued:
     # and in memory while the gateway runs, with the names they were added under.
     images: list[dict[str, Any]] = field(default_factory=list)
     pictures: tuple[Staged, ...] = ()
+    # The hidden text files of a message: its turn starts with them stored, as a
+    # message that did not wait does (#626).
+    attachments: tuple[TextAttachment, ...] = ()
+
+    @property
+    def chars(self) -> int:
+        """What the row holds, words and files: what the queue's limit counts."""
+        return len(self.composed) + sum(len(file.text) for file in self.attachments)
+
+
+def _files_of(row: dict[str, Any]) -> tuple[TextAttachment, ...] | None:
+    """The files a stored row keeps, ``()`` for none; ``None`` for a list that is not one."""
+    kept = row.get("attachments") or []
+    if not isinstance(kept, list):
+        return None
+    files: list[TextAttachment] = []
+    for item in kept:
+        if not (
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("text"), str)
+        ):
+            return None
+        files.append(TextAttachment(item["name"], item["text"]))
+    return tuple(files)
 
 
 def _restored(row: dict[str, Any]) -> _Queued:
@@ -178,7 +207,8 @@ def _restored(row: dict[str, Any]) -> _Queued:
     note, one its run read included, and it goes back to the person.
     """
     note_of = str(row.get("note_of") or "")
-    if not note_of and row.get("message") is not True:
+    files = _files_of(row)
+    if not note_of and (row.get("message") is not True or files is None):
         note_of = UNMARKED
     return _Queued(
         str(row.get("typed", "")),
@@ -187,6 +217,7 @@ def _restored(row: dict[str, Any]) -> _Queued:
         dict(row.get("echo") or {}),
         note_of=note_of,
         images=[dict(i) for i in row.get("images") or [] if isinstance(i, dict)],
+        attachments=files or (),
     )
 
 
@@ -561,11 +592,18 @@ class OwnerAsks:
     # ── The person's messages while a chat answers a task ──
 
     async def queue(
-        self, chat_id: str, typed: str, composed: str, key: str | None
+        self,
+        chat_id: str,
+        typed: str,
+        composed: str,
+        key: str | None,
+        attachments: Sequence[TextAttachment] = (),
     ) -> dict[str, Any]:
         """Keep the person's message for the chat's next turn; its echo shows it queued.
 
-        A repeat of a key still being kept waits for it and gets its outcome.
+        *composed* is its words and *attachments* its text files, kept apart as the
+        turn will have them. A repeat of a key still being kept waits for it and
+        gets its outcome.
         """
         first = self._admitting.get((chat_id, key)) if key is not None else None
         if first is not None:
@@ -575,14 +613,14 @@ class OwnerAsks:
             if key is not None and item.key == key:
                 return item.echo
         if key is None:
-            return await self._admit(chat_id, typed, composed, key, people)
+            return await self._admit(chat_id, typed, composed, key, people, attachments)
         outcome: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
         )
         outcome.add_done_callback(lambda f: f.cancelled() or f.exception())
         self._admitting[(chat_id, key)] = outcome
         try:
-            echo = await self._admit(chat_id, typed, composed, key, people)
+            echo = await self._admit(chat_id, typed, composed, key, people, attachments)
         except BaseException as exc:
             failed = exc if isinstance(exc, Exception) else SessionStoreError(str(exc))
             outcome.set_exception(failed)
@@ -599,14 +637,18 @@ class OwnerAsks:
         composed: str,
         key: str | None,
         people: list[_Queued],
+        attachments: Sequence[TextAttachment] = (),
     ) -> dict[str, Any]:
-        waiting = [item.composed for item in people if not item.note_of]
+        waiting = [item.chars for item in people if not item.note_of]
         rows = len(waiting) + self._places[chat_id]
-        chars = sum(map(len, waiting)) + self._place_chars[chat_id] + len(composed)
+        size = len(composed) + sum(len(file.text) for file in attachments)
+        chars = sum(waiting) + self._place_chars[chat_id] + size
         if rows >= MAX_QUEUED or (rows and chars > MAX_QUEUED_CHARS):
             raise ApiError(409, "chat_queue_full", t("errors.queueFull"))
-        with self._holding(chat_id, len(composed)):
-            return await self._keep_message(chat_id, typed, composed, key, people)
+        with self._holding(chat_id, size):
+            return await self._keep_message(
+                chat_id, typed, composed, key, people, attachments
+            )
 
     async def _keep_message(
         self,
@@ -615,6 +657,7 @@ class OwnerAsks:
         composed: str,
         key: str | None,
         people: list[_Queued],
+        attachments: Sequence[TextAttachment] = (),
     ) -> dict[str, Any]:
         busy = self._busy.get(chat_id)
         title = (
@@ -629,7 +672,12 @@ class OwnerAsks:
             else "ask.queued" if title else "ask.queuedTurn"
         )
         front = self.console.front_for(chat_id)
-        item = _Queued(typed, composed, key or f"queued-{uuid.uuid4().hex}")
+        item = _Queued(
+            typed,
+            composed,
+            key or f"queued-{uuid.uuid4().hex}",
+            attachments=tuple(attachments),
+        )
         item.echo = await front.echo(
             {"echo": "queued", "title": title, "typed": typed,
              "line": t_in("en", words, title=title), "said": said(words, title=title),
@@ -653,7 +701,9 @@ class OwnerAsks:
         """Store *chat_id*'s queued rows; raises on failure. Only a row marked ``message`` runs after a restart."""
         kept = [{"typed": q.typed, "composed": q.composed, "key": q.key, "echo": q.echo,
                  **({"note_of": q.note_of} if q.note_of else {"message": True}),
-                 **({"images": q.images} if q.images else {})}
+                 **({"images": q.images} if q.images else {}),
+                 **({"attachments": [{"name": f.name, "text": f.text} for f in q.attachments]}
+                    if q.attachments else {})}
                 for q in self._people.get(chat_id, [])]  # fmt: skip
         await self.console.store.update_session(
             chat_id, meta_update={"queued": kept or None}
@@ -956,14 +1006,17 @@ class OwnerAsks:
             return
         front = self.console.front_for(chat_id)
         try:
-            # The message was composed with its files when it was queued: only
-            # the words the person typed are theirs (#626).
+            # The turn starts as the same message sent while the chat was idle
+            # does: its words and its files apart (#626). A row written before the
+            # files were kept apart has them in its text: the words the person
+            # typed are theirs, the files' text is not.
             await self.console.sessions.start_turn(
                 chat_id,
                 item.typed,
                 item.composed,
                 client_request_id=item.key,
-                words=item.typed,
+                extras=TurnExtras(item.attachments),
+                words=None if item.attachments else item.typed,
             )
         except SessionBusyError:
             return
