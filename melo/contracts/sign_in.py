@@ -224,17 +224,6 @@ def _plain(text: str, start: int, end: int) -> bool:
     return text[start : end - (text[end - 1] in "?？")].translate(_NO_QUOTES).isalpha()
 
 
-def _fancy(match: re.Match[str]) -> bool:
-    """Whether *match* reads a form the reader once left alone: a name that ends in
-    the password word, marks around the joint, or a quote right after it."""
-    strong = match.group("strong")
-    return (
-        match.group("glued") is not None
-        or (strong is not None and strong.strip() not in (":", "：", "="))
-        or bool(match.group("shut") or match.group("open"))
-    )
-
-
 def _values(text: str) -> list[tuple[int, int]]:
     """The passwords *text* gives, as ``(start, end)`` of each value, in order.
 
@@ -275,11 +264,12 @@ def _values(text: str) -> list[tuple[int, int]]:
                 closing = len(text)  # not on the line: no quote
         quoted = closing < len(text)
         first = start - quoted  # a quoted value is read from its quote
+        after = start  # the next look: a word inside a value is read for its own value
         inside = first < covered  # it starts in the last run
         if quoted:
             if hidden and inside and closing < covered:
                 continue  # in a value that is cut out
-            end, stop, after = closing, closing + 1, start
+            end, stop = closing, closing + 1
             no_value = closing - start < MIN_CHARS
             if inside and not no_value:
                 stop = _next(text, _RUN_END, closing, memo)
@@ -294,20 +284,15 @@ def _values(text: str) -> list[tuple[int, int]]:
             ):
                 continue
             end = _trim(text, start, stop)
-            # Read on from the value's start when a word inside it may be read.
-            after = (
-                start
-                if _fancy(match) or _next(text, _QUOTE, start, memo) < stop
-                else stop
-            )
             # A bare word after "is" or a space is no password by its shape.
             no_value = end - start < MIN_CHARS or (
                 match.group("strong") is None and _plain(text, start, end)
             )
         if no_value:
-            # Still a run: a word outside the last one starts a new one, a word inside
-            # makes that one longer unless it is cut out; a value may start in it.
-            if match.start("cue") >= covered:
+            # Still a run: a word outside the last one, or past a line break, starts a
+            # new one (a run never grows over a line break); a word inside makes that
+            # one longer unless it is cut out; a value may start in it.
+            if match.start("cue") >= covered or text.find("\n", covered, stop) >= 0:
                 run, covered, hidden, pos = first, stop, False, after
             elif not hidden:
                 covered = max(covered, stop)

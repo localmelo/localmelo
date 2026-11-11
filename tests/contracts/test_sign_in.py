@@ -230,6 +230,9 @@ def test_a_value_at_the_limit_still_gets_a_handle() -> None:
         # Short pairs that chain are one run: a word inside it makes it longer, and a
         # value that starts in it is one value from the first quote.
         "pw 'pw='pw:'pw 'abcd'",
+        # A run that is no value never grows over a line break: the quote pair on the
+        # second line is no part of it.
+        "pw “passwd\n'pw:'「ab」'”",
     ],
 )
 def test_hiding_twice_gives_the_same_text(text: str) -> None:
@@ -340,6 +343,13 @@ def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> No
         (
             "pwd = \"the pw is 'abcd1234' and more words\"",
             ["the pw is 'abcd1234' and more words"],
+        ),
+        # A value that is a password word with its mark: the word is read, so the value
+        # after it is hidden too.
+        ("my password is pwd: hunter22", ["pwd:", "hunter22"]),
+        (
+            "DB_PASSWORD=pw=password is pwd: hunter22",
+            ["pw=password", "pwd:", "hunter22"],
         ),
     ],
 )
