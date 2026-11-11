@@ -63,6 +63,43 @@ async def test_retry_after_undo_reruns_the_undone_turn_without_undoing_the_previ
     assert "changed in another window" not in setup.out.text()
 
 
+async def test_retry_sends_a_composed_turn_again_as_melos_with_no_words(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The go-ahead of Allow once is melo's wording each time it runs (``/retry`` too)."""
+    sentence = "Go ahead with the step melo blocked: install software."
+    sid = await seed(setup, "Install the chart library")
+    turn = await setup.store.begin_turn(
+        sid, sentence, holder="other", composed=True, typed_text=""
+    )
+    await setup.store.finish_turn(
+        sid,
+        turn.turn,
+        holder="other",
+        status="completed",
+        cause="run",
+        result=None,
+        answer="Installed.",
+    )
+    scripted(setup).replies.append(answer("Installed again."))
+    agent = setup.session.agent
+    run_task, seen = agent.run_task, []
+
+    async def spy(text: str, **kwargs: Any) -> Any:
+        seen.append((text, kwargs.get("user_words")))
+        return await run_task(text, **kwargs)
+
+    monkeypatch.setattr(agent, "run_task", spy)
+    setup.session.enter(f"/resume {sid}")
+    await setup.idle()
+    setup.session.enter("/retry")
+    await setup.idle()
+    again = (await setup.store.list_turns(sid))[-1]
+    assert (again.turn, again.user_text) == (3, sentence)
+    assert again.composed and again.typed_text == ""
+    assert seen == [(sentence, "")]
+
+
 async def test_retry_can_undo_the_replacement_after_retrying_an_undone_turn(
     setup: Setup,
 ) -> None:
