@@ -271,8 +271,9 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         ("PWD=/a." * 43_000, 1),  # one run of a shell shape, repeated
         ("$pwd:" * 60_000, 1),
         ("$PWD:" * 60_000, 0),
+        ("pw:</attachment>" * 20_000, 0),  # every word finds the same run's end
     ],
-    ids=["openers", "assignments", "lower-case variables", "variables"],
+    ids=["openers", "assignments", "lower-case variables", "variables", "tags"],
 )
 def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) -> None:
     # No run is read twice: a quoted value needs its closing quote on the line, an
