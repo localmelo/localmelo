@@ -318,11 +318,11 @@ async def test_each_item_is_embedded_when_an_embedding_model_is_set(
 # ── Secrets ──
 
 
-async def test_a_password_the_index_would_not_leave_out_reaches_no_window_and_no_file(
+async def test_a_password_given_after_a_short_word_reaches_no_window_and_no_file(
     tmp_path: Path,
 ) -> None:
-    # "pw" and "pwd" say a password is given, and the index's own filter does not
-    # know them: only the hiding before the store keeps the value out.
+    # The chat store keeps the text it is given: the hiding before the store is
+    # what keeps the value out of it, in this mode as in the other.
     value = "plain-Word7"
     data = {
         "sessions": [
@@ -332,7 +332,7 @@ async def test_a_password_the_index_would_not_leave_out_reaches_no_window_and_no
                 "date": "2023-05-22T10:00:00",
                 "turns": [
                     {"role": "user", "text": f"My pw is {value}. I like tea."},
-                    {"role": "assistant", "text": "Signed in. Tea it is."},
+                    {"role": "assistant", "text": f"Signed in with pw: {value}"},
                 ],
             }
         ]

@@ -19,7 +19,7 @@ import pytest
 
 from localmelo.melo.memory.long import LongTermSchemaError
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
-from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory import ChatMemory, index, records
 from localmelo.support.memory.recall import BLOCK_HEADER, NOT_KEPT_LINE
 from localmelo.support.sessions.store import NewSession, SessionStore
 
@@ -213,6 +213,130 @@ def test_a_pin_is_a_secret(text: str) -> None:
     ],
 )
 def test_pin_as_a_verb_is_not_a_secret(text: str) -> None:
+    assert not records.sensitive(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "My pw is plain-Word7.",
+        "forum pwd: abcd1",
+        "pw = 'two words'",
+        # Where one was cut out, the mark counts as the value it stood for.
+        "My pw is […].",
+    ],
+)
+def test_a_password_given_after_a_short_word_is_a_secret(text: str) -> None:
+    assert records.sensitive(text)
+    # So the index leaves the sentence out, like one with the word "password".
+    assert index.cleaned(f"Tea is ready. {text}") == "Tea is ready. [left out]"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ['pw: "plain. Word7" ok.', 'password: "plain. Word7" ok.', "pwd:\nplain-Word7"],
+)
+def test_a_password_that_crosses_a_sentence_end_leaves_no_part_in_the_index(
+    text: str,
+) -> None:
+    for kept in (
+        index.cleaned(f"Tea is ready. {text}"),
+        index.plain_text(f"Tea is ready. {text}"),
+    ):
+        assert kept.startswith("Tea is ready.")
+        assert "plain" not in kept and "Word7" not in kept
+
+
+def test_the_sentences_a_value_crosses_go_whole_as_one_gap() -> None:
+    kept = index.cleaned('Tea is ready. pw: "plain. Word7" ok. More tea.')
+    assert kept == "Tea is ready. [left out] More tea."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "pw: Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+        "Card pw: 4111 1111 1111 1111 ok.",
+        "pw: verification code 123456",
+        "pwd: passcode 482913",
+        # As a loaded chat stores it, the first part cut out.
+        "Card pw: […] 1111 1111 1111 ok.",
+    ],
+)
+def test_another_secret_after_a_password_word_is_left_out_whole(text: str) -> None:
+    # The sentence is judged as the text gives it: a password's value cut out
+    # first would take the start of the other secret and hide the rest.
+    assert index.cleaned(f"Tea is ready. {text}") == "Tea is ready. [left out]"
+
+
+def test_only_the_sentences_a_password_reaches_are_left_out() -> None:
+    text = "pwd\n/srv/app\nls /srv/app/src"
+    assert index.cleaned(text) == "pwd\n[left out]\nls /srv/app/src"
+
+
+@pytest.mark.parametrize("text", ["pw:\n12345678.", "Tea is ready. pwd\n12345678)"])
+def test_a_value_that_is_no_sentence_is_left_out_by_its_place(text: str) -> None:
+    # A line of digits and a full stop reads as a list marker: no sentence holds it.
+    assert "12345678" not in index.cleaned(text)
+
+
+@pytest.mark.parametrize("word", ["pw", "password"])
+def test_a_refused_sentence_inside_a_longer_one_hides_none_of_it(word: str) -> None:
+    # Replaced one after the other, the short sentence went first, inside the
+    # long one too, and the long one was then never found: its card stayed.
+    text = (
+        f"My card is 4111 1111 1111 1111 and my {word} is plain-Word7.\n"
+        f"my {word} is plain-Word7."
+    )
+    assert index.cleaned(text) == "[left out]\n[left out]"
+    assert index.plain_text(text) == "[left out] [left out]"
+
+
+def test_a_refused_sentence_is_left_out_wherever_else_its_words_stand() -> None:
+    assert index.cleaned("keypw: abcd1. pw: abcd1") == "key[left out]. [left out]"
+
+
+def test_a_secret_is_left_out_before_index_text_is_cut_to_length() -> None:
+    # Cut to length first, the head of a token would stay and read as a word.
+    token = "abcdefghijklmnopqrstuvwxyz0123456789"
+    text = "x" * (index.DOC_CHARS - 23) + f" Bearer {token}"
+    assert len(text) > index.DOC_CHARS
+    assert "abcdefgh" not in index.plain_text(text)
+
+
+def test_a_key_block_with_no_body_leaves_one_gap() -> None:
+    assert index.plain_text("-----BEGIN PRIVATE KEY-----") == "[left out]"
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("pw: Bearer\nabcdefghijklmnopqrstuvwxyz0123456789 ok.", "abcdefgh"),
+        ("password: Bearer\nabcdefghijklmnopqrstuvwxyz0123456789 ok.", "abcdefgh"),
+        ("pw: abcd1 then the verification code. 482913 is it.", "482913"),
+        ("The code is 4821. Use this OTP now.", "4821"),
+    ],
+)
+def test_a_secret_goes_with_the_sentence_that_makes_it_one(
+    text: str, secret: str
+) -> None:
+    # The word before a token, or a code's keyword, stands in a sentence that is
+    # left out: read after that cut, the token or the code is a word or a number.
+    kept = index.cleaned(f"Tea is ready. {text}")
+    assert kept.startswith("Tea is ready.")
+    assert secret not in kept
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Run pwd to print the folder.",
+        "The pw manager is open.",
+        "My pw is wrong.",
+        "He wrote […] and left.",
+    ],
+)
+def test_the_short_words_alone_are_not_a_secret(text: str) -> None:
     assert not records.sensitive(text)
 
 

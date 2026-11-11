@@ -45,6 +45,7 @@ from typing import Any, Final
 import numpy as np
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.sign_in import SPENT, password_spans
 from localmelo.melo.memory.bm25 import tokenize
 from localmelo.melo.memory.hippo.policy import (
     STOPWORDS,
@@ -268,6 +269,8 @@ _SECRET_WORDS = re.compile(
     r"|密码|口令|验证码",
     re.IGNORECASE,
 )
+# What a cut-out password's mark is read as: a value by its shape.
+_STOOD_FOR: Final = "0000"
 _ID_NUMBER = re.compile(r"(?<!\d)(\d{3}-\d{2}-\d{4}|\d{17}[\dXx])(?![\dA-Za-z])")
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 
@@ -421,9 +424,26 @@ def holds_secret_value(text: str) -> bool:
     return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _CARD.finditer(text))
 
 
+def gives_password(text: str) -> bool:
+    """Whether *text* gives a password as the sign-in contract reads one
+    (:func:`~localmelo.melo.contracts.sign_in.password_spans`), or shows where one
+    was cut out: the mark left there is read as a value, so ``pw: […]`` is one."""
+    return bool(password_spans(text.replace(SPENT, _STOOD_FOR)))
+
+
 def sensitive(text: str) -> bool:
-    """Whether *text* holds a secret: a key, a password or code, a card or ID number."""
-    return holds_secret_value(text) or _SECRET_WORDS.search(text) is not None
+    """Whether *text* holds a secret: a key, a password or code, a card or ID number.
+
+    A password counts by its word alone, and wherever one is given
+    (:func:`gives_password`): that adds the short words the sign-in contract
+    knows (``pw: …``, ``pwd = …``), which are no secret by themselves (``pwd`` is
+    also a command).
+    """
+    return (
+        holds_secret_value(text)
+        or _SECRET_WORDS.search(text) is not None
+        or gives_password(text)
+    )
 
 
 def _swap(text: str) -> str:

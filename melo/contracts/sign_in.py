@@ -22,6 +22,11 @@ plainly a password given, nothing is cut out and nothing can be typed: the page
 is handed to the person, as before. A card number or a one-time code is never
 cut out or typed: those stay the person's.
 
+Text that is kept and never typed from is read by two functions that only
+read: :func:`password_spans` says where a text gives a password, for memory to
+refuse the text or leave it out, and :func:`without_passwords` cuts the values
+out, for chats loaded from a file. Neither keeps a value or makes a handle.
+
 This module imports only the standard library.
 """
 
@@ -42,6 +47,8 @@ MAX_CHARS: Final = 128
 MAX_KEPT: Final = 16
 
 HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
+# What stands where a password was, once nothing there can be typed.
+SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
 _SIZE = "{" + f"{MIN_CHARS},{MAX_CHARS}" + "}"
@@ -167,9 +174,31 @@ def hide_passwords(text: str) -> str:
     return VAULT.hide(text)
 
 
+def password_spans(text: str) -> list[tuple[int, int]]:
+    """Where *text* gives a password: the ``(start, end)`` of each value, in order.
+
+    The places :func:`hide_passwords` would hide. It only reads: nothing is
+    kept and no handle is made. A handle is not a value.
+    """
+    return [(start, end) for start, end, _ in _values(text)]
+
+
+def without_passwords(text: str) -> str:
+    """*text* with each password it gives cut out and :data:`SPENT` in its place.
+
+    What :func:`hide_passwords` would hide, left as :func:`spent` leaves a
+    handle. It only reads: nothing is kept and no handle is made. For text that
+    is kept and never typed from.
+    """
+    out = text
+    for start, end in reversed(password_spans(text)):
+        out = out[:start] + SPENT + out[end:]
+    return out
+
+
 def spent(text: str) -> str:
     """*text* with its handles gone: it reads the same, and nothing in it can be typed."""
-    return HANDLE.sub("[…]", text)
+    return HANDLE.sub(SPENT, text)
 
 
 def handles_in(text: str) -> frozenset[str]:
