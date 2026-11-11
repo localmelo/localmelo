@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -108,7 +107,7 @@ SOURCES: list[tuple[str, dict[str, str], str]] = [
 def test_the_list_says_where_a_note_from_a_page_a_file_or_a_result_came_from(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    async def seed() -> list[tuple[str, str]]:
+    async def seed() -> list[tuple[str, str, str]]:
         memory = ChatMemory(lambda: None)
         try:
             for turn, (text, provenance, _) in enumerate(SOURCES, 1):
@@ -120,17 +119,22 @@ def test_the_list_says_where_a_note_from_a_page_a_file_or_a_result_came_from(
                     source={**source, **provenance},
                     embed_model="",
                 )
-            return [(e.text, memory_cli.note_origin(e)) for e in await memory.records()]
+            return [
+                (e.text, memory_cli.note_origin(e), day(e.created_at))
+                for e in await memory.records()
+            ]
         finally:
             await memory.aclose()
 
-    origins = dict(asyncio.run(seed()))
+    # The day is the note's own, so the test holds across midnight.
+    origins = {text: (origin, on) for text, origin, on in asyncio.run(seed())}
     for text, _, words in SOURCES:
-        assert origins[text].startswith(words), (text, origins[text])
-        assert origins[text].endswith(f", {day(time.time())}")
+        origin, on = origins[text]
+        assert origin.startswith(words), (text, origin)
+        assert origin.endswith(f", {on}")
     assert memory_cli.main(["list"]) == 0
     out = capsys.readouterr().out
-    assert f"      from jane.example.com, {day(time.time())}\n" in out
+    assert f"      from jane.example.com, {origins[SOURCES[0][0]][1]}\n" in out
     assert "from a finished task's result" in out and "from Main chat" in out
 
 

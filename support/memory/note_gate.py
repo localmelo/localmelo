@@ -278,8 +278,10 @@ def typed_places(text: str) -> list[Place]:
 def given_places(quote: str) -> list[Place]:
     """The places a note of the user's own gives for "my website": those of its *quote*
     (the sentence the user typed for it) when that calls a page theirs
-    (:data:`THEIRS`), else none. The host of an e-mail address is no place."""
-    if _THEIRS.search(fold(quote)) is None:
+    (:data:`THEIRS`) and none someone else's, else none. The host of an e-mail
+    address is no place."""
+    folded = fold(quote)
+    if _THEIRS.search(folded) is None or _OTHERS.search(folded) is not None:
         return []
     return typed_places(_EMAIL.sub(" ", quote))
 

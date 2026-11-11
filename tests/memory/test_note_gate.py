@@ -515,6 +515,10 @@ def test_the_places_the_user_typed(words: str, places: list[tuple[str, str]]) ->
         ),
         # The sentence has to call a page the user's own for any address in it to count.
         ("Your friend Bob's website is bob.example.org.", []),
+        # One that also calls a page someone else's gives none: which address is
+        # whose is not read out of a sentence.
+        ("My website is jane.example.com and Bob's site is bob.example.org.", []),
+        ("我的网站是 jane.example.com，朋友的网站是 bob.example.org。", []),
         ("I run a site at jane.example.com.", []),
         ("", []),
     ],
