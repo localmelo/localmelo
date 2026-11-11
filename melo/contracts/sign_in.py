@@ -5,7 +5,7 @@ it does not stop to ask for what it was handed. The value must never reach a
 model, a record, a log or a memory, so it is cut out of the message the moment
 the message arrives and a handle stands in its place: ``my password is
 hunter2`` reaches the model, the history, the events and the stores as ``my
-password is [password-1]``. :func:`hide_passwords` is the one function that does
+password is [password-482913075]``. :func:`hide_passwords` is the one function that does
 it, called where the person's text comes in (a gateway route, the terminal's
 prompt, a session's runner, an agent's run): before the text is routed,
 queued, titled, stored or read by a model, and running it again on its own
@@ -14,6 +14,15 @@ gives one back only to code that has checked who may use it
 (``StepReviewer.sign_in_value``): a text box of a password, on a site the
 person's own words name, in a turn the person began. The model types the
 handle; the browser tool types the value.
+
+A password in a text file the person attached may be typed too, when the file
+holds exactly one and the message's words say to sign in (#626,
+:func:`says_sign_in`). Which handles a message's files gave is said by the door
+that hid them, as data (:meth:`Vault.hide_with`, ``hide_message``) and carried
+beside the message down to the run; it is never found by reading a text, so a
+file that merely holds handle-shaped text gives nothing, and where no set is
+carried (a turn tried again, a message read back from a store, a task, a note, a
+turn melo began) no file's password can be typed.
 
 What counts as given is decided here, by code, from the person's text: a
 password word (:data:`CUES`) followed by a value, never by the model and never
@@ -38,6 +47,7 @@ This module imports only the standard library and :mod:`.attachments`.
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 from collections.abc import Sequence
 from typing import Final
@@ -60,6 +70,18 @@ HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
+# A message is about signing in when its words hold a password word or one of
+# these (not inside a longer word; "sign up" is none); the one reading of a text
+# for it. The Chinese ones need no boundary: a space is not written there.
+_SIGN_IN = re.compile(
+    rf"(?<![A-Za-z0-9_])(?:{_CUE}|(?:sign|log)(?: me)?[ -]?in(?:to)?|log[ -]?on)"
+    r"(?![A-Za-z0-9_])|登[录陆入]",
+    re.IGNORECASE,
+)
+# "the log in the folder" says where a log is: "log in" between two determiners is
+# no sign-in word.
+_DET = "the|a|an|this|that|my|your|our|its|their"
+_PLACE = re.compile(rf"\b(?:{_DET})\s+log\s+in\s+(?:{_DET}|these|those)\b", re.I)
 # A quoted value runs to the first closing quote on its line, a bare one to the
 # next space, quote or backtick (or the end of the text): neither is ever cut short.
 _QUOTES = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("「", "」"))
@@ -237,8 +259,26 @@ class Vault:
     """
 
     def __init__(self) -> None:
+        """An empty vault whose first handle is a random nine-digit number.
+
+        A handle's text outlives the process that made it: it stays in a stored
+        or queued message, which a later process reads as the person's message
+        again. Numbering from 1 in every process would let the newer process's
+        first password answer to the older message's handle, so each vault
+        starts at a number drawn at random from 100000000 to 899999999
+        (:mod:`secrets`; nothing is written to disk). The handles that two
+        vaults hold meet by chance only: a vault holds at most :data:`MAX_KEPT`
+        consecutive numbers, so an older handle is one of them with a chance of
+        at most ``MAX_KEPT / 800000000``, about 1 in 50,000,000 (1 in
+        800,000,000 for a vault that has made one handle). Nine digits, never
+        fewer: a run of 4 to 8 digits next to a code word is read as a one-time
+        code (``redact_secrets``), and a handle must pass that reader unchanged;
+        :data:`HANDLE` allows nine, and 100,000,000 numbers remain above the
+        highest base. Only :meth:`forget`, for tests, restarts at 1.
+        """
         self._values: dict[str, str] = {}
-        self._made = 0
+        # The last number made: the first handle is one of 100000000 to 899999999.
+        self._made = 99_999_999 + secrets.randbelow(800_000_000)
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -252,15 +292,27 @@ class Vault:
         time. A value over :data:`MAX_CHARS` is cut out whole and kept nowhere:
         :data:`SPENT` stands in its place, for no handle could be typed from it.
         """
+        return self.hide_with(text)[0]
+
+    def hide_with(self, text: str) -> tuple[str, frozenset[str]]:
+        """:meth:`hide`, and what this call put in place of values in *text*.
+
+        The set is what a door says of the text it read: a handle for each value
+        it replaced, and :data:`SPENT` when one was too long to keep. A
+        handle-shaped text *text* already held is no value (it is left as it is),
+        so it is never in the set, and a text hidden a second time has an empty
+        one.
+        """
         spans = _values(text)
         if not spans:
-            return text
+            return text, frozenset()
         with self._lock:
             handles = [
                 self._handle(value) if len(value) <= MAX_CHARS else SPENT
                 for _, _, value in spans
             ]
-        return _splice(text, [(start, end) for start, end, _ in spans], handles)
+        hidden = _splice(text, [(start, end) for start, end, _ in spans], handles)
+        return hidden, frozenset(handles)
 
     def _handle(self, value: str) -> str:
         for handle, kept in self._values.items():
@@ -281,8 +333,9 @@ class Vault:
     def forget(self) -> None:
         """Drop every password and number the handles from 1 again.
 
-        Nothing in melo calls it: a restart forgets them all. A test does, to
-        start from an empty vault.
+        Nothing in melo calls it: a restart forgets them all, and a new vault
+        starts at a random number (see ``__init__``). A test does, to start from
+        an empty vault whose first handle is ``[password-1]``.
         """
         with self._lock:
             self._values.clear()
@@ -324,6 +377,12 @@ def without_passwords(text: str) -> str:
 def spent(text: str) -> str:
     """*text* with its handles gone: it reads the same, and nothing in it can be typed."""
     return HANDLE.sub(SPENT, text)
+
+
+def says_sign_in(words: str) -> bool:
+    """Whether the person's *words* are about signing in: a password word
+    (:data:`CUES`) or a sign-in word (``sign in``, ``log me in``, ``login``, ``登录``)."""
+    return _SIGN_IN.search(_PLACE.sub(" ", words)) is not None
 
 
 def handles_in(text: str) -> frozenset[str]:

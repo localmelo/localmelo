@@ -213,7 +213,8 @@ class Gate:
             self.provider.calls.clear()
         turn = CHAT_TURN.get()
         if turn is not None:
-            turn.refusals = 0
+            turn.refusals, turn.repeated = 0, False
+            turn.saved.clear()
         reply = await self.memory.tools().remember(text=text, topic=topic)
         assert isinstance(reply, str)  # The first refusal of a turn is plain text.
         return reply.removesuffix(TRY_ONCE_MORE)

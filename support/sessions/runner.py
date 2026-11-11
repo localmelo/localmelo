@@ -181,6 +181,8 @@ class _Turn:
     from_person: bool = True
     # The pictures the person added to the message, with their data.
     images: tuple[ImagePart, ...] = ()
+    # The handles the door made from values in the message's files (#626).
+    file_handles: frozenset[str] = frozenset()
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -535,11 +537,14 @@ class SessionRunner:
         title: str | None = None,
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
+        file_handles: frozenset[str] = frozenset(),
         composed: bool = False,
     ) -> RunResult:
         """Run a turn of *text* in this task and return its RunResult.
 
-        *title* is the typed text, for the session's first title. *routine*
+        *title* is the typed text, for the session's first title. *file_handles*
+        are the handles the caller's door made from values in *attachments* when
+        the message arrived (see :meth:`start_turn`). *routine*
         names the run's routine (``Agent.run_task``'s ``routine=``), passed
         only when given. *composed*: *text* is melo's wording, with no words
         of the person's. A turn that this runner stopped (:meth:`cancel`,
@@ -559,6 +564,7 @@ class SessionRunner:
             routine,
             tuple(attachments),
             own_task=False,
+            file_handles=file_handles,
             words="" if composed else None,
             composed=composed,
         )
@@ -582,6 +588,7 @@ class SessionRunner:
         images: Sequence[ImagePart] = (),
         from_person: bool = True,
         composed: bool = False,
+        file_handles: frozenset[str] = frozenset(),
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -603,6 +610,14 @@ class SessionRunner:
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
+
+        *file_handles* are the handles the caller's door made from values in
+        *attachments* when the message arrived (``hide_message``'s
+        ``file_handles``, carried as data): the run may type the one password
+        they name. This runner's own hiding never makes the set (it cannot tell a
+        first read from a retry or a stored message), so a caller with no set
+        from its own door gives none; the set is refused with no files, for a
+        turn the person did not begin and for a composed one.
         """
         turn = await self._start(
             text,
@@ -617,6 +632,7 @@ class SessionRunner:
             images=tuple(images),
             from_person=from_person,
             composed=composed,
+            file_handles=file_handles,
         )
         return turn.turn
 
@@ -648,6 +664,7 @@ class SessionRunner:
         images: tuple[ImagePart, ...] = (),
         from_person: bool = True,
         composed: bool = False,
+        file_handles: frozenset[str] = frozenset(),
     ) -> _Turn:
         self._check_open()
         if composed and from_person and words is None:
@@ -657,6 +674,8 @@ class SessionRunner:
             raise ValueError("worker sessions do not support pictures")
         if attachments and origin:
             raise ValueError("a turn the person did not begin carries no attachments")
+        if file_handles and (composed or not (attachments and from_person)):
+            raise ValueError("file handles go with the files of the person's message")
         if not self._worker and not origin:
             # A password the person wrote, in the words or in a file, is cut out
             # here, before the turn is stored, shown again or read by a model:
@@ -720,6 +739,7 @@ class SessionRunner:
                 images,
                 from_person,
                 composed or not from_person,
+                file_handles,
             )
         )
         self._begin = begin
@@ -766,6 +786,7 @@ class SessionRunner:
         images: tuple[ImagePart, ...] = (),
         from_person: bool = True,
         composed: bool = False,
+        file_handles: frozenset[str] = frozenset(),
     ) -> _Turn:
         # The row says what was typed whenever the words are given apart from the
         # text (a task's request, a queued message of an older row): with files
@@ -811,6 +832,7 @@ class SessionRunner:
             origin=origin,
             from_person=from_person,
             images=images,
+            file_handles=file_handles,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -935,6 +957,9 @@ class SessionRunner:
                 kwargs["from_person"] = False
                 if self._memory is not None:
                     kwargs["hide_tools"] = _NOTE_TOOLS
+            if turn.file_handles:
+                # Only the person's own turn has them: _start refuses any other.
+                kwargs["file_handles"] = turn.file_handles
             # The chat began when its session did, across reloads and restarts.
             session = None
             with contextlib.suppress(Exception):

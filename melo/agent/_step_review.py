@@ -43,7 +43,7 @@ import os
 import re
 import time
 from collections import OrderedDict, deque
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
@@ -98,7 +98,7 @@ from localmelo.melo.contracts.review import (
     named_by,
     step_key,
 )
-from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in, says_sign_in
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -464,8 +464,8 @@ class StepReviewer:
         # Addresses each site verdict let through since the user's last message.
         self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
-        # The handles of passwords the person's messages of this run hold
-        # (#547): only they can be typed, and none in a run they did not begin.
+        # The handles of passwords the person's messages of this run gave
+        # (#547, #626): only they can be typed, and none in a run they did not begin.
         self._live: frozenset[str] = frozenset()
         if new_chat:
             self.since = self._wall()
@@ -484,7 +484,9 @@ class StepReviewer:
         """
         return words_before_files(text).rstrip()
 
-    def user_message(self, text: str, recalled: str | None = None) -> None:
+    def user_message(
+        self, text: str, recalled: str | None = None, files: Collection[str] = ()
+    ) -> None:
         """A message of the user's own: a run's request, or one it read mid-run.
 
         *text* is all the user's: the caller leaves out what melo appended to
@@ -501,12 +503,23 @@ class StepReviewer:
         caller that appended the notes, never from *text*: any string (also
         ``""``) replaces the kept notes, and ``None`` (a message read
         mid-run) keeps them.
+
+        A password the message gave can be typed in this run (#547): the handles
+        its words hold. With none, the one a file it carried gave (#626), when the
+        words are about signing in (:func:`~localmelo.melo.contracts.sign_in.says_sign_in`):
+        *files* are the handles the door made from values in the message's files,
+        given by the caller as data and never found in a text. Exactly one goes
+        live, if the vault still keeps it; two or more, or none (a value too long
+        to keep, which the door says by giving none), do not. A message read
+        mid-run carries no *files*.
         """
         if recalled is not None:
             self._recalled = recalled
         text = self._said(text)
-        # A password this message holds can be typed in this run (#547).
-        self._live |= handles_in(text)
+        gave = handles_in(text)
+        if not gave and len(files) == 1 and says_sign_in(text):
+            gave = frozenset(h for h in files if VAULT.value(h) is not None)
+        self._live |= gave
         # A message counts even with no words (an attachment): a review
         # settled for the last message is asked again, with the new words.
         self._marker += 1
@@ -547,7 +560,7 @@ class StepReviewer:
     # ── Sign-in details the person gives (#547) ──
 
     def begin_run(self) -> None:
-        """A run starts: no password can be typed in it until the person's message of the run holds one (#547).
+        """A run starts: no password can be typed in it until the person's message of the run gives one (#547).
 
         A run the person did not begin (a task's follow-up, a chore) never
         types one, whatever an earlier message held.
@@ -557,8 +570,9 @@ class StepReviewer:
     def sign_in_value(self, handle: str, site: str) -> str | None:
         """The password *handle* stands for, for a password box on *site*, or ``None``.
 
-        Only a handle a message of the person's run holds, and only on a site their
-        own words name (:meth:`names_host`): the model, a page or an earlier
+        Only a handle a message of the person's run holds (or the one its files
+        gave, :meth:`user_message`), and only on a site their own words name
+        (:meth:`names_host`): the model, a page, a file's text or an earlier
         message never makes melo type one. The browser tool asks this and
         types the value; nothing else ever gets it.
         """
@@ -573,6 +587,11 @@ class StepReviewer:
     def signs_in(self, site: str) -> bool:
         """Whether a message of the person's run holds a password and their words name *site*."""
         return self.holds_sign_in() and self.names_host(site)
+
+    def sign_in_handle(self, site: str) -> str | None:
+        """The run's one kept password handle when the person's words name *site*; ``None`` with none or several (#626)."""
+        kept = [h for h in self._live if VAULT.value(h) is not None]
+        return kept[0] if len(kept) == 1 and self.names_host(site) else None
 
     def holds_sign_in(self) -> bool:
         """Whether a message of the person's run holds a password melo can still type (#571)."""

@@ -11,17 +11,23 @@ of them.
 from __future__ import annotations
 
 import asyncio
+import secrets
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
-from localmelo.melo.contracts.sign_in import VAULT
+from localmelo.melo.agent import Agent, _step_review
+from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.contracts import sign_in
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, Vault, hide_passwords
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console.asks import _restored
 from localmelo.support.gateway.handover import words_of
 from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions import attachments
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import typed_words
 from localmelo.tests.agent.test_sign_in import LIKE_HEADING
@@ -285,6 +291,93 @@ def a_file(name: str, text: str) -> dict[str, Any]:
     return {"name": name, "text": text, "chars": len(text)}
 
 
+async def test_the_one_password_of_a_sent_file_is_typed_for_that_run_and_no_retry_or_old_handle_brings_it_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chat turn with a file, from the route to the run: its password is live on the site the words name; a retry carries no set, and a file that only holds the handle's text (#626) gives nothing."""
+    secret = "quokka-7741"
+    words = "sign in to forum.example for me"
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")] * 3, run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        sent = await _post_turn(
+            client,
+            main,
+            words,
+            attachments=[a_file("login.txt", f"password: {secret}")],
+        )
+        assert sent.status_code == 202, sent.text
+        turn = await _wait_turn(client, main)
+        entry = console.sessions.get(main)
+        assert entry is not None and entry.agent is not None
+        review = entry.agent._reviewer
+        assert review.sign_in_value("[password-1]", "forum.example") == secret
+        assert review.sign_in_value("[password-1]", "other.example") is None
+        assert review.holds_sign_in() and review.signs_in("forum.example")
+
+        # Try again sends the stored message again: the set is not stored, so none.
+        retried = await client.post(
+            f"/api/sessions/{main}/retry", json={"turn_id": turn["id"]}
+        )
+        assert retried.status_code == 202, retried.text
+        await _wait_turn(client, main)
+        assert review.sign_in_value("[password-1]", "forum.example") is None
+        assert not review.holds_sign_in()
+
+        # A file that holds only the handle's text brings the password back to no one.
+        held = a_file("old.txt", "password: [password-1]")
+        assert (
+            await _post_turn(client, main, words, attachments=[held])
+        ).status_code == 202
+        await _wait_turn(client, main)
+        assert VAULT.value("[password-1]") == secret
+        assert review.sign_in_value("[password-1]", "forum.example") is None
+        assert secret not in stored(tmp_path / "sessions.db")
+
+
+async def test_a_queued_message_carries_its_files_handles_in_memory_and_a_stored_row_has_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The set waits with the message in this process; the stored row holds no set, so a row read back after a restart has none (#626)."""
+    seen: list[Any] = []
+    real = Agent.run_task
+
+    async def run_task(self: Agent, query: str, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("file_handles"))
+        return await real(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", run_task)
+    release = asyncio.Event()
+    main = [held(release, answer("First.")), answer("Second.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        assert (await _post_turn(client, chat, "start the job")).status_code == 202
+        await until(lambda: len(models["main"].requests) == 1)
+        queued = await _post_turn(
+            client,
+            chat,
+            "sign in to forum.example for me",
+            attachments=[a_file("login.txt", "password: quokka-5541")],
+            client_request_id="q-1",
+        )
+        assert queued.json()["echo"]["echo"] == "queued", queued.text
+        info = await console.store.get_session(chat)
+        assert info is not None
+        [row] = info.meta["queued"]
+        assert "[password-1]" in row["attachments"][0]["text"]
+        assert "file_handles" not in row and not _restored(row).file_handles
+        release.set()
+        await until(lambda: len(seen) == 2)
+        await console.asks.settle()
+        await _wait_turn(client, chat)
+        assert seen == [None, {"[password-1]"}]
+
+
 async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_sent_one_does(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -384,6 +477,58 @@ async def test_a_turn_tried_again_twice_holds_its_typed_words_and_files_and_runs
             assert row.attachments and "[password-1]" in row.attachments[0].text
         assert given == [typed] * 3
         assert "quokka" not in stored(tmp_path / "sessions.db")
+
+
+def start_process(monkeypatch: pytest.MonkeyPatch, draw: int) -> Vault:
+    """A new process: its own vault, numbering from a base that the random draw *draw* picked."""
+    monkeypatch.setattr(secrets, "randbelow", lambda _: draw)
+    vault = Vault()
+    monkeypatch.setattr(sign_in, "VAULT", vault)
+    monkeypatch.setattr(_step_review, "VAULT", vault)
+    monkeypatch.setattr(attachments, "VAULT", vault)
+    return vault
+
+
+async def test_a_turn_tried_again_after_a_restart_cannot_type_a_password_given_since(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A handle kept in a stored message stands for nothing in a newer process, whatever that one's first handle is (#626)."""
+    start_process(monkeypatch, 0)
+    typed = "sign in to forum.example for me, my password is old-Secret1"
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")] * 2, run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        assert (await _post_turn(client, main, typed)).status_code == 202
+        turn = await _wait_turn(client, main)
+        [old] = await console.store.list_turns(main)
+        [stale] = HANDLE.findall(old.user_text)
+        assert stale == "[password-100000000]"
+        # The app restarts and the person gives another password in another message.
+        newer = start_process(monkeypatch, 7)
+        given = hide_passwords("on other.example my password is new-Secret9")
+        assert given.endswith("[password-100000007]") and newer.value(stale) is None
+        # Try again reads the old message back as the person's: its handle is not live.
+        typed_again: list[str | None] = []
+        real = StepReviewer.user_message
+
+        def user_message(
+            self: StepReviewer,
+            text: str,
+            recalled: str | None = None,
+            files: Collection[str] = (),
+        ) -> None:
+            real(self, text, recalled, files)
+            typed_again.append(self.sign_in_value(stale, "forum.example"))
+
+        monkeypatch.setattr(StepReviewer, "user_message", user_message)
+        retried = await client.post(
+            f"/api/sessions/{main}/retry", json={"turn_id": turn["id"]}
+        )
+        assert retried.status_code == 202, retried.text
+        await until(lambda: len(typed_again) == 1)
+        await _wait_turn(client, main)
+        assert typed_again == [None]
 
 
 @pytest.mark.parametrize(
