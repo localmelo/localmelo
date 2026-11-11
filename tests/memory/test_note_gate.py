@@ -233,7 +233,8 @@ def read(
     events: list[dict[str, Any]], typed: dict[int, str], notes: tuple[str, ...] = ()
 ) -> list[gate.Material]:
     """The material of *events*, all of turn 1 unless an event names its turn; *notes*
-    are the texts of the person's own notes, whose addresses "my site" may stand for."""
+    are texts whose addresses stand for the places the user's own notes give for "my
+    site" (:func:`gate.given_places` reads them from a note's quote)."""
     return gate.pointed_material(
         [(int(event.get("turn", 1)), event) for event in events],
         typed,
@@ -497,6 +498,31 @@ def test_the_page_that_holds_most_of_a_note_is_named() -> None:
 )
 def test_the_places_the_user_typed(words: str, places: list[tuple[str, str]]) -> None:
     assert [tuple(p) for p in gate.typed_places(words)] == places
+
+
+@pytest.mark.parametrize(
+    ("quote", "places"),
+    [
+        ("My website is jane.example.com.", [("jane.example.com", "")]),
+        ("my site: https://www.jane.example.com/me", [("jane.example.com", "/me")]),
+        ("我的网站是 jane.example.com。", [("jane.example.com", "")]),
+        # An e-mail address names a mail domain, not a page, in any sentence.
+        ("Your work email is jane@bigcorp.example.", []),
+        ("My website is jane.doe@bigcorp.example.", []),
+        (
+            "My website is jane.example.com and my email is jane@bigcorp.example.",
+            [("jane.example.com", "")],
+        ),
+        # The sentence has to call a page the user's own for any address in it to count.
+        ("Your friend Bob's website is bob.example.org.", []),
+        ("I run a site at jane.example.com.", []),
+        ("", []),
+    ],
+)
+def test_the_places_a_note_of_theirs_gives_for_my_website(
+    quote: str, places: list[tuple[str, str]]
+) -> None:
+    assert [tuple(p) for p in gate.given_places(quote)] == places
 
 
 def fetched(url: str, body: str = "Some text.") -> list[dict[str, Any]]:

@@ -13,8 +13,9 @@ inference), which no level writes now and recall still reads.
   fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
   address or file name the user typed, or that the user's words in that turn call
   theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
-  whose address one of the user's own notes holds, since the phrase alone never
-  points to a page the model chose. A page the user did not point to is no source at
+  at an address the user gave when they called a page theirs and a note of their own
+  kept that (:func:`given_places`), since the phrase alone never points to a page the
+  model chose. A page the user did not point to is no source at
   any level, and a page the user called someone else's supports no note about the
   user.
 - ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
@@ -274,6 +275,15 @@ def typed_places(text: str) -> list[Place]:
     return places
 
 
+def given_places(quote: str) -> list[Place]:
+    """The places a note of the user's own gives for "my website": those of its *quote*
+    (the sentence the user typed for it) when that calls a page theirs
+    (:data:`THEIRS`), else none. The host of an e-mail address is no place."""
+    if _THEIRS.search(fold(quote)) is None:
+        return []
+    return typed_places(_EMAIL.sub(" ", quote))
+
+
 def _covers(typed: Place, page: Place) -> bool:
     """Whether the place the user typed holds *page*: the same host and, for a typed
     path, that path or one below it (``/jane`` holds ``/jane/repo``, not ``/janet``)."""
@@ -511,7 +521,7 @@ def pointed_material(
     *events* are the chat's stored events, oldest first, as ``(turn, event)``;
     *typed* maps each turn the user began (not an undone one, not a task's
     question) to what they typed in it, the turn under way included; *own* are the
-    places (:func:`typed_places`) that the user's own notes name. A tool call counts
+    places the user's own notes give (:func:`given_places`). A tool call counts
     when it finished with a result and the user pointed to its page or file:
 
     - a page, when the user typed its address (:func:`typed_places`) in some turn up

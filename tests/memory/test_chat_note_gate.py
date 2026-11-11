@@ -1142,14 +1142,14 @@ async def test_a_bare_host_typed_points_to_every_page_of_it(
 
 async def keep_address(
     gate: Gate, words: str = f"Remember that my website is {HOST}."
-) -> str:
+) -> None:
     """A first turn whose typed words ask melo to keep an address: a note the user's
-    own words made. The chat's id, for the turns after it."""
+    own words made. The turns after it are in another chat, where the address is not
+    typed, so only the note can make "my website" point to it."""
     first = await gate.turn(words)
     await gate.finish(first)
     (entry,) = await gate.notes()
     assert entry.admitted_by == "user_request" and HOST in entry.text
-    return first.session_id
 
 
 @pytest.mark.parametrize("level", LEVELS)
@@ -1160,8 +1160,8 @@ async def test_my_site_holds_for_the_place_a_note_holds_not_for_another_page(
     """ "Read my site and compare me with similar people" fetches the user's site,
     then other people's pages: only a page at an address of the user's own is theirs."""
     gate = make(level, poisoned_provider())
-    chat = await keep_address(gate)
-    turn = await gate.turn("Read my site and compare me with similar people.", chat)
+    await keep_address(gate)
+    turn = await gate.turn("Read my site and compare me with similar people.")
     await gate.fetch(turn, "https://rival.example.net/", page_text)
     await gate.fetch(turn, URL, RESUME_PAGE)
     for note in notes:
@@ -1191,14 +1191,131 @@ async def test_my_website_points_to_a_page_at_an_address_in_a_note_the_user_type
     make: Any,
 ) -> None:
     gate = make("pointed")
-    chat = await keep_address(gate)
-    turn = await gate.turn("Read my website and tell me which jobs fit.", chat)
+    await keep_address(gate)
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
     await gate.fetch(turn, URL, "You work at Acme in Leeds.")
     reply = await gate.remember("You work at Acme in Leeds.")
     assert reply.startswith(f"Remembered (source: pointed, from {HOST})")
     mine, kept = sorted(await gate.notes(), key=lambda note: note.id)
     assert mine.admitted_by == "user_request"
     assert kept.provenance["source"] == "pointed" and kept.provenance["from"] == URL
+
+
+async def test_my_website_points_to_a_page_at_an_address_a_statement_of_theirs_gave(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn(f"My website is {HOST}.")
+    assert (await gate.remember(f"Your website is {HOST}.")).startswith("Remembered")
+    (mine,) = await gate.notes()
+    assert mine.admitted_by == "user_statement"
+    assert mine.provenance["quote"] == f"My website is {HOST}."
+    await gate.finish(first)
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, URL, "You work at Acme in Leeds.")
+    reply = await gate.remember("You work at Acme in Leeds.")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST})")
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "host"),
+    [
+        (
+            "My work email is jane@bigcorp.example.",
+            "Your work email is jane@bigcorp.example.",
+            "bigcorp.example",
+        ),
+        (
+            "My friend Bob's website is bob.example.org.",
+            "Your friend Bob's website is bob.example.org.",
+            "bob.example.org",
+        ),
+        (
+            "Remember that my work email is jane@bigcorp.example.",
+            "Your work email is jane@bigcorp.example.",
+            "bigcorp.example",
+        ),
+    ],
+)
+async def test_an_email_host_and_a_host_called_someone_else_s_are_no_place_for_my_website(
+    make: Any, typed: str, note: str, host: str
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn(typed)
+    await gate.remember(note, "about")
+    await gate.finish(first)
+    (mine,) = await gate.notes()
+    assert mine.admitted_by in ("user_statement", "user_request") and host in mine.text
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, f"https://{host}/", "You work at Acme in Leeds.")
+    chat = CHAT_TURN.get()
+    assert chat is not None and await gate.memory._pointed(chat) == []
+    reply = await gate.remember("You work at Acme in Leeds.")
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert len(await gate.notes()) == 1
+
+
+async def test_the_website_in_a_sentence_that_also_names_an_email_is_still_a_place(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    words = f"Remember that my website is {HOST} and my work email is jane@{HOST}."
+    await keep_address(gate, words)
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, URL, "You work at Acme in Leeds.")
+    reply = await gate.remember("You work at Acme in Leeds.")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST})")
+
+
+async def put_note(gate: Gate, text: str, quote: str, **provenance: object) -> int:
+    """A note the person's own words made, written straight to the store with *quote*."""
+    where = {"session_id": "s0", "turn": 1, "chat": "Main chat", **provenance}
+    (written,) = await records.write(
+        gate.memory.stores()[0],
+        [records.Candidate(text, quote, "about", "user_statement")],
+        [None],
+        source=where,
+        embed_model="",
+    )
+    return written.id
+
+
+@pytest.mark.parametrize("quote", ["", "I run a site at jane.example.com."])
+async def test_a_note_of_theirs_whose_quote_calls_no_page_theirs_gives_no_place(
+    make: Any, quote: str
+) -> None:
+    gate = make("pointed")
+    await put_note(gate, f"Your website is {HOST}.", quote)
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, URL, "You work at Acme in Leeds.")
+    chat = CHAT_TURN.get()
+    assert chat is not None and await gate.memory._pointed(chat) == []
+    assert (await gate.remember("You work at Acme in Leeds.")).startswith(
+        note_gate.NOT_SUPPORTED
+    )
+
+
+async def test_an_edited_note_from_a_page_gives_no_place_for_my_website(
+    make: Any,
+) -> None:
+    """The edit box is pre-filled, so a note from a page that is reworded as "My
+    website is ..." is still the page's: it is not the person's own words."""
+    gate = make("pointed")
+    first = await gate.turn(f"Read {URL} and tell me what fits.")
+    await gate.fetch(first, URL, f"Website: {HOST}. You work at Acme in Leeds.")
+    assert (await gate.remember(f"Your website is {HOST}.")).startswith(
+        f"Remembered (source: pointed, from {HOST})"
+    )
+    (page,) = await gate.notes()
+    edited = await gate.memory.edit_record(page.id, f"My website is {HOST}.")
+    assert edited is not None and edited.provenance["edited"]
+    assert edited.provenance["quote"] == f"My website is {HOST}."
+    assert records.kept_from_replacement(edited) and not records.by_person(edited)
+    await gate.finish(first)
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, URL, "You work at Acme in Leeds.")
+    chat = CHAT_TURN.get()
+    assert chat is not None and await gate.memory._pointed(chat) == []
 
 
 async def test_an_address_only_a_note_from_a_page_holds_is_not_the_users_to_point_to(

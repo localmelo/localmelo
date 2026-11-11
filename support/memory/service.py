@@ -1983,9 +1983,10 @@ class ChatMemory:
         """The pages and files this chat read that the user pointed to, from the
         chat's stored tool events (:func:`note_gate.pointed_material`): each
         ``tool.started`` with its ``tool.finished`` output, in turns the user began
-        and did not undo, the turn under way included. The addresses in the notes the
-        person's own words made are the places that "my website" may stand for; a
-        note kept from a page, a file or a result names none."""
+        and did not undo, the turn under way included. The places that "my website"
+        may stand for are those a note the person's own words made gives
+        (:func:`note_gate.given_places`: the address they typed when they called a
+        page theirs); a note kept from a page, a file or a result gives none."""
         typed: dict[int, str] = {}
         for earlier in await turn.store.list_turns(turn.info.session_id):
             if earlier.turn < turn.info.turn and not (
@@ -2018,7 +2019,9 @@ class ChatMemory:
             place
             for entry in active
             if records.by_person(entry)
-            for place in note_gate.typed_places(entry.text)
+            for place in note_gate.given_places(
+                str(entry.provenance.get("quote") or "")
+            )
         ]
         return note_gate.pointed_material(events, typed, own)
 
