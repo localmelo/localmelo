@@ -3585,7 +3585,9 @@ class TaskWorkers:
                         if self.on_unsent is not None:
                             await self.on_unsent(ended, str(exc) or type(exc).__name__)
 
-    def _hand_melos(self, task_id: str, unread: list[str], melos: list[str]) -> None:
+    def _hand_melos(
+        self, task_id: str, unread: builtins.list[str], melos: builtins.list[str]
+    ) -> None:
         """Melo's go-ahead that came with the person's messages goes into the next run's inbox."""
         if unread and melos:
             inbox = self._inboxes.setdefault(task_id, TaskInbox())
