@@ -65,7 +65,15 @@ from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
 from localmelo.support.memory import people
-from localmelo.support.memory.recall import OLDER, Item, stem, unit
+from localmelo.support.memory.recall import (
+    OLDER,
+    OWN,
+    REWORDED,
+    TAKEN,
+    Item,
+    stem,
+    unit,
+)
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
 TOPIC_LABELS: Final = {
@@ -1310,12 +1318,6 @@ def by_person(entry: StoredEntry) -> bool:
     :data:`OWN_WORDS` and its provenance names no other source (a note kept from a
     page, a file or a result says so there, whatever signal it carries)."""
     return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
-
-
-# How far a note is the person's own (:func:`standing`).
-OWN: Final = 2
-REWORDED: Final = 1
-TAKEN: Final = 0
 
 
 def standing(entry: StoredEntry) -> int:

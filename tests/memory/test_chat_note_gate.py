@@ -23,7 +23,7 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.support.config import MEMORY_NOTE_GATE, Config, MemoryConfig
 from localmelo.support.memory import ChatMemory, note_gate, note_judge, records
 from localmelo.support.memory.index import Document, document_text
-from localmelo.support.memory.recall import day
+from localmelo.support.memory.recall import Corpus, day, replaced_turns
 from localmelo.support.memory.service import (
     CHAT_TURN,
     REMEMBER,
@@ -722,6 +722,31 @@ async def test_recall_lists_a_page_note_the_person_edited_first_and_unmarked(
     assert "Alice Wu-Reyes" in mine and "Carla Reyes" in newer
     assert "older" not in mine and "older" not in newer
     assert HOST in mine and HOST in newer  # each still says where it came from
+
+
+async def test_a_page_s_note_that_replaces_a_page_s_note_marks_no_turn_older(
+    make: Any,
+) -> None:
+    """The turn the older note was taken in holds the person's words too."""
+    gate = make("pointed")
+    first = await gate.turn(f"Read {URL}, who runs the lab? My manager is Bob.")
+    await gate.fetch(first, URL, "Manager: Alice Wu. Lab: robotics.")
+    await gate.remember("Your manager is Alice Wu.", "people")
+    await gate.finish(first)
+    second = await gate.turn(f"Read {URL} again, who runs the lab?", first.session_id)
+    await gate.fetch(second, URL, "Manager: Carla Reyes. Lab: robotics.")
+    await gate.remember("Your manager is Carla Reyes.", "people")
+    (newer,) = await gate.notes()
+    assert newer.text == "Your manager is Carla Reyes."
+    assert newer.provenance["replaces"] == [[first.session_id, first.turn]]
+    corpus = Corpus()
+    corpus.add(_record_item(newer))
+    assert replaced_turns(corpus) == {}
+    # Reworded by hand it is still from the page.
+    edited = await gate.memory.edit_record(newer.id, "Your manager is Carla R.")
+    assert edited is not None and edited.provenance["replaces"]
+    corpus.add(_record_item(edited))
+    assert replaced_turns(corpus) == {}
 
 
 async def test_recall_keeps_the_typed_note_first_beside_a_page_note_the_person_edited(

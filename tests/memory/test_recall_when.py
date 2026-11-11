@@ -23,9 +23,11 @@ from localmelo.support.memory.recall import (
     BLOCK_CHARS,
     BLOCK_HEADER,
     OLDER,
+    Corpus,
     Item,
     block,
     day,
+    replaced_turns,
     snippet,
     times,
     turn_said,
@@ -284,6 +286,19 @@ def test_a_reworded_note_is_listed_first_whatever_its_source_label() -> None:
     plain = dataclasses.replace(note(3, BOB, at(2026, 10, 27)), standing=records.TAKEN)
     ordered = records.newer_values_first([plain, newer])
     assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:3", OLDER)]
+
+
+def test_only_a_note_of_the_persons_own_marks_a_turn_older() -> None:
+    corpus = Corpus()
+    said = (("chat-a", 1),)
+    for key, make in enumerate((note, reworded_note, source_note), 1):
+        item = make(key, BOB, at(2026, 10, 27))
+        corpus.add(dataclasses.replace(item, replaces=said, session_id=f"s{key}"))
+    assert {turn: item.key for turn, item in replaced_turns(corpus).items()} == {
+        ("chat-a", 1): "r:1"
+    }
+    corpus.remove("r:1")
+    assert replaced_turns(corpus) == {}
 
 
 def test_a_reworded_note_never_marks_the_persons_own_older() -> None:
