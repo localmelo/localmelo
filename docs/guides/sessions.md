@@ -92,7 +92,7 @@ What to know about the runner:
 
 - It raises `SessionBusyError` during a turn, or `UnknownSessionError` (a `SessionStoreError` subclass) if the session was deleted.
 - Store operations that require an existing session raise the same typed error; `list_turns` keeps returning an empty list for an unknown ID.
-- `TurnInfo.typed_text` exposes the original typed text passed as `title=`, separately from the composed `user_text`; `/retry` keeps both after a restart.
+- `TurnInfo.typed_text` exposes the typed text, separately from the composed `user_text`, when the turn was begun with it (`TurnInfo.typed_apart`); otherwise it holds the title the turn was begun with, or nothing. `typed_words(turn)` says what the person typed in an earlier turn. `/retry` keeps both after a restart.
 
 `resume_mode` chooses how:
 
