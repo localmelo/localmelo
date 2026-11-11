@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
@@ -162,6 +163,8 @@ from localmelo.support.memory.recall import (
     unit,
     whole_turn,
 )
+from localmelo.support.sessions.attachments import is_stand_in
+from localmelo.support.sessions.store import typed_words
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -198,10 +201,8 @@ ADDED_MARK: Final = "(added while melo worked)"
 # The line a console chat puts before a note in the request the run reads (so also
 # in the ``inbox.accepted`` text); memory leaves it out, :data:`ADDED_MARK` says it.
 _NOTE_LEAD: Final = "[The user added this while you were working]"
-# What the console adds to a note that carries pictures and no words (a stand-in,
-# ``[2 pictures]``), and after the words of a note whose pictures a text-only
-# model was not sent (a line to the model). Neither is the person's.
-_PICTURE_STANDIN: Final = re.compile(r"\[\d+ pictures?\]")
+# What the console adds after the words of a note whose pictures a text-only model
+# was not sent (a line to the model): not the person's.
 _PICTURES_WITHHELD: Final = re.compile(
     r"\s*\[You cannot see (?:this picture|these pictures) "
     r"\(this model is not sent pictures\); [^\]]*\]\s*$"
@@ -750,23 +751,15 @@ async def window_start(
         before = page[0].turn
 
 
-def _typed_words(turn: TurnInfo) -> str:
-    """What the user typed in *turn*: with attachments the typed text, which holds
-    none of the attached text, else the turn's text; ``""`` for a turn whose text
-    melo composed (``TurnInfo.composed``)."""
-    if turn.composed:
-        return ""
-    return turn.typed_text if turn.attachments else turn.user_text
-
-
 def _note_words(note: str) -> str:
     """The words of a note the person added while melo worked, as the run read it:
-    after the console's own lead (:data:`_NOTE_LEAD`), without the stand-in for its
-    pictures or the console's line about pictures a model was not sent (neither is
-    words); ``""`` when none are left."""
-    words = note.strip().removeprefix(_NOTE_LEAD).strip()
+    after the console's own lead (:data:`_NOTE_LEAD`) and before the first file sent
+    with it (a message sent on to a running task can carry one), without the
+    console's line about pictures a model was not sent; ``""`` when none are left
+    or they are only the stand-in for pictures or files."""
+    words = words_before_files(note.strip().removeprefix(_NOTE_LEAD).strip())
     words = _PICTURES_WITHHELD.sub("", words).strip()
-    return "" if _PICTURE_STANDIN.fullmatch(words) else words
+    return "" if is_stand_in(words) else words
 
 
 def with_read_notes(typed: str, notes: Sequence[str]) -> str:
@@ -852,7 +845,7 @@ async def recent_said(
             ):
                 return said
             seen += 1
-            words = _typed_words(turn)
+            words = typed_words(turn)
             if turn.undone or is_owner_question(turn) or is_contentless(words):
                 continue
             said.append(words)
@@ -2003,7 +1996,7 @@ class ChatMemory:
             if earlier.turn < turn.info.turn and not (
                 earlier.undone or is_owner_question(earlier)
             ):
-                typed[earlier.turn] = _typed_words(earlier)
+                typed[earlier.turn] = typed_words(earlier)
         typed[turn.info.turn] = turn.typed
         events: list[tuple[int | None, dict[str, Any]]] = []
         started: set[tuple[int | None, str]] = set()
@@ -2120,7 +2113,7 @@ class ChatMemory:
         All read from the store."""
         store, chat = turn.store, turn.info.session_id
         shown = {
-            t.turn: _typed_words(t)
+            t.turn: typed_words(t)
             for t in await store.list_turns(chat)
             if not t.undone and not is_owner_question(t)
         }
@@ -2533,7 +2526,7 @@ class ChatMemory:
             if (info.finished_at or 0) <= since:
                 continue
             held = await turn_document(
-                chats, info, _typed_words(info), split_thinking(info.answer)[1]
+                chats, info, typed_words(info), split_thinking(info.answer)[1]
             )
             if held is None:
                 continue
@@ -2656,12 +2649,12 @@ class ChatMemory:
                         and answer.strip()
                         and (turn.finished_at or 0) > since
                     ):
-                        # What was typed: the composed text holds attachments too.
-                        # Then the words the person added while melo worked, and no
-                        # answer for a turn that ended on a blocked step, as the
-                        # live index has them (:func:`turn_document`).
+                        # What was typed, as the store reads it (never a file's text
+                        # or a title). Then the words the person added while melo
+                        # worked, and no answer for a turn that ended on a blocked
+                        # step, as the live index has them (:func:`turn_document`).
                         held = await turn_document(
-                            chats, turn, _typed_words(turn), answer
+                            chats, turn, typed_words(turn), answer
                         )
                         if held is not None:
                             found.append(

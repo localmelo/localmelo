@@ -792,7 +792,7 @@ class SessionRunner:
             routine=routine,
             # Another's words, or melo's, are never the person's: memory reads
             # none of them.
-            typed="" if origin or info.composed else typed_text,
+            typed="" if origin else typed_words(info),
             words=words,
             origin=origin,
             from_person=from_person,
