@@ -81,6 +81,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A password given after a short word, as in "pw: …" or "pwd = …", is not kept in melo's memory.
 - A token on the line after the word "Bearer", and a one-time code in the sentence beside its keyword ("verification code") on the same line, are left out of melo's memory too.
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
+- A note melo cannot keep no longer costs you the answer: after its last refused try the note tool is not offered again in that turn, and melo answers the rest of what you asked.
 
 ### App and web console
 
@@ -108,6 +109,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `melo -h` shows the everyday options; `melo -h all` shows every option and setting.
 - Come back to a chat with `melo -c` or `melo -r`, and name, undo or copy it.
 - Shift+Tab switches the chat between Ask and Auto.
+- In the terminal too, your next message goes to the one task that asked for you last, and a plain yes allows its blocked step once.
 - Every question with fixed answers is a list you move through and confirm with Enter.
 - Colour tells kinds of output apart, and `NO_COLOR` or `LOCALMELO_ASCII=1` lose nothing.
 - Attach a text file with `/attach`, and run a shell command with `!`.
@@ -136,6 +138,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - New memory files are readable only by you.
 - A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
 - A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
+- A text file you send on to a task, running or finished, is data too: only the words you typed with it count as yours.
 
 ### Scripts and API
 

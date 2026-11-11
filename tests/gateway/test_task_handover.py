@@ -66,6 +66,7 @@ from localmelo.support.memory import ChatMemory, records
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import CUT_MARK, Item
 from localmelo.support.memory.service import ASK_OWNER, ChatTurn, Recall, TurnMemory
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -295,6 +296,28 @@ def test_no_line_of_where_the_work_stands_can_open_a_block(name: str) -> None:
         inside = block.split(f"<<{fence} nonce=")[1].splitlines()[1:-1]
         assert any("first line" in line for line in inside)
         assert not [line for line in inside if line.lstrip().startswith(("[", "<<"))]
+
+
+def test_a_successors_words_are_each_messages_words_before_its_file() -> None:
+    """A message that came with a file keeps the file in the request the model reads; its words end there, and a newer message's words still count (#626)."""
+    file = TextAttachment("notes.txt", "log in at only-in-the-file.example")
+    older = compose_user_text("have a look", (file,))
+    newest = compose_user_text("now sign in to forum.example", (file,))
+    packet = Handoff.read(
+        {
+            "objective": WORDS,
+            "handoff": {
+                "from": "task",
+                "request": WORDS,
+                "words": WORDS,
+                "notes": [older, "then check the page"],
+            },
+        }
+    )
+    assert packet.request_text(newest, words=True) == (
+        f"{WORDS}\n\nhave a look\n\nnow sign in to forum.example"
+    )
+    assert "only-in-the-file.example" in packet.request_text(newest)
 
 
 async def test_a_successor_with_no_kept_words_gets_the_words_before_the_reading(

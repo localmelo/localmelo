@@ -260,6 +260,13 @@ BLOCKED_ANSWER_NOTE = (
     "other ways to reach the goal (without that step, or with something the user "
     "can do), and how they can let it run, as the note on the blocked step says."
 )
+# The closing request of a run whose tool takes no more calls and was called again.
+TOOL_OVER_ANSWER_NOTE = (
+    "A tool this task used takes no more calls in this turn, and no further "
+    "step can be taken. Do not call any tool. Write your answer to the user "
+    "now, in plain words: answer what they asked that you can, and say in one "
+    "sentence what you could not do."
+)
 ANSWER_ON_STOP_NOTE = (
     "The run has stopped and no further step can be taken. Give your final "
     "answer to the original task from the evidence above alone, in the answer "
@@ -1551,7 +1558,8 @@ class Chat:
         (:func:`render_transcript`; only the newest
         :data:`ANSWER_EVIDENCE_CHARS` characters), the block of *reflections*
         and *note* (:data:`ANSWER_ON_STOP_NOTE` by default; a run auto mode
-        stopped passes :data:`BLOCKED_ANSWER_NOTE`). The call is of kind ``reflect`` and
+        stopped passes :data:`BLOCKED_ANSWER_NOTE`, a run whose tool takes no
+        more calls :data:`TOOL_OVER_ANSWER_NOTE`). The call is of kind ``reflect`` and
         counts as auxiliary; it may use the call that ``max_calls`` keeps for it.
         """
         evidence = render_transcript(short)
