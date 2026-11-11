@@ -270,7 +270,9 @@ def _kept(text: str) -> str:
     sentence is gone, a long sentence once a shorter one inside it was replaced.
     """
     places = _merged([*password_spans(text), *secret_spans(text)])
-    out = list(places)  # by its place too: a piece the splitter gives no sentence for
+    # By its place too: a piece the splitter gives no sentence for. An empty place
+    # (a key block with no body) holds nothing to cut.
+    out = [place for place in places if place[0] < place[1]]
     refused: dict[str, None] = {}
     at = 0
     for start, sentence in split_sentences(text):

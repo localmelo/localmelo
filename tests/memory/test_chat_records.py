@@ -296,6 +296,18 @@ def test_a_refused_sentence_is_left_out_wherever_else_its_words_stand() -> None:
     assert index.cleaned("keypw: abcd1. pw: abcd1") == "key[left out]. [left out]"
 
 
+def test_a_secret_is_left_out_before_index_text_is_cut_to_length() -> None:
+    # Cut to length first, the head of a token would stay and read as a word.
+    token = "abcdefghijklmnopqrstuvwxyz0123456789"
+    text = "x" * (index.DOC_CHARS - 23) + f" Bearer {token}"
+    assert len(text) > index.DOC_CHARS
+    assert "abcdefgh" not in index.plain_text(text)
+
+
+def test_a_key_block_with_no_body_leaves_one_gap() -> None:
+    assert index.plain_text("-----BEGIN PRIVATE KEY-----") == "[left out]"
+
+
 @pytest.mark.parametrize(
     ("text", "secret"),
     [

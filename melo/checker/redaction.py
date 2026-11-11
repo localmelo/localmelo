@@ -101,15 +101,17 @@ def redact_secrets(text: str) -> tuple[str, int]:
 
 
 def secret_spans(text: str) -> list[tuple[int, int]]:
-    """Where *text* holds what :func:`redact_secrets` replaces: the ``(start, end)``
-    of each key block's body, key, bearer token and code, sorted.
+    """Where *text* holds a secret by the rules of :func:`redact_secrets`: the
+    ``(start, end)`` of each key block's body, key, bearer token and code, sorted.
 
     Each kind is read in *text* as given, not in an earlier pass's output, so a
     span is a place in *text*. It is for a reader that takes text out by its
     place: a secret can need words outside its own sentence to be seen (a code's
     keyword, the word before a token on the next line), and once those are taken
     out it reads as a number or a word. There is a span exactly when
-    :func:`redact_secrets` counts a secret.
+    :func:`redact_secrets` counts a secret. The spans are not always what the
+    passes replace one after the other: a replacement can bring a keyword within
+    reach of a code, or take a keyword away, and only the passes see that.
     """
     spans: list[tuple[int, int]] = []
     if "PRIVATE KEY" in text:
