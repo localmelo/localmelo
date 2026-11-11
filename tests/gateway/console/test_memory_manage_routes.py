@@ -131,6 +131,7 @@ async def test_forget_everything_needs_its_flag_and_reports_what_went(
         "documents": 0,
         "embedding_model": "",
         "retriever": "auto",
+        "answering": "llm",  # no embedding model, a chat model set up
         "last_error": "",
     }
 

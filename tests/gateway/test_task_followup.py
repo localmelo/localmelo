@@ -25,7 +25,7 @@ from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
 from localmelo.support.gateway.workers import TaskInbox, TaskWorkers
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, typed_words
 
 Reply = Callable[[list[Message]], Awaitable[Message]]
 
@@ -255,14 +255,56 @@ async def test_a_message_to_a_running_task_arrives_at_its_next_step(
     assert [data["text"] for data in accepted] == ["also count the files"]
 
 
-async def test_a_message_after_the_last_step_goes_on_as_the_next_turn(
+async def test_a_message_melo_worded_arrives_at_the_next_step_as_none_of_the_persons_words(
     workers: Setup,
 ) -> None:
     pool, llm, workspace = workers
     holder: dict[str, str] = {}
 
+    async def first(messages: list[Message]) -> Message:
+        await pool.message(holder["id"], "also count the files")
+        await pool.message(holder["id"], "Go ahead with the step.", by="melo")
+        return await lists_files()(messages)
+
+    llm.replies = [first, says("Two files.")]
+    row, _ = await pool.create(
+        {"prompt": "List my folder", "workspace": str(workspace)}
+    )
+    holder["id"] = task_id = row["task_id"]
+    await _ended(pool, task_id, 1)
+    # The model reads both; what the person added is only what they worded.
+    assert "Go ahead with the step." in _texts(llm.requests[1])
+    events = await pool.store.list_events(task_id)
+    accepted = [e.event["data"] for e in events if e.event["type"] == "inbox.accepted"]
+    assert [d["text"] for d in accepted] == [
+        "also count the files",
+        "Go ahead with the step.",
+    ]
+    assert await pool.store.read_notes(task_id, 1) == ["also count the files"]
+
+
+@pytest.mark.parametrize(
+    ("sent", "said", "heard"),
+    [
+        ([("and commit it", "person")], "and commit it", False),
+        ([("Go ahead with the step.", "melo")], "", True),
+        # Both unread: the person's note is the turn, melo's go-ahead stays melo's.
+        (
+            [("and commit it", "person"), ("Go ahead with the step.", "melo")],
+            "and commit it",
+            True,
+        ),
+    ],
+)
+async def test_a_message_after_the_last_step_goes_on_as_the_next_turn(
+    workers: Setup, sent: list[tuple[str, str]], said: str, heard: bool
+) -> None:
+    pool, llm, workspace = workers
+    holder: dict[str, str] = {}
+
     async def last(messages: list[Message]) -> Message:
-        await pool.message(holder["id"], "and commit it")
+        for text, by in sent:
+            await pool.message(holder["id"], text, by=by)
         return Message(role="assistant", content="Fixed.")
 
     llm.replies = [last, says("Committed.")]
@@ -270,7 +312,11 @@ async def test_a_message_after_the_last_step_goes_on_as_the_next_turn(
     holder["id"] = task_id = row["task_id"]
     await _ended(pool, task_id, 2)
     turns = await pool.store.list_turns(task_id, limit=10)
-    assert [t.user_text for t in turns] == ["Fix it", "and commit it"]
+    assert [t.user_text for t in turns] == ["Fix it", sent[0][0]]
+    # The turn's text is what the model got; the words are the person's only.
+    assert typed_words(turns[1]) == said and turns[1].composed is (said == "")
+    # The run hears melo's go-ahead (the turn, or its inbox beside the person's note).
+    assert ("Go ahead with the step." in _texts(llm.requests[-1])) is heard
     assert task_id not in pool._inboxes
 
 

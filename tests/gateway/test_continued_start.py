@@ -23,6 +23,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.config import Config
+from localmelo.support.gateway import workers as workers_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.recovery_store import RecoveryStore
@@ -30,7 +31,7 @@ from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, typed_words
 
 Reply = Callable[[list[Message]], Awaitable[Message]]
 
@@ -135,17 +136,36 @@ async def _settled(pool: TaskWorkers, task_id: str, turns: int, state: str) -> N
             await asyncio.sleep(0.01)
 
 
-async def test_a_done_task_continues_to_a_second_turn(workers: Setup) -> None:
+@pytest.mark.parametrize(("by", "said"), [("person", "commit it"), ("melo", "")])
+async def test_a_done_task_continues_to_a_second_turn(
+    workers: Setup, monkeypatch: pytest.MonkeyPatch, by: str, said: str
+) -> None:
     pool, llm, workspace = workers
     llm.replies = [lists_files(), says("Fixed; not committed."), says("Committed.")]
-    row, _ = await pool.create({"prompt": "Fix it", "workspace": str(workspace)})
+    finishing: list[bool] = []
+    decide = workers_module.decide_ending
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        finishing.append(kwargs["finishing"])
+        return await decide(*args, **kwargs)
+
+    monkeypatch.setattr(workers_module, "decide_ending", spy)
+    # A request that asks for the tests: melo's go-ahead must not make the next
+    # run a Finish it run by being read as what the person told it.
+    row, _ = await pool.create(
+        {"prompt": "Fix it and run the tests", "workspace": str(workspace)}
+    )
     task_id = row["task_id"]
     await _settled(pool, task_id, 1, "done")
-    _, how = await pool.message(task_id, "commit it")
+    _, how = await pool.message(task_id, "commit it", by=by)
     assert how == "continued"
     await _settled(pool, task_id, 2, "done")
     turns = await pool.store.list_turns(task_id, limit=10)
     assert [t.answer for t in turns][-1] == "Committed."
+    # The text is what the model got; the words are the person's only, none for melo's.
+    assert turns[-1].user_text == "commit it"
+    assert typed_words(turns[-1]) == said and turns[-1].composed is (by == "melo")
+    assert finishing == [False, False]
 
 
 async def test_a_task_out_of_steps_continues_to_a_second_turn(workers: Setup) -> None:
