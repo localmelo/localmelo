@@ -470,7 +470,10 @@ class TestNoReflectionPolicy:
     @pytest.mark.asyncio
     async def test_stuck_fails_without_reflection(self) -> None:
         llm = FakeLLM([_echo_call("same") for _ in range(6)])
-        agent = _echo_agent(llm, AgentOptions(attempt_policy="none", max_steps=10))
+        options = AgentOptions(
+            attempt_policy="none", max_steps=10, answer_on_stop=False
+        )
+        agent = _echo_agent(llm, options)
         result = await agent.run("echo q")
         assert result == "[stuck] Stuck: the same tool calls or errors repeated"
         assert len(llm.calls) == 3

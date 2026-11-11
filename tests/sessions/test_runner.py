@@ -95,11 +95,12 @@ async def setup(
     writer: str = "gateway",
     clock: Clock | None = None,
     progress: bool = False,
+    **options: Any,
 ) -> Setup:
     path = tmp_path / "sessions.db"
     store = SessionStore(path, writer=writer, clock=clock or Clock())  # type: ignore[arg-type]
     llm = ScriptedLLM(replies or [])
-    agent = await started_agent(tmp_path / "ws", llm)
+    agent = await started_agent(tmp_path / "ws", llm, **options)
     return Setup(path, store, llm, agent, progress=progress)
 
 
@@ -204,6 +205,47 @@ async def test_a_turns_events_are_stored_in_order_with_its_outcome(
     assert [e.id for e in s.events] == [e.id for e in events[2:]]
     assert all(e.id is not None for e in s.events)
     check_invariants(s.path, "gateway")
+    await s.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status", "options", "reads", "error"),
+    [
+        ("budget_exhausted", {"max_steps": 2}, ["a", "b"], "Max steps reached"),
+        (
+            "stuck",
+            {},
+            ["a", "b", "notes", "notes", "notes"],
+            "Stuck: the same tool calls or errors repeated",
+        ),
+    ],
+)
+async def test_a_turn_that_stopped_with_an_answer_is_stored_the_same_way(
+    tmp_path: Path,
+    status: str,
+    options: dict[str, Any],
+    reads: list[str],
+    error: str,
+) -> None:
+    replies = [
+        tool_call("file_read", {"path": f"{name}.txt"}, f"call_{i}")
+        for i, name in enumerate(reads)
+    ]
+    s = await setup(
+        tmp_path, [*replies, answer("Buy milk.")], attempt_policy="none", **options
+    )
+    for name in ("a", "b"):
+        (tmp_path / "ws" / f"{name}.txt").write_text(name)
+    result = await s.runner.run_turn("What do my notes say?")
+    assert (result.status, result.result, result.error) == (status, "Buy milk.", error)
+    assert result.answered_on_stop is True
+    turn = await last_turn(s)
+    assert (turn.status, turn.cause, turn.answer) == (status, "run", "Buy milk.")
+    assert turn.result == result.to_dict()
+    assert turn.result is not None and turn.result["answered_on_stop"] is True
+    events = await stored_events(s)
+    assert types_of(events)[-2:] == ["run.finished", "turn.finished"]
+    assert events[-1].event["data"]["status"] == status
     await s.aclose()
 
 

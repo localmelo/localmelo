@@ -252,8 +252,8 @@ class AgentConfig:
     # Developer setting: plain direct runs (melo "TASK", melo "") are confined too
     # (AgentOptions.confine_writes); worker runs and saved tasks follow confine_writes.
     confine_direct_runs: bool = False
-    # Developer setting: a run that stops (gate_stopped, budget_exhausted) with no
-    # answer asks the model once for one, and an answer that lacks the closing line
+    # Developer setting: a run that stops (gate_stopped, budget_exhausted, stuck) with
+    # no answer asks the model once for one, and an answer that lacks the closing line
     # the task asks for gets it (AgentOptions.answer_on_stop). false turns both off.
     answer_on_stop: bool = True
     # Developer setting: most model requests one direct run sends (planning,
