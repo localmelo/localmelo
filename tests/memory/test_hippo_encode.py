@@ -600,7 +600,8 @@ async def test_a_chat_title_that_holds_a_secret_reaches_the_model_cleaned() -> N
     stub = StubEncoder()
     await hippo.encode(stub, title, chat(1), window_chars=12000)
     (prompt,) = stub.prompts
-    assert prompt.startswith(f"Chat title: {cleaned(title)}\n\n[0] ")
+    # As the index keeps a title: the number goes, the words stay.
+    assert prompt.startswith("Chat title: Card [left out]\n\n[0] ")
     assert "4242" not in prompt
 
 

@@ -61,6 +61,7 @@ from localmelo.support.memory import records
 from localmelo.support.memory.index import (
     ITEM_KINDS,
     cleaned,
+    cleaned_title,
     holds_secret,
     plain_text,
 )
@@ -447,7 +448,7 @@ def halves(window: Window) -> tuple[Window, Window] | None:
 
 def prompt_of(title: str, window: Window) -> str:
     """The user message of a window: the chat's title, then its exchanges."""
-    head = " ".join(cleaned(title).split())[:_CHAT_TITLE_CHARS] or "(none)"
+    head = " ".join(cleaned_title(title).split())[:_CHAT_TITLE_CHARS] or "(none)"
     return f"Chat title: {head}\n\n{window.text}"
 
 

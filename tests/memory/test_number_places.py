@@ -50,6 +50,8 @@ WORD_TITLES = [
     "Add a PIN pad to the checkout form",
     "Debug OTP timeout",
     "Wi-Fi password rotation",
+    "Password-protected PDF export",
+    "Why is the OTP not arriving?",
 ]
 NBSP = "\N{NO-BREAK SPACE}"
 THIN = "\N{THIN SPACE}"
@@ -65,11 +67,16 @@ DASHES = [
     "\N{FIGURE DASH}",
     EN_DASH,
     "\N{EM DASH}",
+    "\N{HORIZONTAL BAR}",
     "\N{MINUS SIGN}",
+    "\N{SMALL EM DASH}",
+    "\N{SMALL HYPHEN-MINUS}",
+    "\N{FULLWIDTH HYPHEN-MINUS}",
 ]
 # The Unicode spaces and invisible characters that may stand between two digits.
 UNICODE_GAPS = [
     "\u00a0",
+    "\u00ad",
     "\u1680",
     "\u202f",
     "\u205f",
@@ -329,6 +336,22 @@ def test_cleaning_a_text_takes_time_in_proportion_to_the_text(unit: str) -> None
     assert_linear(_repeated(unit), cleaned)
 
 
+@pytest.mark.parametrize(
+    "unit", ["PIN 4821 is set. ", "password is hunter\n", "password is ", "a" * 50]
+)
+def test_cleaning_a_title_takes_time_in_proportion_to_the_title(unit: str) -> None:
+    assert_linear(_repeated(unit), cleaned_title)
+
+
+def test_a_card_under_three_lines_that_are_each_cut_is_found() -> None:
+    # Each wrapped card is readable only when the line above it is gone: four layers.
+    wrapped = "4111 1111 1111\n1111"
+    text = "OTP 482913\n" + " code 12\n".join([wrapped] * 3)
+    once = cleaned(text)
+    assert not re.search(r"\d{4}", once)
+    assert cleaned(once) == once
+
+
 # ── The index cuts every place ──
 
 SAFE = ("The garden needs water.", "Basil grows fast.")
@@ -473,6 +496,26 @@ TITLES = {
     "The password is hunter2\n4111 1111\n1111 1111\nThanks.": (
         "The password is [left out]\n[left out]\nThanks."
     ),
+    # A sentence that names a password or a code: its runs with a digit, and what
+    # follows the word and a link.
+    "PIN 4821 for the bank": "PIN [left out] for the bank",
+    "4821 is my PIN": "[left out] is my PIN",
+    "CVV 737 on the card": "CVV [left out] on the card",
+    "security code 123 on the back": "security code [left out] on the back",
+    "pin number 4821 is set": "pin number [left out] is set",
+    "Reset my password to hunter2.": "Reset my password to [left out].",
+    "my password was hunter2 before": "my password was [left out]",
+    "password — hunter2": "password — [left out]",
+    "password is correct horse battery staple": "password is [left out]",
+    "My wifi password is sunflowerfields": "My wifi password is [left out]",
+    "The passwords are alpha and beta. Next: deploy.": (
+        "The passwords are [left out]. Next: deploy."
+    ),
+    f"Card {CARD.replace(' ', '-')} and PIN 4821": (
+        "Card [left out] and PIN [left out]"
+    ),
+    "修复密码页面的3个问题": "修复密码页面的[left out]个问题",
+    "密码是correct horse": "密码是[left out]",
     **{title: title for title in WORD_TITLES},
 }
 
@@ -483,7 +526,24 @@ def test_a_title_loses_the_places_of_its_secrets_and_keeps_its_words(
 ) -> None:
     assert cleaned_title(title) == label
     assert cleaned_title(label) == label
-    assert not re.search(r"\d{4}|hunter2|a1B2", cleaned_title(title))
+    assert not re.search(
+        r"\d{3}|hunter2|a1B2|horse|sunflower|alpha", cleaned_title(title)
+    )
+
+
+def test_a_password_of_letters_that_no_link_comes_before_stays_in_a_title() -> None:
+    # The stated limit: nothing says which word is the value.
+    for title in ("sunflower is my password", "password sunflower"):
+        assert records.named_secret_spans(title) == []
+        assert cleaned_title(title) == title
+
+
+def test_a_sentence_that_names_no_password_or_code_gives_no_such_place() -> None:
+    assert records.named_secret_spans("Room 4821 is booked. Call 555 0100.") == []
+    assert records.named_secret_spans("PIN 4821, then room 12. Call 555.") == [
+        (4, 8),
+        (20, 22),
+    ]
 
 
 def test_a_title_with_a_private_key_block_loses_its_body() -> None:
@@ -686,6 +746,31 @@ def _old_text(kind: str, title: str) -> str:
     went through the redaction only."""
     lead = redact_secrets(f"Task: {title.strip()}\n")[0] if kind == "task" else ""
     return f"{lead}User: hi\nmelo: hello"
+
+
+async def test_a_title_line_an_older_version_wrote_as_given_is_replaced(
+    tmp_path: Path,
+) -> None:
+    # The line is found by where the user's words start, not by how it was redacted.
+    path = str(tmp_path / "index.db")
+    _old_insert(path, [("t1", "task", f"Use key {KEY} for the build")])
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "UPDATE documents SET text = ?",
+        (f"Task: Use key {KEY} for the build\nUser: hi\nmelo: hello",),
+    )
+    raw.commit()
+    raw.close()
+    index = ConversationIndex(path)
+    try:
+        (doc,) = await index.fetch(await index.ids())
+        assert (
+            doc.text == "Task: Use key [left out] for the build\nUser: hi\nmelo: hello"
+        )
+    finally:
+        await index.aclose()
+    kept = b"".join(p.read_bytes() for p in tmp_path.glob("index.db*"))
+    assert b"a1B2" not in kept
 
 
 def _old_insert(path: str, rows: list[tuple[str, str, str]]) -> None:

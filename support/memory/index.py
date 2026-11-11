@@ -48,7 +48,11 @@ from localmelo.melo.memory._sqlite import (
     secure_deletes,
 )
 from localmelo.melo.memory.notes import split_sentences
-from localmelo.support.memory.records import number_spans, sensitive
+from localmelo.support.memory.records import (
+    named_secret_spans,
+    number_spans,
+    sensitive,
+)
 
 DOC_CHARS: Final = 2_000
 # A turn's text over DOC_CHARS becomes at most this many chunks, each at most
@@ -299,7 +303,7 @@ def _kept(text: str) -> str:
 # What stands where a secret's place was cut out.
 _LEFT_OUT: Final = "[left out]"
 # How many times a cleaning is applied at most (:func:`_stable`).
-_PASSES: Final = 3
+_PASSES: Final = 8
 
 
 def _places(text: str) -> list[tuple[int, int]]:
@@ -347,10 +351,10 @@ def _clean(text: str) -> str:
 
     A cut can make a secret readable that was not: a card wrapped over two lines is
     no number while a digit of the line above is joined to it, and is the whole run
-    once that line is cut. A second pass changes the text only where the first made a
-    place readable, and a third only where the second did. A text that a third pass
-    still changes holds three such layers: the result of that pass is used, and what
-    a fourth would take out stays."""
+    once that line is cut. A pass changes the text only where the one before made a
+    place readable, so a text with no such layer takes one pass and a check. A text
+    that the last pass still changes holds more layers than passes: the result of
+    that pass is used, and what another would take out stays."""
     return _stable(_clean_once, text.strip())
 
 
@@ -373,26 +377,36 @@ def _stable(step: Callable[[str], str], text: str) -> str:
 
 def _title_once(title: str) -> str:
     """One pass of :func:`cleaned_title`."""
-    marks = [m.span() for m in re.finditer(re.escape(_LEFT_OUT), title)]
-    places = []
-    for start, end in _places(title):
-        if start < end:
-            # The reader of passwords takes a mark for a value and gives part of it
-            # ("[left"): the place holds the whole mark, so the mark stays one.
-            for first, last in marks:
-                if first < end and start < last:
-                    start, end = min(start, first), max(end, last)
-            places.append((start, end))
-    return redact_secrets(_left_out(title, places))[0]
+    places = _merged(
+        [
+            place
+            for place in (*_places(title), *named_secret_spans(title))
+            if place[0] < place[1]
+        ]
+    )
+    # The reader of passwords takes a mark for a value and gives part of it
+    # ("[left"): a place that reaches into a mark holds the whole mark, so the
+    # mark stays one.
+    reached: list[tuple[int, int]] = []
+    at = 0
+    for mark in re.finditer(re.escape(_LEFT_OUT), title):
+        while at < len(places) and places[at][1] <= mark.start():
+            at += 1
+        if at < len(places) and places[at][0] < mark.end():
+            reached.append(mark.span())
+    return redact_secrets(_left_out(title, [*places, *reached]))[0]
 
 
 def cleaned_title(title: str) -> str:
     """A chat's or task's *title* without the places of its secrets: a password's
-    value, a key, a token or code, a card or ID number, each replaced by ``[left out]``
-    (:func:`_places`), then redacted as a text is.
+    value, a key, a token or code, a card or ID number (:func:`_places`) and what a
+    sentence that names a password or a code may give of it
+    (:func:`~.records.named_secret_spans`), each replaced by ``[left out]``, then
+    redacted as a text is.
 
     A title is a short label, so no sentence is dropped for its words: ``Reset
-    password flow`` stays, ``Pay with card 4111 …`` loses the number only. The cut
+    password flow`` stays, ``Pay with card 4111 …`` loses the number only, ``PIN 4821
+    for the bank`` the digits and ``My password is …`` what follows ``is``. The cut
     is repeated until it changes nothing (:func:`_stable`), so cleaning a cleaned
     title gives it back. The one place a title is cleaned: the task line of a
     document's text, the stored title, a note's source and the label recall shows."""
@@ -617,17 +631,20 @@ async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
 
 # The ``meta`` key that says every stored title has been through :func:`cleaned_title`.
 _TITLES_CLEANED: Final = "titles_cleaned"
+# Where the user's words start in a task's text, after its title line.
+_USER_LINE: Final = "\nUser: "
 
 
-def _retitled(text: str, old: str, new: str) -> str:
-    """The *text* of a task's document stored before titles were cleaned, with the
-    first line, ``Task: <old title>`` (the line redacted, as it was written), replaced by
-    ``Task: <new title>``. A text that does not start with that line, and the rest of
-    one that does, stay as they are."""
-    if not old.strip():
+def _retitled(text: str, new: str) -> str:
+    """The *text* of a task's document stored before titles were cleaned, with its
+    title line, ``Task: <old title>``, replaced by ``Task: <new title>``. The line
+    runs from the start of the text to the user's words (``User: `` at the start of
+    a line), however the older version wrote it. A text that does not start with a
+    title line, and the rest of one that does, stay as they are."""
+    head, label, rest = text.partition(_USER_LINE)
+    if not label or not head.startswith("Task: "):
         return text
-    lead = redact_secrets(f"Task: {old.strip()}\n")[0]
-    return f"Task: {new}\n{text[len(lead):]}" if text.startswith(lead) else text
+    return f"Task: {new}{label}{rest}"
 
 
 async def _clean_titles(conn: aiosqlite.Connection) -> None:
@@ -664,9 +681,7 @@ async def _clean_titles(conn: aiosqlite.Connection) -> None:
                 ) as cur:
                     row = await cur.fetchone()
                 text = str(row[0]) if row else ""
-                rewrites.append(
-                    (clean[title], _retitled(text, title, clean[title]), row_id)
-                )
+                rewrites.append((clean[title], _retitled(text, clean[title]), row_id))
             await conn.executemany(
                 "UPDATE documents SET title = ?, text = ? WHERE id = ?", rewrites
             )
