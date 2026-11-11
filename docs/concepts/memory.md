@@ -221,7 +221,7 @@ These levels are developer settings because they have not been measured to keep 
 | `auto` (default) | By words, and by meaning too when an embedding model is set up. With no embedding model and a chat model set up, the same as `llm`; with neither, by words only. | With an embedding model: one small embedding request per message, with the 1.5 s limit above. Without one: one chat request per message that shares a word with a note or earlier chat, about a second with a thinking model, and the words alone if it takes over 4 s. |
 | `bm25` | By words only. | Nothing: no model request at all. It misses a question that shares no word with the note. |
 | `embedding` | The same as `auto` with a model; `melo serve` refuses to start without one. | The same as `auto`. |
-| `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. |
+| `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. With a hosted chat model those lines go to that service, as the recalled ones already do. |
 
 Every recall is timed. The page shows nothing new, but the `turn.memory` event of each turn has a `recall` object:
 
@@ -293,7 +293,7 @@ The context pack:
 - It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
 - In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out.
 - Never in it: People and Decisions notes. A worker browses and calls outside tools, so it gets the least that it needs.
-- At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. Building it asks no chat model; with an embedding model set up, the objective is matched by meaning too, with the 1.5 s limit above.
+- At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. The notes that match the objective are found as a message's recall finds them: by meaning too with an embedding model set up (the 1.5 s limit above), or, without one, by the chat model's choice among the word matches (the 4 s limit below).
 
 ### A task reads its project's own instruction file
 
