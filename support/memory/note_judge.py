@@ -1,9 +1,9 @@
-"""A fail-closed judge for typed notes refused only for CJK wording.
+"""A fail-closed judge for notes refused only for CJK wording.
 
-``ChatMemory.remember`` asks it, at ``[memory] note_gate = "typed"``, when the typed
-rule refuses a note and :func:`cjk_only_refusal` says only Chinese or Japanese
-wording is missing; the chat's model then checks that no name, place, number or
-date changed. Arm ``J`` of ``scripts/eval_note_gate.py`` measures the same path.
+``ChatMemory.remember`` asks it when no source supports a note and
+:func:`cjk_only_refusal` says only Chinese or Japanese wording of what the user
+typed is missing; the chat's model then checks that no name, place, number or date
+changed. Arm ``J`` of ``scripts/eval_note_gate.py`` measures the same path.
 
 Code decides first, whatever the model would say: a sentence that is not a
 statement about the user (the allow-list of :func:`gives_order`), a number, a

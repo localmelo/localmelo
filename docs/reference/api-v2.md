@@ -335,7 +335,7 @@ file's revision.
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (search by words only)"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no search by meaning)"}],
     "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
@@ -777,7 +777,8 @@ Tools run with the user's permissions, not in a sandbox.
   only when set and never accepted in a request: `context_pack` (the notes),
   `own_words` (what the person typed, when the objective does not hold it),
   `chat_turns` (the starting chat's newest earlier turns, `- the user: …` with
-  an indented `melo: …` line each) and `chat_picked` (one `- ` line for each
+  an indented `melo: …` line each; a turn a press of the person's began, such as
+  Allow once, is a `- melo: …` line alone) and `chat_picked` (one `- ` line for each
   thing that chat's turn opened, searched or recalled). The task reads them as
   data after its request; the task page folds them under "What melo told the
   task".
@@ -1540,7 +1541,7 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 The chat's internal turn is a turn with `"origin": "ask_owner"` (the key is
 absent on the person's turns, in the turn row and in `turn.started`), empty
 typed text and the question as its user text. A turn whose text is not what a person typed (where a
-stopped task goes on, the restart's check, the request of a task another agent or a channel made) has
+stopped task goes on, the restart's check, the go-ahead Allow once sends in a chat, the request of a task another agent or a channel made) has
 `"composed": true`, absent otherwise, in the turn row and in `turn.started`. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
 "owner" | "person"}` while it waits, else `null`.
 
@@ -2297,7 +2298,7 @@ folders fails, and its output starts with a line that says so.
 ### POST /api/sessions/{id}/blocks/{request_id}/allow
 
 Allow once the step blocked with `approval.request_id` *request_id*, and send
-the person's message that asks melo to go ahead.
+melo's own message that asks it to go ahead.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
@@ -2313,7 +2314,8 @@ the person's message that asks melo to go ahead.
   it. The retried call is recorded with origin `user` and
   `allowance: "once"`.
 - The message (in the console's language) starts a turn as
-  `POST /api/sessions/{id}/turns` does; 202 with that turn.
+  `POST /api/sessions/{id}/turns` does; 202 with that turn, which has
+  `composed: true`: its text is melo's, not words the person typed.
 - 404 `not_found` for no such block in this chat; 409 `not_allowable` for a
   step that changes localmelo itself or a call a stopped turn did not run;
   409 `already_allowed` once the step ran on an allowance after the block,
@@ -2545,19 +2547,22 @@ panel uses these routes.
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "answering": "llm", "last_error": ""}
 ```
 
 - `GET /api/memory/records` lists the notes newest first; `?session_id=ID` keeps one chat's.
   `topic` is `about`, `preferences`, `people`, `projects` or `decisions`. `from` names the
   chat and the day, or `from a deleted chat, Oct 30` (`chat_gone` true) once the chat is
-  gone; a note kept from a page or file the user pointed to (developer setting
-  `[memory] note_gate`) has `from jane.example.com, Oct 30` (or `from the file resume.pdf, Oct 30`)
-  in `from` and `source`, and a note an earlier version kept as inferred has `melo inferred it from chat “Plans”, Oct 30`
+  gone; a note kept from a page or file the user pointed to
+  has `from jane.example.com, Oct 30` (or `from the file resume.pdf, Oct 30`)
+  in `from` and `source`, a note a finished task's result supports has
+  `from a finished task's result, Oct 30` in both, and a note an earlier version kept as inferred has `melo inferred it from chat “Plans”, Oct 30`
   in `from` and `melo inferred it · chat “Plans”, Oct 30` in `source`; `edited` is true once the user reworded the note; `imported` is true for a note
   brought in from another assistant's file (with its `batch_id`; see below). `documents` counts the chat turns in the
-  index, `embedding_model` is the model that searches by meaning (`""`: words only, which
-  `retriever` `bm25` or `llm` always is) and `last_error` the last reason it was not used.
+  index, `embedding_model` is the model that searches by meaning (`""`: none, which
+  `retriever` `bm25` or `llm` always is), `retriever` is the `[memory] retriever` setting, `answering`
+  is the way that answers a recall now (`embedding`, `llm` or `bm25`: `auto` with no embedding model
+  is `llm` when a chat model is set up, else `bm25`) and `last_error` the last reason it was not used.
 - `PATCH /api/memory/records/{id}` with `{"text": "..."}` rewords a note in place and answers
   the note as above. The old wording is overwritten (not kept), the new one is embedded, and
   the text of the note's decision rows is blanked. A wording that is empty, over 300

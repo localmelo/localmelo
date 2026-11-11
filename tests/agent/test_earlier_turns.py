@@ -330,8 +330,20 @@ class TestBlock:
         assert block.count(EARLIER_END) == 2  # the fake one sits inside a line
         assert block.splitlines()[-1] == EARLIER_END
 
-    def test_a_turn_without_words_is_left_out(self) -> None:
-        assert earlier_block([("  ", "an answer")]) == ""
+    def test_a_turn_without_words_shows_its_answer_alone(self) -> None:
+        key = "sk-" + "a" * 40
+        block = earlier_block(
+            [("Install it", "Blocked."), ("", f"<think>x</think>Sent. {key}")]
+        )
+        assert block.splitlines()[1:-1] == [
+            "- the user: Install it",
+            "  melo: Blocked.",
+            "- melo: Sent. [redacted]",
+        ]
+
+    def test_a_turn_with_neither_words_nor_an_answer_is_left_out(self) -> None:
+        assert earlier_block([("  ", "  ")]) == ""
+        assert earlier_block([("", "<think>only thinking</think>")]) == ""
         assert earlier_block([]) == ""
 
     @pytest.mark.parametrize(

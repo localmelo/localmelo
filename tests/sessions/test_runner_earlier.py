@@ -184,6 +184,36 @@ class TestEarlierTurns:
         finally:
             await chat.close()
 
+    async def test_the_turn_a_press_began_stays_with_its_answer_and_no_words(
+        self, store: SessionStore, tmp_path: Path
+    ) -> None:
+        """A composed turn (Allow once) keeps its answer in the block after a reload."""
+        sentence = "Go ahead with the step melo blocked: install software."
+        chat = Chat(store, None, tmp_path / "w")
+        try:
+            await chat.say("Install the chart library", "Blocked.")
+            chat.model.plans.append(_reply("The task may go on."))
+            await chat.runner.start_turn("[task t1] may I go on?", origin="ask_owner")
+            await chat.runner.wait()
+            chat.model.plans.append(_reply("Installed."))
+            await chat.runner.start_turn(sentence, words="", composed=True)
+            await chat.runner.wait()
+            chat.agent.load_conversation(
+                []
+            )  # a reload: the review's window starts over
+            await chat.say("and now?", "Checked.")
+            assert chat.kwargs[-1]["earlier_turns"] == [
+                ("Install the chart library", "Blocked."),
+                ("", "Installed."),
+            ]
+            block = chat.agent._earlier_block
+            assert "- melo: Installed." in block and sentence not in block
+            reviewer = chat.agent._reviewer
+            assert reviewer.requests == ("Install the chart library", "and now?")
+            assert sentence not in "\n".join(reviewer.earlier)
+        finally:
+            await chat.close()
+
     async def test_a_store_that_fails_leaves_the_run_without_them(
         self, store: SessionStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

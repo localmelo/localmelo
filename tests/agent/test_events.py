@@ -55,6 +55,7 @@ from localmelo.melo.schema import (
 OPTIONAL_KEYS: dict[str, set[str]] = {
     "run.finished": {"reviews"},
     "tool.finished": {"tool_asks", "allowed_local", "phases", "effect"},
+    "inbox.accepted": {"by"},
 }
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
@@ -519,7 +520,7 @@ class TestFields:
     def test_event_fields_are_pinned(self) -> None:
         assert {
             "run.started": {"query", "max_steps", "workspace_root", "approval"},
-            "inbox.accepted": {"offset", "text", "step", "attempt"},
+            "inbox.accepted": {"offset", "text", "step", "attempt", "by"},
             "step.started": {"step", "attempt"},
             "assistant.message": {
                 "step",
