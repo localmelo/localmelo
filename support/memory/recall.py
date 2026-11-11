@@ -5,10 +5,11 @@ model, cosine similarity over the vectors joins it, and reciprocal rank fusion
 (k = :data:`RRF_K`) merges the two lists (:func:`ranked`; :func:`pick` keeps the
 best few). The ``llm`` retriever asks :func:`ranked` for loose BM25 candidates
 and lets the chat model choose among them. An item takes part in a list only
-above that list's bar: most of the question's content words for BM25
-(:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors, so most turns recall
-nothing. Documents (not
-records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
+above that list's bar: a share of the question's content words for BM25
+(:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors. The bars are loose on
+purpose (a missed chat costs an answer, an unrelated one a few lines the model
+passes over), so a message about something else can still recall an item.
+Documents (not records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
 A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
 one chunk of a turn, the best, whatever the chats' cap.
