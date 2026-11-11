@@ -1296,13 +1296,16 @@ OWN_WORDS: Final = ("user_statement", "user_request")
 
 
 def by_person(entry: StoredEntry) -> bool:
-    """Whether *entry* is the person's own: they edited it by hand, or their own
-    words made it (its signal is one of :data:`OWN_WORDS` and its provenance names
-    no other source; a note kept from a page, a file or a result says so there,
-    whatever signal it carries)."""
-    if entry.provenance.get("edited"):
-        return True
+    """Whether the person's own words made *entry*: its signal is one of
+    :data:`OWN_WORDS` and its provenance names no other source (a note kept from a
+    page, a file or a result says so there, whatever signal it carries)."""
     return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
+
+
+def kept_from_replacement(entry: StoredEntry) -> bool:
+    """Whether a note from a page, a file or a result must not replace *entry*: the
+    person's own words made it (:func:`by_person`), or they reworded it by hand."""
+    return by_person(entry) or bool(entry.provenance.get("edited"))
 
 
 def decide(
@@ -1499,10 +1502,10 @@ async def write(
     time; sleep writes as ``sleep``, at the time of the turn it read.
 
     A candidate admitted as ``outcome`` (a note from a page, a file or a result)
-    never replaces a record the person's own words made (:func:`by_person`): it is
-    written beside it, each with its source. It still replaces an older note from a
-    page, a file or a result, and a note of the person's own still replaces any
-    older note of its subject.
+    never replaces a record the person's own words made or one they reworded by hand
+    (:func:`kept_from_replacement`): it is written beside it, each with its source.
+    It still replaces an older note from a page, a file or a result, and a note of
+    the person's own still replaces any older note of its subject.
     """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
@@ -1513,11 +1516,11 @@ async def write(
         if (
             action == "UPDATE"
             and cand.admitted_by == "outcome"
-            and any(e.id == target and by_person(e) for e in active)
+            and any(e.id == target and kept_from_replacement(e) for e in active)
         ):
             action, target = decide(
                 cand.text,
-                [e for e in active if not by_person(e)],
+                [e for e in active if not kept_from_replacement(e)],
                 kind=cand.kind,
                 vector=vector,
                 embed_model=embed_model,

@@ -648,12 +648,13 @@ async def test_only_a_note_the_persons_own_words_made_is_theirs(
     }
 
 
-async def test_a_note_the_person_edited_is_theirs_and_a_page_does_not_replace_it(
+async def test_a_note_the_person_edited_is_kept_from_a_page_s_replacement_but_is_not_their_own_words(
     memory: ChatMemory,
 ) -> None:
     page = await _put(memory, ALICE, "outcome", source="pointed")
     edited = await memory.edit_record(page.id, BOB)
-    assert edited is not None and records.by_person(edited)
+    assert edited is not None
+    assert records.kept_from_replacement(edited) and not records.by_person(edited)
     again = await _put(memory, ALICE, "outcome", source="pointed")
     assert again.replaced is None
     assert await _texts(memory) == [ALICE, BOB]
