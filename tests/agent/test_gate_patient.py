@@ -17,6 +17,8 @@ from localmelo.melo.agent._chat import (
     ANSWER_EVIDENCE_CHARS,
     ANSWER_ON_STOP_NOTE,
     REFLECTION_PROMPT,
+    STUCK_ANSWER_NOTE,
+    TOOL_OVER_ANSWER_NOTE,
 )
 from localmelo.melo.agent._reflection import (
     REFLECTION_ITEM_CHARS,
@@ -287,10 +289,30 @@ class TestAnswerOnStop:
         assert run.status == "stuck"
         assert run.error == "Stuck: the same tool calls or errors repeated"
         assert (run.result, run.answered_on_stop) == (result, bool(result))
-        assert len(_answer_requests(llm)) == asked
         assert len(llm.calls) == 5 + asked
-        if result:
-            assert not _answer_requests(llm)[0]["tools"]
+        if asked:
+            # No tools, and the note a run with no evidence can answer (not
+            # "from the evidence alone, unknown allowed").
+            request = llm.calls[-1]
+            assert not request["tools"]
+            assert request["messages"][-1].content.endswith(STUCK_ANSWER_NOTE)
+            assert ANSWER_ON_STOP_NOTE not in request["messages"][-1].content
+
+    def test_the_closing_notes_of_a_run_that_cannot_go_on(self) -> None:
+        tail = (
+            "Do not call any tool. Write your answer to the user now, in plain "
+            "words: answer what they asked that you can, and say in one sentence "
+            "what you could not do."
+        )
+        stuck = (
+            "The same step was repeated with the same result, and no further "
+            f"step can be taken. {tail}"
+        )
+        over = (
+            "A tool this task used takes no more calls in this turn, and no "
+            f"further step can be taken. {tail}"
+        )
+        assert (stuck, over) == (STUCK_ANSWER_NOTE, TOOL_OVER_ANSWER_NOTE)
 
     @pytest.mark.asyncio
     async def test_a_think_block_is_not_part_of_the_answer(self) -> None:

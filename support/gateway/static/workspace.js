@@ -3151,8 +3151,8 @@ function turnStatus(turn) {
     line.dataset.severity = info.severity;
     line.append(statusMarkNode(info.severity), el("span", "", info.title));
     nodes.push(line);
-    // A run that used all its steps says so in the title; its raw cause ("Max steps reached") is for a developer.
-    const quiet = turn.status === "completed" || (turn.status === "budget_exhausted" && !developerMode);
+    // A run that used all its steps, or kept repeating, says so in the title; its raw cause is for a developer.
+    const quiet = turn.status === "completed" || (["budget_exhausted", "stuck"].includes(turn.status) && !developerMode);
     const error = quiet ? "" : cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0];
     if (error) {
       const text = el("p", "failure-error", error);

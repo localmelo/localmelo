@@ -251,9 +251,10 @@ class AgentOptions:
       ``budget_exhausted`` or ``stuck`` with no answer makes one more
       request, without tools, for the final answer from the evidence gathered
       (the working window and the latest reflection), in the format the task
-      asks for, ``unknown`` allowed. The run keeps its status; its ``result`` is that
-      answer and ``RunResult.answered_on_stop`` is true. The request counts
-      in ``n_aux``. A failed request leaves the run as it was. It also
+      asks for, ``unknown`` allowed; a ``stuck`` run is asked to answer what
+      it can in plain words instead. The run keeps its status; its ``result``
+      is that answer and ``RunResult.answered_on_stop`` is true. The request
+      counts in ``n_aux``. A failed request leaves the run as it was. It also
       answers a run that ends ``provider_error`` because the server refused a
       request for a budget or rate limit (HTTP 429, or an error that says the
       budget is used), as long as ``max_calls`` allows one more request: the

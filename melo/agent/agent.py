@@ -60,6 +60,7 @@ from localmelo.melo.agent._chat import (
     PREFIX_RUN,
     PREFIX_VERSION,
     RETRY_HOOK,
+    STUCK_ANSWER_NOTE,
     TOOL_OVER_ANSWER_NOTE,
     CallTelemetry,
     Chat,
@@ -4978,8 +4979,12 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         ``stuck``, or ``provider_error`` after the server refused a request
         for a budget or rate limit (see :meth:`_run_attempts`), with a blank
         result. The request (:meth:`Chat.final_answer`) carries the working
-        window and the latest reflection. A non-blank reply becomes the run's
-        result (its ``<think>`` block removed), the status stays, and
+        window and the latest reflection, and ends with
+        :data:`~localmelo.melo.agent._chat.ANSWER_ON_STOP_NOTE`, or, for a
+        ``stuck`` run, which may have no evidence, with
+        :data:`~localmelo.melo.agent._chat.STUCK_ANSWER_NOTE` (answer what you
+        can, in plain words). A non-blank reply becomes the run's result (its
+        ``<think>`` block removed), the status stays, and
         ``RunResult.answered_on_stop`` is true. A request that fails or that
         ``max_calls`` leaves no call for, or a blank reply, leaves the run as
         it was.
@@ -4998,6 +5003,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 window,
                 task.query,
                 self.hippo.working.get_reflections(),
+                note=STUCK_ANSWER_NOTE if run.status == "stuck" else "",
                 earlier=run.earlier_block,
             ),
             "an answer on stop",

@@ -58,7 +58,8 @@ Details:
   `gate_stopped`, `budget_exhausted` or `stuck` with an empty `result` makes one more
   request, without tools, that asks for the final answer from the working
   window and the latest reflection, in the format the task asks for, with
-  `unknown` allowed. The run keeps its status and `error`; `result` is that
+  `unknown` allowed (a `stuck` run is asked to answer what it can in plain
+  words). The run keeps its status and `error`; `result` is that
   answer and the record gains `"answered_on_stop": true`. The request counts in
   `n_aux`. A request that fails, or a blank reply, leaves the run as it was.
   It also answers a run that ends `provider_error` because the server refused a
