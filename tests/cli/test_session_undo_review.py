@@ -98,6 +98,35 @@ async def test_retry_sends_a_composed_turn_again_as_melos_with_no_words(
     assert (again.turn, again.user_text) == (3, sentence)
     assert again.composed and again.typed_text == ""
     assert seen == [(sentence, "")]
+    # The line says what is tried again; the sentence is never put where the
+    # person types: not in ↑ history by /undo, not in the box by a retry that
+    # does not run (it fails, or Esc stops it before anything is sent).
+    assert f"↻ Retrying turn 2: {sentence}" in setup.out.text()
+    setup.session.enter("/undo")
+    await setup.idle()
+    assert sentence not in list(setup.app.buffer.history.get_strings())
+
+    failed: list[str] = []
+
+    async def fails(*args: Any, **kwargs: Any) -> Any:
+        failed.append(args[0])
+        raise RuntimeError("the model is gone")
+
+    monkeypatch.setattr(setup.session.runner, "run_turn", fails)
+    setup.session.enter("/retry")
+    await setup.idle()
+    assert failed == [sentence] and setup.app.buffer.text == ""
+
+    async def esc() -> None:
+        assert setup.session.stop()
+
+    monkeypatch.setattr(setup.session, "_follow_served", esc)
+    setup.session.enter("/retry")
+    await setup.idle()
+    assert "nothing was sent" in setup.out.text()
+    assert setup.app.buffer.text == ""
+    assert "back in the input box" not in setup.out.text()
+    assert "your message is back" not in setup.out.text()
 
 
 async def test_retry_can_undo_the_replacement_after_retrying_an_undone_turn(

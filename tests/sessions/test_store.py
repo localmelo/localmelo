@@ -1132,6 +1132,16 @@ async def test_the_first_title_comes_from_the_typed_text(tmp_path: Path) -> None
     assert rows(
         path, "SELECT typed_text FROM turns WHERE session_id = ?", blank.session_id
     ) == [("",)]
+    # No typed words given: the words before the files name the chat, not the
+    # file's opening line that a greeting alone leaves for the title.
+    greeted = await store.begin_turn(
+        None,
+        compose_user_text("Hi there\n\n", (TextAttachment("a.txt", "Q3 numbers"),)),
+        holder=HOLDER,
+        title="  ",
+        new_session=NewSession(),
+    )
+    assert (await store.get_session(greeted.session_id)).title == "Hi there"  # type: ignore[union-attr]
     await store.aclose()
 
 

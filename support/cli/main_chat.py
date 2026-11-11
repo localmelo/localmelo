@@ -1490,8 +1490,9 @@ class MainChat:
 
     # ── Turns ──
 
-    async def last_turn(self) -> tuple[str, str] | None:
-        """The open chat's newest finished turn, its id and text; None without one."""
+    async def last_turn(self) -> tuple[str, str, bool] | None:
+        """The open chat's newest finished turn: its id, its text and whether melo
+        worded that text itself; None without one."""
         if self.chat.id is None:
             return None
         page = await self.client.turns(self.chat.id, 1)
@@ -1500,7 +1501,11 @@ class MainChat:
             return None
         if turns[-1].get("origin"):
             return None  # a task's question is not the person's to run again
-        return str(turns[-1].get("id") or ""), str(turns[-1].get("user_text") or "")
+        return (
+            str(turns[-1].get("id") or ""),
+            str(turns[-1].get("user_text") or ""),
+            turns[-1].get("composed") is True,
+        )
 
     async def run_turn(self, text: str, *, retry: str = "") -> str:
         """Send *text* in the open chat and wait for its turn; its final status.

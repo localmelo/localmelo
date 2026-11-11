@@ -70,6 +70,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
+    from localmelo.melo.agent._step_review import StepReviewer
     from localmelo.melo.agent.agent import _RunState
 
 logger = logging.getLogger(__name__)
@@ -310,14 +311,15 @@ def _block_tokens(room: int) -> int:
 class _CheckpointLoop:
     """The work checkpoint methods of :class:`~localmelo.melo.agent.agent.Agent`.
 
-    They read ``chat``, ``hippo`` and ``executor``, and ``_sent_window`` (the
-    window as a planning request carries it); the state they keep belongs to the
-    run they are passed.
+    They read ``chat``, ``hippo``, ``executor`` and ``_reviewer`` (the person's
+    messages), and ``_sent_window`` (the window as a planning request carries
+    it); the state they keep belongs to the run they are passed.
     """
 
     chat: Chat
     hippo: Hippo
     executor: Executor
+    _reviewer: StepReviewer
 
     def _sent_window(
         self, window: list[Message], task_query: Message | None
@@ -392,9 +394,14 @@ class _CheckpointLoop:
                 if answer is not None and _read_checkpoint(answer) is not None:
                     reply = answer
                     break
+        # The goal is the person's request. A turn of theirs with no words (a
+        # go-ahead, only files) has the newest request they made, not melo's
+        # sentence or the files' text; a run that is not theirs, or with no
+        # earlier request, has the query as before.
+        requests: tuple[str, ...] = self._reviewer.requests if run.from_person else ()
         checkpoint = checkpoint_from(
             reply,
-            goal=run.words or query,
+            goal=run.words or next(reversed(requests), query),
             step=run.steps,
             chars=room // 2,
             **self._computed(run, room),

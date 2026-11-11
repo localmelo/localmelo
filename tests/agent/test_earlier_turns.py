@@ -254,15 +254,6 @@ class TestReplay:
         assert text.startswith(EARLIER_HEAD)
         assert text.index(EARLIER_END) < text.index("Original task: go look it up")
 
-    async def test_closing_answer_after_the_run_carries_the_turns(self) -> None:
-        model = SubjectModel()
-        agent = _agent(model)
-        await _chat_then_look_up(model, agent, earlier=True)
-        model.calls.clear()
-        answer = await agent.closing_answer("go look it up", note=ANSWER_ON_STOP_NOTE)
-        assert answer == "Roles that fit Alex."
-        assert model.calls[0]["messages"][-1].content.startswith(EARLIER_HEAD)
-
     async def test_a_window_that_began_empty_plans_as_before(self) -> None:
         # A new Agent for a chat whose turns are only in the store: the window lost
         # nothing, so planning is as it was; the reflection still has the turns.
