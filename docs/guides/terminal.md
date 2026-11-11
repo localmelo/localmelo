@@ -149,7 +149,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
 | `/title [text]` | Show or set a 1–200-character title. |
 | `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
-| `/retry` | Re-run the newest finished turn with its stored typed text. |
+| `/retry` | Re-run the newest finished turn with its stored typed text; a turn melo itself worded (the go-ahead of **Allow once**) is sent again as melo's own, with no words of yours. |
 | `/copy [turn]` | Copy a stored answer's Markdown; without a number, the latest finished, non-undone turn. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals; `?` means not recorded. |
 | `/status [all]` | Five rows that say whether melo is ready: the model and its server (`✓ answers`, or why not), the folder, the session, what the approvals do, and how full the context is. `/status all`, and `/status` in developer mode, print every row. |

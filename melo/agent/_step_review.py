@@ -550,7 +550,7 @@ class StepReviewer:
             return
         self._seeded = True
         texts = [self._said(text)[:MAX_REQUEST_CHARS] for text in words]
-        texts = [text for text in texts[-EARLIER_REQUESTS:] if text.strip()]
+        texts = [text for text in texts if text.strip()][-EARLIER_REQUESTS:]
         first = self._said(first)[:MAX_REQUEST_CHARS]
         if first.strip() and first not in texts:
             self._add(first)

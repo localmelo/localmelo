@@ -116,10 +116,11 @@ async def test_the_set_of_a_messages_files_reaches_the_run_of_the_persons_turn_a
         await chat.runner.run_turn(hidden.text, attachments=(file,))
         assert "file_handles" not in chat.kwargs[-1]
         assert "[password-2]" not in chat.kwargs[-1]["query"]
-        # A turn melo began, one not from the person, one with no files: refused.
+        # A turn melo began, one not from the person, a composed one, one with no files: refused.
         cases: list[dict[str, Any]] = [
             {"origin": "followup"},
             {"from_person": False, "attachments": hidden.attachments},
+            {"composed": True, "words": "", "attachments": hidden.attachments},
             {},
         ]
         for case in cases:

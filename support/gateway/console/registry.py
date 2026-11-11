@@ -901,10 +901,12 @@ class ConsoleSessions:
         text: str,
         tool: str = "",
     ) -> tuple[TurnInfo, float]:
-        """Allow the step *key* once (Auto, #339) and send *text* as the person's message.
+        """Allow the step *key* once (Auto, #339) and send *text*, melo's own words.
 
         409 ``session_busy`` while a turn runs, so the allowance and the
-        message go together; the message starts the turn that retries it.
+        message go together; the message starts the turn that retries it. The
+        turn is composed (the text is melo's) and has no words of the
+        person's: no reader takes the sentence for something they typed.
         :class:`BlockError` ``already_allowed`` while an allowance of *key*
         waits. When the turn ends without using the allowance, it is
         dropped. Returns the turn and when the allowance runs out.
@@ -921,7 +923,9 @@ class ConsoleSessions:
             until = auto.given[key]
             self._note_turn_start(session_id)
             try:
-                turn = await entry.runner.start_turn(text, approval=entry.policy)
+                turn = await entry.runner.start_turn(
+                    text, approval=entry.policy, words="", composed=True
+                )
             except BaseException:
                 auto.withdraw(key)
                 raise
@@ -1404,7 +1408,11 @@ class ConsoleSessions:
             # again.
             pictures = await self._store.turn_images(session_id, undone.turn)
             text, words = undone.user_text, None
-            if undone.attachments:
+            if undone.composed:
+                words = (
+                    ""  # melo's own wording again, as melo's (Allow once's sentence)
+                )
+            elif undone.attachments:
                 text = undone.typed_text
             else:
                 head = words_before_files(text)
@@ -1415,6 +1423,7 @@ class ConsoleSessions:
                 attachments=undone.attachments or (),
                 words=words,
                 images=pictures,
+                composed=undone.composed,
             )
             entry.last_used = self._clock()
             return turn, resumed

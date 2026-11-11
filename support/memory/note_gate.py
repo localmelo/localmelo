@@ -1,29 +1,33 @@
 """The note gate: where a note the chat's model keeps with ``remember`` may come from.
 
-Developer setting ``[memory] note_gate`` (#442), three cumulative levels. A note is
+Setting ``[memory] note_gate`` (#442), two cumulative levels. A note is
 kept when something the chat shows supports it, and the gate tags the note with that
 source (source monitoring): what the user typed (``typed``), material the user
 pointed to (``pointed``) or a finished task's result (``result``), in that order of
 trust. A note kept by an earlier version may also carry ``inferred`` (the model's own
 inference), which no level writes now and recall still reads.
 
-- ``typed``, the default, is the rule that always was: the note's words are in what
-  the user typed in this chat or in a finished task's result shown in it
-  (:func:`records.unsupported`). This module is not asked at all.
-- ``pointed`` adds the page or file the user pointed to: one the chat fetched or read
-  (:func:`pointed_material`, from the chat's stored tool events) whose address or
-  file name the user typed, or that the user's words in that turn call theirs
-  (:data:`THEIRS`). A page the user did not point to is no source at any level, and a
-  page the user called someone else's supports no note about the user.
+- ``pointed``, the default: the note's words are in what the user typed in this chat,
+  in a page or file the user pointed to, or in a finished task's result shown in it
+  (:func:`records.unsupported`). A page or file the user pointed to is one the chat
+  fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
+  address or file name the user typed, or that the user's words in that turn call
+  theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
+  at the address of a sentence that called a page theirs and gave one address, which
+  a note of their own words kept and they did not edit (:func:`given_places`), since
+  the phrase alone never points to a page the model chose. A page the user did not
+  point to is no source at
+  any level, and a page the user called someone else's supports no note about the
+  user.
 - ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
   numbers, dates, addresses, e-mail addresses, names) must be found in a source, and
   the rest of it may say the same in other words or another language, judged by the
   cosine between its embedding and the best window of the sources
-  (:func:`windows`). Without an embedding model that is the ``typed`` word check.
+  (:func:`windows`). Without an embedding model that is the ``pointed`` word check.
 
-Every level but ``typed`` also refuses a note that is an instruction to the assistant
-(:func:`is_instruction`), not a fact about the user. Secrets are refused at every
-level before this module is asked.
+Both levels refuse a note that is an instruction to the assistant
+(:func:`is_instruction`), not a fact about the user. Secrets are refused before this
+module is asked.
 
 What a page, a file or a finished task's result may support is what it *states*, not
 what it hides or asks the assistant to do. Material (a page or a file) goes through
@@ -63,15 +67,15 @@ from urllib.parse import unquote, urlsplit
 import numpy as np
 
 from localmelo.melo.agent._step_review import named_sites
-from localmelo.support.config import MEMORY_NOTE_GATE
 from localmelo.support.memory import markup, records
 from localmelo.support.memory.index import CHUNK_OVERLAP
 
-# The sources a note is tagged with, most trusted first.
-TYPED: Final = "typed"
-POINTED: Final = "pointed"
-RESULT: Final = "result"
-INFERRED: Final = "inferred"
+# The sources a note is tagged with, most trusted first (named in :mod:`records`,
+# which the replacement rules read).
+TYPED: Final = records.TYPED
+POINTED: Final = records.POINTED
+RESULT: Final = records.RESULT
+INFERRED: Final = records.INFERRED
 
 # The default bar for the meaning of a note against its source.
 MIN_COSINE: Final = 0.55
@@ -177,9 +181,11 @@ _PATH_END = ".,;:!?)]}>'\"/"
 class Material(NamedTuple):
     """A page or file the user pointed to, as this chat read it.
 
-    *ref* is the address (a page) or the file name, *text* what the tool returned
-    that may support a note (:func:`material_text`: no hidden text, no order to the
-    assistant, never empty) and *other* says the user called it someone else's.
+    *ref* is the address (a page: its scheme, host, port and path, never a query
+    string, a fragment or a login, since a note keeps it) or the file name, *text*
+    what the tool returned that may support a note (:func:`material_text`: no hidden
+    text, no order to the assistant, never empty) and *other* says the user called it
+    someone else's.
     *browser* says the page was read in the browser (:data:`BROWSER_TOOLS`): what the
     browser shows melo is not what a reader sees (its labels and hidden controls), so
     such a page supports no note and its *text* only tells why a note is refused.
@@ -227,6 +233,17 @@ def _place_of(address: str) -> Place | None:
     return Place(host, _tail(parts.path, parts.query)) if host else None
 
 
+def _kept_address(address: str) -> str:
+    """*address* as a note keeps it: its scheme (when it has one), host, port and path.
+
+    What follows the path (a query string, a fragment) and any login before the host
+    are left out: a link may carry a token there."""
+    text = address.strip()
+    parts = urlsplit(text if "://" in text else "//" + text)
+    scheme = f"{parts.scheme}://" if parts.scheme else ""
+    return f"{scheme}{parts.netloc.rpartition('@')[2]}{parts.path}"
+
+
 def _spellings(host: str) -> set[str]:
     """The ways a host may be typed: as is, and in Unicode if it is punycode."""
     names = {host}
@@ -239,15 +256,16 @@ def typed_places(text: str) -> list[Place]:
     """The places *text* (what the user typed) names: a host alone is every page of
     it (the path ``""``), an address with a path is that page and what is below it.
 
-    The scheme, ``www.``, a trailing slash, a fragment and the punctuation after
-    the address are not part of it: ``see https://www.github.com/jane/.`` names
-    ``github.com`` at ``/jane``.
+    The scheme, ``www.``, the dot that may end a host, a trailing slash, a fragment
+    and the punctuation after the address are not part of it: ``see
+    https://www.github.com/jane/.`` names ``github.com`` at ``/jane``, and so does
+    ``github.com./jane``.
     """
     places: list[Place] = []
     for host in sorted(named_sites(text)):
         names = "|".join(re.escape(name) for name in sorted(_spellings(host)))
         pattern = re.compile(
-            r"(?<![\w.@-])(?:https?://)?(?:www\.)?(?:" + names + r")(?::\d+)?"
+            r"(?<![\w.@-])(?:https?://)?(?:www\.)?(?:" + names + r")\.?(?::\d+)?"
             rf"(?P<path>/[^{_ADDRESS_END}]*)?",
             re.IGNORECASE,
         )
@@ -258,6 +276,19 @@ def typed_places(text: str) -> list[Place]:
         if not found:
             places.append(Place(host, ""))
     return places
+
+
+def given_places(quote: str) -> list[Place]:
+    """The place a note of the user's own gives for "my website": the one address of
+    its *quote* (the sentence the user typed for it) when that calls a page theirs
+    (:data:`THEIRS`), calls none someone else's and, with e-mail addresses left out,
+    names exactly one place; else none. A sentence with two addresses gives none:
+    which one is whose is not read out of a sentence."""
+    folded = fold(quote)
+    if _THEIRS.search(folded) is None or _OTHERS.search(folded) is not None:
+        return []
+    named = set(typed_places(_EMAIL.sub(" ", quote)))
+    return list(named) if len(named) == 1 else []
 
 
 def _covers(typed: Place, page: Place) -> bool:
@@ -479,9 +510,8 @@ def _assembled(reads: Sequence[_Read], limit: int = MAX_MATERIAL) -> list[Materi
             continue
         stated = material_text(whole)
         if stated.strip():
-            found.append(
-                Material(group.kind, group.ref, stated, group.other, group.browser)
-            )
+            ref = _kept_address(group.ref) if group.kind == "page" else group.ref
+            found.append(Material(group.kind, ref, stated, group.other, group.browser))
             if len(found) >= limit:
                 break
     found.reverse()
@@ -489,23 +519,30 @@ def _assembled(reads: Sequence[_Read], limit: int = MAX_MATERIAL) -> list[Materi
 
 
 def pointed_material(
-    events: Iterable[tuple[int | None, Mapping[str, Any]]], typed: Mapping[int, str]
+    events: Iterable[tuple[int | None, Mapping[str, Any]]],
+    typed: Mapping[int, str],
+    own: Sequence[Place],
 ) -> list[Material]:
     """The pages and files this chat read that the user pointed to, newest last.
 
     *events* are the chat's stored events, oldest first, as ``(turn, event)``;
     *typed* maps each turn the user began (not an undone one, not a task's
-    question) to what they typed in it, the turn under way included. A tool call
-    counts when it finished with a result and the user pointed to its page or file:
+    question) to what they typed in it, the turn under way included; *own* are the
+    places the user's own notes give (:func:`given_places`). A tool call counts
+    when it finished with a result and the user pointed to its page or file:
 
     - a page, when the user typed its address (:func:`typed_places`) in some turn up
       to now: a host alone points to every page of it, an address with a path to that
       page and what is below it (``github.com/jane`` is not ``github.com/evil``);
     - a file, when its name is in the typed words of some turn up to now;
-    - the first page or file a turn read, when the typed words of that turn call it
-      theirs (:data:`THEIRS`) without saying which: "my profile at github.com/jane"
-      means that address and no other. A later read of that turn is the user's only
-      if it is the same page or file again, or the user typed its address or name.
+    - a page, when the typed words of its turn call it theirs (:data:`THEIRS`)
+      without saying which and its place is one of *own*: the phrase alone points
+      only to a place the user gave, never to a page the model chose;
+    - the first page or file a turn read, when that is a file and the typed words of
+      that turn call it theirs without saying which: "my resume" means the file the
+      turn read first, and "my profile at github.com/jane" that address and no other.
+      A later read of that turn is the user's only if it is the same file again, or
+      the user typed its name.
 
     It is someone else's (``other``) when the words of that turn, or of a turn that
     names it, say so. A page or file the user did not point to is left out, as is
@@ -575,11 +612,16 @@ def pointed_material(
             continue
         opener = first.setdefault(began, seen)
         # "My site at example.com": the address typed is what the phrase means, so
-        # no other page is "my site".
+        # no other page is "my site". Otherwise the phrase stands for a file the
+        # turn read first, or for a page at a place the user gave in a note.
         theirs = (
             _THEIRS.search(folded[began]) is not None
             and _BOUND.search(folded[began]) is None
-            and _again(opener, seen)
+            and (
+                any(_covers(p, landing[0]) for p in own)
+                if landing is not None
+                else _again(opener, seen)
+            )
         )
         if not named and not theirs:
             continue
@@ -596,6 +638,29 @@ def name_of(source: str) -> str:
         host = next(iter(named_sites(source)), "")
         return host or source
     return source
+
+
+def where_from(provenance: Mapping[str, Any], say: Callable[..., str], on: str) -> str:
+    """Where a note kept from a page, a file or a finished task's result, or brought in
+    from a file, came from, as the notes page words it: ``from jane.example.com, Oct
+    30``, ``from the file resume.pdf, Oct 30`` or ``from a finished task's result,
+    Oct 30``; ``""`` for any other note. *say* gives the words of a ``memoryRows.*``
+    key of the console's catalog for its parameters, and *on* is the day as the
+    reader reads it."""
+    how, ref = str(provenance.get("source") or ""), str(provenance.get("from") or "")
+    if how == POINTED and ref:
+        key = "memoryRows.fromPage" if "://" in ref else "memoryRows.fromFile"
+        return say(key, name=name_of(ref), day=on)
+    if how == RESULT:
+        return say("memoryRows.fromResult", day=on)
+    if how == "import":
+        file = os.path.basename(str(provenance.get("path") or "").rstrip("/\\"))
+        return say(
+            "memoryRows.fromFile",
+            name=file or str(provenance.get("chat") or ""),
+            day=on,
+        )
+    return ""
 
 
 def best_material(note: str, material: Sequence[Material]) -> Material:
@@ -1226,9 +1291,3 @@ def cosine(left: Sequence[float], right: Sequence[float]) -> float:
 def best_cosine(vector: Sequence[float], group: Sequence[Sequence[float]]) -> float:
     """The highest cosine of *vector* to a vector of *group* (0 for none)."""
     return max((cosine(vector, other) for other in group), default=0.0)
-
-
-def level_at_least(level: str, wanted: str) -> bool:
-    """Whether the gate *level* includes *wanted*; an unknown level is ``typed``."""
-    ranks = {name: n for n, name in enumerate(MEMORY_NOTE_GATE)}
-    return ranks.get(level, 0) >= ranks[wanted]

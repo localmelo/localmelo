@@ -299,8 +299,10 @@ async def earlier_turns(
 
     Finished, not undone turns numbered below *before* (any, when ``None``)
     and finished by *until* (any time, when ``None``) that have words of the
-    person's (typed, or the turn's text); a turn melo began (a task's question
-    to the chat, a follow-up) is never one, however many of those came since.
+    person's (typed, or the turn's text), or that a press of theirs began (a
+    composed turn: no words, only an answer, such as the one Allow once
+    starts); a turn melo began (a task's question to the chat, a follow-up:
+    they have an ``origin``) is never one, however many of those came since.
     At most :data:`EARLIER_SCAN` turns are read. A chat's run carries them as
     ``Agent.run_task(earlier_turns=...)``, and a task the chat starts begins
     with them (:func:`earlier_pair` for each).
@@ -312,12 +314,13 @@ async def earlier_turns(
         page = await store.list_turns(session_id, limit=page_size, before=cursor)
         for past in reversed(page):  # newest first
             read += 1
-            words = typed_words(past)
+            # A composed turn with no ``origin`` is one a press began, not melo.
+            pressed = past.composed and bool(split_thinking(past.answer)[1].strip())
             if (
                 past.status == "running"
                 or past.undone
                 or past.origin
-                or not words.strip()
+                or not (typed_words(past).strip() or pressed)
                 or (
                     until is not None
                     and (past.finished_at is None or past.finished_at > until)
@@ -535,6 +538,7 @@ class SessionRunner:
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
         file_handles: frozenset[str] = frozenset(),
+        composed: bool = False,
     ) -> RunResult:
         """Run a turn of *text* in this task and return its RunResult.
 
@@ -542,7 +546,8 @@ class SessionRunner:
         are the handles the caller's door made from values in *attachments* when
         the message arrived (see :meth:`start_turn`). *routine*
         names the run's routine (``Agent.run_task``'s ``routine=``), passed
-        only when given. A turn that this runner stopped (:meth:`cancel`,
+        only when given. *composed*: *text* is melo's wording, with no words
+        of the person's. A turn that this runner stopped (:meth:`cancel`,
         :meth:`close`, a takeover) returns the ``cancelled`` RunResult of
         its ``run.finished``, or, when it was stopped before its run
         began, a ``cancelled`` RunResult with the stop's reason and no
@@ -560,6 +565,8 @@ class SessionRunner:
             tuple(attachments),
             own_task=False,
             file_handles=file_handles,
+            words="" if composed else None,
+            composed=composed,
         )
         if turn.finish is not None:  # stopped before its run began
             task = asyncio.current_task()
@@ -594,9 +601,10 @@ class SessionRunner:
         whose text the person did not send though it has none (a task
         another agent, a channel or melo made): the run counts no message of
         theirs in it. *composed* marks a turn of the person's whose *text*
-        melo wrote (a stop card): stored as ``TurnInfo.composed``, as is every
-        turn not *from_person*, so that memory reads no words of it; it needs
-        *words*. *images* are the pictures the
+        melo wrote (a stop card, the go-ahead of Allow once): stored as
+        ``TurnInfo.composed``, as is every turn not *from_person*, so that
+        memory reads no words of it; it needs *words* (``""`` for a turn with
+        none: the run counts no words of theirs in it). *images* are the pictures the
         person added: stored with the turn and sent to the model with *text*
         (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
@@ -608,8 +616,8 @@ class SessionRunner:
         ``file_handles``, carried as data): the run may type the one password
         they name. This runner's own hiding never makes the set (it cannot tell a
         first read from a retry or a stored message), so a caller with no set
-        from its own door gives none; the set is refused with no files or for a
-        turn the person did not begin.
+        from its own door gives none; the set is refused with no files, for a
+        turn the person did not begin and for a composed one.
         """
         turn = await self._start(
             text,
@@ -659,14 +667,14 @@ class SessionRunner:
         file_handles: frozenset[str] = frozenset(),
     ) -> _Turn:
         self._check_open()
-        if composed and from_person and not words:
-            # The run would read the empty typed text as the person's words.
+        if composed and from_person and words is None:
+            # The run would read the composed text as the person's words.
             raise ValueError("a composed turn of the person's needs their words")
         if images and self._worker:
             raise ValueError("worker sessions do not support pictures")
         if attachments and origin:
             raise ValueError("a turn the person did not begin carries no attachments")
-        if file_handles and not (attachments and from_person):
+        if file_handles and (composed or not (attachments and from_person)):
             raise ValueError("file handles go with the files of the person's message")
         if not self._worker and not origin:
             # A password the person wrote, in the words or in a file, is cut out
