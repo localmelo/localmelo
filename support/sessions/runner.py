@@ -297,8 +297,10 @@ async def earlier_turns(
 
     Finished, not undone turns numbered below *before* (any, when ``None``)
     and finished by *until* (any time, when ``None``) that have words of the
-    person's (typed, or the turn's text); a turn melo began (a task's question
-    to the chat, a follow-up) is never one, however many of those came since.
+    person's (typed, or the turn's text), or that a press of theirs began (a
+    composed turn: no words, only an answer, such as the one Allow once
+    starts); a turn melo began (a task's question to the chat, a follow-up:
+    they have an ``origin``) is never one, however many of those came since.
     At most :data:`EARLIER_SCAN` turns are read. A chat's run carries them as
     ``Agent.run_task(earlier_turns=...)``, and a task the chat starts begins
     with them (:func:`earlier_pair` for each).
@@ -310,12 +312,13 @@ async def earlier_turns(
         page = await store.list_turns(session_id, limit=page_size, before=cursor)
         for past in reversed(page):  # newest first
             read += 1
-            words = typed_words(past)
+            # A composed turn with no ``origin`` is one a press began, not melo.
+            pressed = past.composed and bool(split_thinking(past.answer)[1].strip())
             if (
                 past.status == "running"
                 or past.undone
                 or past.origin
-                or not words.strip()
+                or not (typed_words(past).strip() or pressed)
                 or (
                     until is not None
                     and (past.finished_at is None or past.finished_at > until)

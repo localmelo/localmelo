@@ -777,7 +777,8 @@ Tools run with the user's permissions, not in a sandbox.
   only when set and never accepted in a request: `context_pack` (the notes),
   `own_words` (what the person typed, when the objective does not hold it),
   `chat_turns` (the starting chat's newest earlier turns, `- the user: …` with
-  an indented `melo: …` line each) and `chat_picked` (one `- ` line for each
+  an indented `melo: …` line each; a turn a press of the person's began, such as
+  Allow once, is a `- melo: …` line alone) and `chat_picked` (one `- ` line for each
   thing that chat's turn opened, searched or recalled). The task reads them as
   data after its request; the task page folds them under "What melo told the
   task".

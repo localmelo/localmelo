@@ -763,6 +763,19 @@ async def test_t82r2_receipt_current_checks_state_and_terminal(
     )
 
 
+async def test_a_database_made_before_card_by_gets_the_column_and_reads_the_person(
+    store: SessionStore, tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(tasks, spec("old"), origin="user")
+    async with store.component_transaction("before_card_by") as conn:
+        await conn.execute("ALTER TABLE tasks DROP COLUMN card_by")
+    reopened = TaskStore(store, clock=clock)
+    assert await reopened.open() == SCHEDULER_VERSION
+    old = await reopened.get_task(record.task_id)
+    assert old is not None and old.card_by == ""  # nothing says melo wrote the card
+    assert await one(store, "SELECT card_by FROM tasks") == (None,)
+
+
 async def test_v1_migration_preserves_later_override_and_missing_log_fallback(
     store: SessionStore, tasks: TaskStore, clock: Clock
 ) -> None:
