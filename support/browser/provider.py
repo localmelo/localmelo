@@ -207,8 +207,9 @@ _PAGE_NOTE = (
     "in one tab: browser_open reuses the tab you opened unless you pass "
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
     "browser_type and browser_select act on the page you read, by ref. Sign in "
-    "with the details the user gave: a password they wrote in their message "
-    "reads [password-1] there (melo keeps the real one out of your sight): "
+    "with the details the user gave: a password they wrote in their message, "
+    "or the one in a file they attached, reads [password-1] there (melo keeps "
+    "the real one out of your sight): "
     "browser_type that text into the password box (the list says melo never "
     "types there: that holds for any other password) and melo types the real "
     "one on a site they named. Never type any other password, a card number or "
@@ -1772,8 +1773,8 @@ class BrowserToolProvider(BaseToolProvider):
         )
         if kind == "password" and self._signs_in(_box_origin(snap, item)):
             refusal += (
-                " The user gave a sign-in password in their message: type its "
-                "handle ([password-1]) here, not a value."
+                " The user gave a sign-in password in their message or a file: "
+                "type its handle ([password-1]) here, not a value."
             )
             raise BrowserError(refusal)
         return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
@@ -1784,7 +1785,8 @@ class BrowserToolProvider(BaseToolProvider):
         """The password *text* stands for, when melo may type it into *item*, else None.
 
         *text* must be exactly the handle of a password the person gave in
-        their message of this run (``[password-1]``); *item* a password box (not
+        their message of this run, in its words or in a file it carried
+        (``[password-1]``); *item* a password box (not
         a card or a one-time code box) whose own origin, not the page's it sits
         in, is an https site their own words name. The check is the run's (``TOOL_ASK``'s ``sign_in_value``): a page,
         the model or an earlier message never passes it, and without a policy

@@ -81,7 +81,7 @@ from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
 from localmelo.support.cli.work import WorkBeside, work_parts
 from localmelo.support.progress_line import run_elapsed, wall_range
-from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.attachments import TextAttachment, hide_message
 from localmelo.support.sessions.display import (
     clean_output,
     format_duration,
@@ -755,7 +755,13 @@ class CliSession:
                     "muted",
                 )
             )
-        self._work = self.spawn(self._turn(text, attachments=staged))
+        # A message typed here is read by no door before this one: its files'
+        # handles are known here, and a turn tried again has none (#626).
+        files = tuple(TextAttachment(item.path, item.content) for item in staged)
+        handles = hide_message(text, files).file_handles if files else frozenset()
+        self._work = self.spawn(
+            self._turn(text, attachments=staged, file_handles=handles)
+        )
 
     async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
         """Ask through the panel, recorded in the session's events during a turn."""
@@ -777,6 +783,7 @@ class CliSession:
         *,
         typed_text: str | None = None,
         attachments: tuple[Attachment, ...] = (),
+        file_handles: frozenset[str] = frozenset(),
     ) -> None:
         started = self._clock()
         runner = self.runner
@@ -809,7 +816,8 @@ class CliSession:
                 {
                     "attachments": tuple(
                         TextAttachment(item.path, item.content) for item in attachments
-                    )
+                    ),
+                    "file_handles": file_handles,
                 }
                 if attachments
                 else {}

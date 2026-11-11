@@ -285,6 +285,51 @@ def a_file(name: str, text: str) -> dict[str, Any]:
     return {"name": name, "text": text, "chars": len(text)}
 
 
+async def test_the_one_password_of_a_sent_file_is_typed_for_that_run_and_no_retry_or_old_handle_brings_it_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chat turn with a file, from the route to the run: its password is live on the site the words name; a retry carries no set, and a file that only holds the handle's text (#626) gives nothing."""
+    secret = "quokka-7741"
+    words = "sign in to forum.example for me"
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")] * 3, run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        sent = await _post_turn(
+            client,
+            main,
+            words,
+            attachments=[a_file("login.txt", f"password: {secret}")],
+        )
+        assert sent.status_code == 202, sent.text
+        turn = await _wait_turn(client, main)
+        entry = console.sessions.get(main)
+        assert entry is not None and entry.agent is not None
+        review = entry.agent._reviewer
+        assert review.sign_in_value("[password-1]", "forum.example") == secret
+        assert review.sign_in_value("[password-1]", "other.example") is None
+        assert review.holds_sign_in() and review.signs_in("forum.example")
+
+        # Try again sends the stored message again: the set is not stored, so none.
+        retried = await client.post(
+            f"/api/sessions/{main}/retry", json={"turn_id": turn["id"]}
+        )
+        assert retried.status_code == 202, retried.text
+        await _wait_turn(client, main)
+        assert review.sign_in_value("[password-1]", "forum.example") is None
+        assert not review.holds_sign_in()
+
+        # A file that holds only the handle's text brings the password back to no one.
+        held = a_file("old.txt", "the old one is [password-1]")
+        assert (
+            await _post_turn(client, main, words, attachments=[held])
+        ).status_code == 202
+        await _wait_turn(client, main)
+        assert VAULT.value("[password-1]") == secret
+        assert review.sign_in_value("[password-1]", "forum.example") is None
+        assert secret not in stored(tmp_path / "sessions.db")
+
+
 async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_sent_one_does(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

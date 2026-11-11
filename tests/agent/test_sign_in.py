@@ -17,7 +17,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
 from localmelo.melo.contracts import review
 from localmelo.melo.contracts.approvals import TOOL_ASK, AutoPolicy
-from localmelo.melo.contracts.sign_in import HANDLE, hide_passwords
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, hide_passwords
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.schema import Message, ToolDef
@@ -551,3 +551,114 @@ def test_one_site_adds_nothing_to_where_a_password_goes(
     found = reviewer.sign_in_value("[password-1]", site)
     assert found == ("mine-12345" if typed else None)
     assert reviewer.signs_in(site) is typed
+
+
+# A password in a file the person attached (#626): the door says which handles the
+# files gave, as data, and the review takes the one a message's files gave.
+THE_FILE = TextAttachment("login.txt", "password: file-Secret7\n")
+ASK = "sign in to forum.example for me"
+
+
+def test_the_door_names_the_handles_it_made_from_values_in_the_files_never_from_their_text() -> (
+    None
+):
+    """A file that holds handle-shaped text gave no value, so it gave no handle; a second pass finds none either."""
+    typed = hide_message(TASK)
+    assert typed.text.endswith("[password-1]") and typed.file_handles == frozenset()
+    # The handle text of an earlier message's password, written in a file.
+    held = TextAttachment("old.txt", "my old one is [password-1]")
+    quiet = hide_message(ASK, (held,))
+    assert quiet.attachments == (held,) and quiet.file_handles == frozenset()
+    # A value in a file gets a handle in this pass: that is what the set holds.
+    given = hide_message(ASK, (held, THE_FILE))
+    assert given.file_handles == {"[password-2]"}
+    assert HANDLE.findall(given.attachments[1].text) == ["[password-2]"]
+    # A name is no file text, and a typed password is the words'.
+    named = hide_message(TASK, (TextAttachment("password: n-Secret5.txt", "x"),))
+    assert named.file_handles == frozenset()
+    again = hide_message(given.text, given.attachments)
+    assert again.attachments == given.attachments
+    assert again.file_handles == frozenset()
+
+
+def test_a_file_that_holds_an_earlier_handles_text_never_brings_back_that_password() -> (
+    None
+):
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    hide_message(TASK)  # an earlier message: [password-1] is the typed PASSWORD
+    held = hide_message(ASK, (TextAttachment("old.txt", "my old one is [password-1]"),))
+    reviewer.user_message(held.text, files=held.file_handles)
+    assert reviewer.sign_in_value("[password-1]", "forum.example") is None
+    assert not reviewer.holds_sign_in() and not reviewer.signs_in("forum.example")
+
+
+def test_the_one_password_of_a_messages_files_is_typed_on_a_site_the_words_name() -> (
+    None
+):
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    site_in_file = TextAttachment("login.txt", "at only-in-the-file.example\n")
+    hidden = hide_message(ASK, (site_in_file, THE_FILE))
+    reviewer.user_message(hidden.text, files=hidden.file_handles)
+    assert reviewer.sign_in_value("[password-1]", "forum.example") == "file-Secret7"
+    assert reviewer.holds_sign_in() and reviewer.signs_in("forum.example")
+    # The site is the person's words', never the file's.
+    assert reviewer.sign_in_value("[password-1]", "only-in-the-file.example") is None
+    assert not reviewer.signs_in("only-in-the-file.example")
+    # The next run starts with none, and the model's own handle is no password.
+    reviewer.begin_run()
+    assert reviewer.sign_in_value("[password-1]", "forum.example") is None
+    reviewer.user_message(ASK)
+    assert reviewer.sign_in_value("[password-1]", "forum.example") is None
+
+
+def test_words_that_give_a_password_win_over_the_files_and_two_file_passwords_give_none() -> (
+    None
+):
+    other = TextAttachment("other.txt", "pw: file-Secret8\n")
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    typed = hide_message(TASK, (THE_FILE,))
+    reviewer.user_message(typed.text, files=typed.file_handles)
+    assert reviewer.sign_in_value("[password-1]", "forum.example") == PASSWORD
+    assert reviewer.sign_in_value("[password-2]", "forum.example") is None
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    two = hide_message(ASK, (THE_FILE, other))
+    assert len(two.file_handles) == 2
+    reviewer.user_message(two.text, files=two.file_handles)
+    assert not reviewer.holds_sign_in() and not reviewer.signs_in("forum.example")
+    for handle in two.file_handles:
+        assert reviewer.sign_in_value(handle, "forum.example") is None
+    # One handle the vault no longer keeps (a restart) is none either.
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    one = hide_message(ASK, (THE_FILE,))
+    VAULT.forget()
+    reviewer.user_message(one.text, files=one.file_handles)
+    assert not reviewer.holds_sign_in()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("from_person", "typed"), [(True, "file-Secret7"), (False, None)]
+)
+async def test_the_set_counts_only_in_a_run_the_person_began(
+    tmp_path: Path, from_person: bool, typed: str | None
+) -> None:
+    """Where the set enters ``run_task`` it is dropped for a run the person did not begin."""
+    box = PasswordBox()
+    hidden = hide_message(ASK, (THE_FILE,))
+    composed = compose_user_text(hidden.text, hidden.attachments)
+    llm = FakeModel(
+        [_type_call("forum.example", "[password-1]"), _answer("done")],
+        [verdict()] * 3,
+    )
+    agent = _agent(tmp_path, llm, box)
+
+    await agent.run_task(
+        composed,
+        own_chars=len(composed),
+        user_words=hidden.text,
+        file_handles=hidden.file_handles,
+        from_person=from_person,
+        approval=AutoPolicy(),
+    )
+
+    assert box.typed == [typed]

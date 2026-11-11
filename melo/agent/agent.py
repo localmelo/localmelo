@@ -3597,6 +3597,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         chat_first: str | None = None,
         own_chars: int | None = None,
         recalled: str = "",
+        file_handles: Collection[str] = (),
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -3834,6 +3835,15 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         window starts over, the step review keeps it first, as the task the
         chat began with, so a goal review still has it after a reload.
 
+        *file_handles* are the handles the door that read the person's message
+        made from values in its attached files (``hide_message``'s
+        ``file_handles``), given by the caller as data: a file's text is never
+        read for one. The step review lets melo type the one password they name
+        when the person's words give none of their own and the set holds exactly
+        one the vault still keeps (:meth:`StepReviewer.user_message`). They count
+        only in a run the person began: with *from_person* false they are
+        ignored, as is every note read mid-run (#626).
+
         *images* are pictures the person added to the query, with their data.
         The query message keeps reference copies, as a tool result does, and the
         store keeps the payloads of the newest few (see
@@ -3949,7 +3959,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         if from_person:
             # The notes recalled for this message go along, apart: they count
             # only where the person's words point to them (#465).
-            self._reviewer.user_message(person_words, recalled=recalled)
+            self._reviewer.user_message(
+                person_words, recalled=recalled, files=file_handles
+            )
         if chat_started is not None:
             self._reviewer.since = chat_started
         await self._ensure_budget()

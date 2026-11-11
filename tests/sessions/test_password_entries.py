@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.cli.app import open_history
-from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.attachments import TextAttachment, hide_message
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.sessions.test_runner_earlier import (  # noqa: F401
     Chat,
@@ -90,6 +91,42 @@ async def test_a_password_in_a_file_a_turn_carries_is_hidden_as_a_typed_one_is(
             await chat.runner.start_turn(
                 "a task's words", origin="followup", attachments=(file,)
             )
+    finally:
+        await chat.close()
+
+
+async def test_the_set_of_a_messages_files_reaches_the_run_of_the_persons_turn_and_no_other(
+    store: SessionStore, tmp_path: Path  # noqa: F811
+) -> None:
+    """The runner carries the door's set as given: its own hiding makes none, and a turn that is not the person's takes none (#626)."""
+    chat = Chat(store, None, tmp_path / "w")
+    try:
+        file = TextAttachment("login.txt", "password: file-Secret7\n")
+        hidden = hide_message("use the login in the file", (file,))
+        assert hidden.file_handles == {"[password-1]"}
+        chat.model.plans += [_reply("Read it."), _reply("Again.")]
+        await chat.runner.run_turn(
+            hidden.text,
+            attachments=hidden.attachments,
+            file_handles=hidden.file_handles,
+        )
+        assert chat.kwargs[-1]["file_handles"] == {"[password-1]"}
+        # The same message sent again with its raw file (a retry, a stored row) is
+        # hidden by the runner as before, and carries no set: none is made here.
+        await chat.runner.run_turn(hidden.text, attachments=(file,))
+        assert "file_handles" not in chat.kwargs[-1]
+        assert "[password-2]" not in chat.kwargs[-1]["query"]
+        # A turn melo began, one not from the person, one with no files: refused.
+        cases: list[dict[str, Any]] = [
+            {"origin": "followup"},
+            {"from_person": False, "attachments": hidden.attachments},
+            {},
+        ]
+        for case in cases:
+            with pytest.raises(ValueError, match="file handles"):
+                await chat.runner.start_turn(
+                    "x", file_handles=hidden.file_handles, **case
+                )
     finally:
         await chat.close()
 

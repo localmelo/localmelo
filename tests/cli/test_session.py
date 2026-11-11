@@ -225,6 +225,26 @@ async def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     await session.shutdown()
 
 
+async def test_the_one_password_in_an_attached_file_is_typed_in_its_turn_and_not_in_a_retry(
+    setup: Setup,
+) -> None:
+    """The terminal reads the message as it arrives, so it says which handles the file gave; `/retry` sends the stored message and carries none (#626)."""
+    (setup.factory.root / "login.txt").write_text("password: file-Secret7\n")
+    session = setup.session
+    assert session.enter("/attach login.txt") is None
+    await setup.idle()
+    assert session.enter("sign in to forum.example for me") is None
+    await setup.idle()
+    review = session.agent._reviewer
+    assert review.sign_in_value("[password-1]", "forum.example") == "file-Secret7"
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.append(answer("Again."))
+    assert session.enter("/retry") is None
+    await setup.idle()
+    assert review.sign_in_value("[password-1]", "forum.example") is None
+
+
 async def test_text_attachment_snapshot_survives_retry(setup: Setup) -> None:
     path = setup.factory.root / "input.txt"
     path.write_text("café", encoding="utf-8")
