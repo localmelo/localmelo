@@ -652,6 +652,7 @@ def test_words_that_give_a_password_win_over_the_files_and_two_file_passwords_gi
         ("log in the website forum.example with the file", True),
         ("the log in is in the attached file, open forum.example", True),
         ("check the log in the attached file, and open forum.example", False),
+        ("check the log in the file, then log in to forum.example", True),
         ("find the error in the log in this folder of forum.example", False),
         ("summarise this file and open forum.example", False),
         ("sign up at forum.example and read this file", False),
