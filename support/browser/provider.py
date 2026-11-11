@@ -209,9 +209,10 @@ _PAGE_NOTE = (
     "browser_type and browser_select act on the page you read, by ref. Sign in "
     "with the details the user gave: a password they wrote in their message, "
     "or the only one in a file they attached when they asked to sign in, reads "
-    "[password-1] there (melo keeps "
+    "like [password-…] there (melo keeps "
     "the real one out of your sight): "
-    "browser_type that text into the password box (the list says melo never "
+    "browser_type that text, copied from their message, into the password box "
+    "(the list says melo never "
     "types there: that holds for any other password) and melo types the real "
     "one on a site they named. Never type any other password, a card number or "
     "a one-time code: {sign_in} An act's first line says whether the page "
@@ -1772,10 +1773,13 @@ class BrowserToolProvider(BaseToolProvider):
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "payment cards or one-time codes, nor a password the user did not give."
         )
-        if kind == "password" and self._signs_in(_box_origin(snap, item)):
+        origin = _box_origin(snap, item)
+        if kind == "password" and self._signs_in(origin):
+            handle = self._sign_in_handle(origin)
             refusal += (
                 " The user gave a sign-in password in their message or a file: "
-                "type its handle ([password-1]) here, not a value."
+                f"type its handle ({handle or '[password-…], copied from their message'}) "
+                "here, not a value."
             )
             raise BrowserError(refusal)
         return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
@@ -1787,7 +1791,7 @@ class BrowserToolProvider(BaseToolProvider):
 
         *text* must be exactly the handle of a password the person gave in
         their message of this run, in its words or in a file it carried
-        (``[password-1]``); *item* a password box (not
+        (``[password-482913075]``); *item* a password box (not
         a card or a one-time code box) whose own origin, not the page's it sits
         in, is an https site their own words name. The check is the run's (``TOOL_ASK``'s ``sign_in_value``): a page,
         the model or an earlier message never passes it, and without a policy
@@ -1805,6 +1809,12 @@ class BrowserToolProvider(BaseToolProvider):
         find = getattr(TOOL_ASK.get(), "sign_in_value", None)
         value = find(handle, sites.host_of(origin)) if callable(find) else None
         return value if isinstance(value, str) and value else None
+
+    def _sign_in_handle(self, origin: str) -> str | None:
+        """The one password handle the run holds for the site *origin* (``TOOL_ASK``'s ``sign_in_handle``), or None."""
+        find = getattr(TOOL_ASK.get(), "sign_in_handle", None)
+        handle = find(sites.host_of(origin)) if callable(find) else None
+        return handle if isinstance(handle, str) and HANDLE.fullmatch(handle) else None
 
     def _signs_in(self, origin: str) -> bool:
         """Whether the person gave sign-in details for the site *origin* (https) in their newest message."""

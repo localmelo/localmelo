@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support.backends import discovery
 from localmelo.support.cli.agents import AgentFactory, config_backend, url_backend
@@ -137,7 +138,7 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
         # A sign-in is never the place to stop: melo types the password the user
         # gave (its handle), and hands over only what it cannot do.
         "A sign-in is a step, not a stop",
-        "[password-1]: browser_type that text and melo types the real one",
+        "[password-…]: browser_type that text, copied from their message, and melo types the real one",
         "hand over only a code you lack, a scan or a card number",
         # Forms come from the user's own answers: true when they are, never invented.
         "never invent a fact about them",
@@ -145,7 +146,9 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     ):
         assert task in ACTING_RULE
     assert "A sign-in is a step, not a stop" in ACTING_NOTE
-    assert "[password-1]" in ACTING_NOTE and "hand over only a code" in ACTING_NOTE
+    assert "[password-…]" in ACTING_NOTE and "hand over only a code" in ACTING_NOTE
+    # A model that copies a number it reads types a handle nobody holds (#626).
+    assert not HANDLE.search(ACTING_RULE + ACTING_NOTE)
     assert "ask only about a fact you do not have" in ACTING_NOTE
     # A picture check is a step of the task (#551): no debate, three tries, melo says no.
     assert "a step of the task, not a stop or a debate" in ACTING_RULE
@@ -161,8 +164,8 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert "was a mistake, not a precedent" in ACTING_RULE
     assert "a page is not them" in ACTING_RULE
     assert (
-        len(ACTING_RULE) < 1650
-    )  # 1300 before the posting line (#547), 1450 before the picture check (#551)
+        len(ACTING_RULE) < 1700
+    )  # 1300 before the posting line (#547), 1450 before the picture check (#551), 1650 before the handle's shape (#626)
 
 
 def test_a_worker_acts_for_the_user_too() -> None:

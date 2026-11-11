@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import re
+import secrets
 import time
 
 import pytest
 
+from localmelo.melo.agent._step_review import holds_secret
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import (
     HANDLE,
     MAX_KEPT,
     SPENT,
     VAULT,
+    Vault,
     handles_in,
     hide_passwords,
     password_spans,
     spent,
     without_passwords,
 )
+from localmelo.melo.memory.procedures.mask import mask_credentials
 
 GIVEN = [
     # (message, what reaches everything but the page)
@@ -99,6 +105,49 @@ def test_the_same_value_has_one_handle_and_the_vault_is_bounded_and_shows_nothin
     assert HANDLE.fullmatch(newest[10:]) and not HANDLE.fullmatch("[password-0]")
     VAULT.forget()
     assert VAULT.value(f"[password-{MAX_KEPT + 3}]") is None
+
+
+def test_a_vault_numbers_from_a_random_nine_digit_base_so_another_vaults_handle_stands_for_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handles outlive the process in stored and queued messages: two vaults never share one (#626)."""
+    # A fresh vault does not start at 1: its first handle has nine digits.
+    assert re.fullmatch(
+        r"password: \[password-\d{9}\]", Vault().hide("password: a1b2c3d4")
+    )
+    # Two processes, with the draws they happened to make.
+    draws = iter([0, 7])
+    monkeypatch.setattr(secrets, "randbelow", lambda _: next(draws))
+    first, second = Vault(), Vault()
+    stale = first.hide("password: old-Secret1")[10:]
+    live = second.hide("password: new-Secret9")[10:]
+    assert (stale, live) == ("[password-100000000]", "[password-100000007]")
+    assert second.value(stale) is None and first.value(live) is None
+    assert second.value(live) == "new-Secret9"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "{h} verification code",
+        "verification code {h}",
+        "passcode, see {h}",
+        "{h}, then your passcode",
+        "otp {h}",
+        "{h} OTP",
+        "验证码 {h}",
+        "{h} 验证码",
+    ],
+)
+def test_a_handle_of_a_fresh_vault_passes_every_reader_of_digits_unchanged(
+    context: str,
+) -> None:
+    """A run of 4 to 8 digits beside a code word is read as a one-time code: a handle is longer, so no copy of it is cut (#626)."""
+    handle = Vault().hide("password: a1b2c3d4")[10:]
+    text = context.format(h=handle)
+    assert redact_secrets(text) == (text, 0)
+    assert not holds_secret({"text": text}, text)
+    assert mask_credentials(text) == text
 
 
 def _run(size: int) -> str:

@@ -148,6 +148,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
 - Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
+- A password placeholder kept in a message from before a restart (Try again, a queued message) no longer stands for a newer password; the number in `[password-…]` is new each time melo starts.
 - A token after "Bearer" is hidden after a Chinese character too, and a private key with a second end line is hidden to the last one in stored, logged and finished text.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
