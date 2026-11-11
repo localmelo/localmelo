@@ -1646,20 +1646,21 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   color: var(--accent);
   animation: pulse 1.4s infinite;
 }
-.tool-card[data-state="success"] .tool-mark {
+/* The live steps panel marks a step by the same states, in the same colours. */
+:is(.tool-card, .activity-step)[data-state="success"] :is(.tool-mark, .activity-mark) {
   color: var(--ok);
 }
-.tool-card[data-state="error"] .tool-mark,
-.tool-card[data-state="timeout"] .tool-mark,
-.tool-card[data-state="crashed"] .tool-mark {
+:is(.tool-card, .activity-step)[data-state="error"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="timeout"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="crashed"] :is(.tool-mark, .activity-mark) {
   color: var(--error);
 }
-.tool-card[data-state="blocked"] .tool-mark,
-.tool-card[data-state="declined"] .tool-mark,
-.tool-card[data-state="interrupted"] .tool-mark,
-.tool-card[data-state="held"] .tool-mark,
-.tool-card[data-state="waiting_approval"] .tool-mark,
-.tool-card[data-state="cancelled"] .tool-mark {
+:is(.tool-card, .activity-step)[data-state="blocked"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="declined"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="interrupted"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="held"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="waiting_approval"] :is(.tool-mark, .activity-mark),
+:is(.tool-card, .activity-step)[data-state="cancelled"] :is(.tool-mark, .activity-mark) {
   color: var(--warn);
 }
 .tool-name {
@@ -2310,10 +2311,8 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .activity-detail { padding: 0 12px 12px 50px; }
 .activity-steps { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: var(--text-small); }
 .activity-step { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; }
-.activity-mark { color: var(--ok); }
+.activity-mark { color: var(--ink-3); }
 .activity-step[data-state="running"] .activity-mark { color: var(--accent); }
-.activity-step[data-state="failed"] .activity-mark { color: var(--error); }
-.activity-step[data-state="declined"] .activity-mark { color: var(--warn); }
 .activity-step-time { color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .activity-output { max-height: 6.4em; margin: 8px 0 0; padding: var(--space-2) var(--space-3); overflow: hidden; border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font: var(--text-caption)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--space-3); }
@@ -2494,7 +2493,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
   .app { grid-template-columns: 64px minmax(0, 1fr) 340px; }
   .sidebar { align-items: center; padding: var(--space-5) var(--space-2) var(--space-3); }
   .brand { padding: 0 0 var(--space-5); }
-  :is(.brand strong, .local-badge, .worker-navigation, .search, .list-heading, .session-title, .session-meta, .session-close, .local-caption) { display: none; }
+  :is(.brand strong, .local-badge, .worker-navigation, .search, .list-heading, .session-title, .session-meta, .session-close, .local-caption, .list-empty) { display: none; }
   .sidebar .nav-button { justify-content: center; padding: var(--space-3) 0; }
   :is(.nav-label, #settings-label, .new-chat kbd) { display: none; }
   .session-list { width: 100%; }

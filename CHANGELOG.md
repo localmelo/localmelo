@@ -103,6 +103,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
 - Calmer task pages, Settings and details: short times, a task's facts on one line, plain words for each tool, and a failed task's card saying why in your language.
 - A blocked step reads the same on its chat card and its task page, also after a reload; a run whose work went on in a newer task says so instead of Needs you everywhere; the Scheduled tab says how each last run really ended.
+- The live steps beside a chat mark a failed, blocked or waiting step as the chat does, a stopped turn's card says its cause once and names Continue when it offers it, and a narrow window hides the empty side-chat note.
 
 ### Terminal
 

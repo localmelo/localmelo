@@ -1645,6 +1645,11 @@ export function toolState(item, {held = "", now = 0} = {}) {
   }
 }
 
+/** A step's words for how it ended (*state* is `toolState`'s): `Reading x` while it runs, `Read x` once done, else what it was to do. */
+export function stepSaid(item, {state}) {
+  return stepWords(item.name, item.arguments, state === "running" ? false : state === "success" ? true : "ask", item.output);
+}
+
 /** `_first_line`: the first non-blank line of *text*, cleaned and collapsed. */
 function firstLine(text) {
   for (const line of cleanOutput(String(text ?? "")).split("\n")) {
