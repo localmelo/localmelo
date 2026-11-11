@@ -281,9 +281,14 @@ def test_a_negation_or_a_relation_is_still_a_word_of_the_note() -> None:
             ["hull"],
         ),
         ("You met Sam on Friday.", "I meet Sam on Monday.", ["friday"]),
-        # A given name that is also a joining word is a value inside a sentence.
+        # A given name that is also a joining word stays a word of the note.
         ("Your dentist is Will Park.", "My dentist is Sam Park.", ["will"]),
         ("Your coach is Per Andersson.", "My coach is Sam Andersson.", ["per"]),
+        # Also as the first word of the note: written with a capital, it stays a word.
+        ("Will Park is your dentist.", "Sam Park is my dentist.", ["will"]),
+        ("Per Andersson coaches you.", "Sam Andersson coaches me.", ["per"]),
+        # A capitalised joining word counts as it did before: one of two, refused.
+        ("Now you live in Leeds.", "I live in Leeds.", ["now"]),
     ],
 )
 def test_a_value_in_another_form_is_still_refused(

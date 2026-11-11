@@ -234,15 +234,17 @@ _FRAMING: Final = frozenset(
 # ("so", "now", "will", "plus", "some", "about"; the "re", "ll" and "ve" a
 # contraction leaves). A negation ("not", "no", "never") turns a fact round, and
 # a word of relation ("over", "after", "before", "since", "off", "under") says
-# how two things stand, so those stay content words. A joining word that is also
-# a given name ("Will Park", "Per Andersson") is a value, and is kept when it is
-# capitalised inside a sentence.
+# how two things stand, so those stay content words. A joining word is skipped
+# only where the note writes it in lower case: one written with a capital
+# anywhere, first word of a sentence included, may be a given name ("Will Park",
+# "Per Andersson") and stays a word that has to be found.
 _JOINING: Final = frozenset(
     ["per", "now", "so", "will", "would", "could", "plus", "some", "currently"]
     + ["including", "about", "around", "re", "ll", "ve"]
 )
 # Past and participle forms that stemming cannot reduce, each with its base, so a
-# note's "kept" finds the user's "keep" (the common irregular verbs only).
+# note's "kept" finds the user's "keep" (the common irregular verbs only). A form
+# that is also a name ("Ran") is compared by its base like any other.
 _IRREGULAR: Final = {
     form: base
     for base, forms in {
@@ -1162,13 +1164,13 @@ def note_terms(text: str, *, joining: bool = False) -> list[str]:
     terms: list[str] = []
     # "the user's name" restates; its "s" is not a word the user typed.
     text = _POSSESSIVE.sub("", _CJK_FRAMING.sub(" ", text))
-    names = _capitalised(text)
+    capitalised = {w.lower() for w in _CASED.findall(text) if w[0].isupper()}
     for term in tokenize(normalise(text)):
         if term.isascii():
             if (
                 term in STOPWORDS
                 or term in _FRAMING
-                or (term in _JOINING and not joining and term not in names)
+                or (term in _JOINING and not joining and term not in capitalised)
             ):
                 continue
             term = _stem(term)
@@ -1247,19 +1249,9 @@ def _flagged(note: str) -> set[str]:
         for span in group
         for word in tokenize(normalise(span))
     ]
-    words += _capitalised(note)
+    for sentence in _SENTENCE.split(note):
+        words += [w.lower() for w in _CASED.findall(sentence)[1:] if w[0].isupper()]
     return {_stem(word) for word in words if word.isascii()}
-
-
-def _capitalised(text: str) -> set[str]:
-    """The lower-case words of *text* that are capitalised without starting a
-    sentence."""
-    return {
-        w.lower()
-        for sentence in _SENTENCE.split(text)
-        for w in _CASED.findall(sentence)[1:]
-        if w[0].isupper()
-    }
 
 
 def _quoted_cjk(note: str) -> set[str]:
