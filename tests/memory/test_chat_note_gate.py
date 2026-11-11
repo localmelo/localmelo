@@ -126,10 +126,16 @@ class Gate:
         self.emitted: list[dict[str, Any]] = []
 
     async def turn(
-        self, typed: str, session_id: str | None = None, *, composed: bool = False
+        self,
+        typed: str,
+        session_id: str | None = None,
+        *,
+        composed: bool = False,
+        origin: str = "",
     ) -> TurnInfo:
         """A turn of *typed* that runs, in a new chat or in *session_id*; one
-        *composed* is melo's text, and the run hands memory no typed words."""
+        *composed* is melo's text, and the run hands memory no typed words; one with
+        an *origin* (``ask_owner``) is not one the person began."""
         info = await self.store.begin_turn(
             session_id,
             typed,
@@ -138,6 +144,7 @@ class Gate:
             typed_text=typed,
             new_session=None if session_id else NewSession(),
             composed=composed,
+            origin=origin,
         )
         words = "" if composed else typed
         await self.memory.before_turn(self.store, info, words, emit=self.emitted.append)
@@ -525,6 +532,71 @@ async def test_a_pointed_turn_the_user_undid_is_no_source(
         "You have an MSc in Robotics at Carnegie Mellon University."
     )
     assert reply.startswith(note_gate.NOT_SUPPORTED)
+
+
+async def test_an_address_in_a_turn_the_user_did_not_begin_points_to_nothing(
+    make: Any,
+) -> None:
+    """A task's question to its owner chat is agent data: an address in it is no
+    pointer, so a page fetched later in the chat is not one the user pointed to."""
+    gate = make("pointed")
+    first = await gate.turn("Which jobs fit me?")
+    await gate.finish(first)
+    asked = await gate.turn(f"Read {URL} for me.", first.session_id, origin="ask_owner")
+    await gate.finish(asked)
+    turn = await gate.turn("Go on.", first.session_id)
+    await gate.fetch(turn)
+    chat = CHAT_TURN.get()
+    assert chat is not None
+    assert await gate.memory._pointed(chat) == []
+    reply = await gate.remember(
+        "You have an MSc in Robotics at Carnegie Mellon University."
+    )
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert await gate.notes() == []
+
+
+async def test_a_read_in_a_turn_the_user_did_not_begin_supports_nothing(
+    make: Any,
+) -> None:
+    """The user typed the host, but the page was read inside a task's question to
+    its owner chat: that read is no material, in that turn or after it."""
+    gate = make("pointed")
+    first = await gate.turn(f"Look at {HOST} later.")
+    await gate.finish(first)
+    asked = await gate.turn(
+        "Which jobs fit the user?", first.session_id, origin="ask_owner"
+    )
+    await gate.fetch(asked)
+    await gate.finish(asked)
+    turn = await gate.turn("Go on.", first.session_id)
+    chat = CHAT_TURN.get()
+    assert chat is not None
+    assert await gate.memory._pointed(chat) == []
+    reply = await gate.remember(
+        "You have an MSc in Robotics at Carnegie Mellon University."
+    )
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert turn.turn == 3 and await gate.notes() == []
+
+
+async def test_a_page_read_in_another_chat_supports_nothing_in_this_one(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    other = await gate.turn(f"Read {URL} and tell me which jobs fit.")
+    await gate.fetch(other)
+    await gate.finish(other)
+    here = await gate.turn(f"Is {URL} up to date?")
+    assert here.session_id != other.session_id
+    chat = CHAT_TURN.get()
+    assert chat is not None
+    assert await gate.memory._pointed(chat) == []
+    reply = await gate.remember(
+        "You have an MSc in Robotics at Carnegie Mellon University."
+    )
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert await gate.notes() == []
 
 
 @pytest.mark.parametrize(
