@@ -230,9 +230,18 @@ MAX_REFUSALS: Final = 2
 # reads "Not remembered:" as a refused step that is free, so a model that goes on
 # calling after the final line pays for each call.
 TRY_ONCE_MORE: Final = " You may try once more; change only what this message names."
+# It asks for the answer first: told only to say what it could not keep, a model
+# answered with that one sentence and left the person's message unanswered.
 NO_MORE_TRIES: Final = (
-    "Not remembered. Do not try to save this note again in this turn; tell the user "
-    "in one sentence what you could not keep."
+    "Not remembered. Do not try to save this note again in this turn. Answer the "
+    "user's message, and add one sentence saying what you could not keep."
+)
+# What ``remember`` adds when the model sends it a note it was already answered
+# "Remembered" or "Already remembered" for in this turn: the model is repeating
+# itself (on a small local model such repeats went on until the turn ended with no
+# answer), so the tool takes no more calls in this turn.
+SAVED_THIS_TURN: Final = (
+    " It is saved. Do not call remember again in this turn; go on with your answer."
 )
 _BATCH: Final = 16
 # The size of the window a chat is encoded in, and the file in the memory folder
@@ -469,6 +478,10 @@ class ChatTurn:
     # How many of the model's notes ``remember`` refused in this turn (a kept note
     # does not take one back); at :data:`MAX_REFUSALS` it refuses without looking.
     refusals: int = 0
+    # The notes ``remember`` answered "Remembered" or "Already remembered" for in
+    # this turn, and whether the model sent one of them again.
+    saved: set[str] = field(default_factory=set)
+    repeated: bool = False
     # The reply said it noted something and no note was kept (``keep_claims``).
     unsaved_claim: bool = False
     # The oldest turn of this chat the model's window holds (None: not known).
@@ -486,6 +499,12 @@ class ChatTurn:
     def out_of_tries(self) -> bool:
         """Whether ``remember`` has refused :data:`MAX_REFUSALS` notes in this turn."""
         return self.refusals >= MAX_REFUSALS
+
+    @property
+    def closed(self) -> bool:
+        """Whether ``remember`` takes no more calls in this turn: it is out of tries,
+        or the model sent again a note this turn's ``remember`` already saved."""
+        return self.out_of_tries or self.repeated
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -1753,6 +1772,9 @@ class ChatMemory:
         A turn gets :data:`MAX_REFUSALS` refusals. The first says the model may try
         once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
         answers :data:`NO_MORE_TRIES` with no check run (:attr:`ChatTurn.refusals`).
+        A note sent again that this turn's ``remember`` already saved is answered
+        "Already remembered" with :data:`SAVED_THIS_TURN`, and the tool takes no
+        more calls in the turn (:attr:`ChatTurn.closed`).
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -1820,6 +1842,10 @@ class ChatMemory:
                 embed_model=model,
             )
         if not written:
+            if note in turn.saved:
+                turn.repeated = True
+                return f"Already remembered: {note}{SAVED_THIS_TURN}"
+            turn.saved.add(note)
             return f"Already remembered: {note}"
         label = ""
         if admission.source != note_gate.TYPED:
@@ -1831,6 +1857,7 @@ class ChatMemory:
                 label += f", from {note_gate.name_of(admission.ref)}"
             label += ")"
         turn.kept.extend(written)
+        turn.saved.add(note)
         turn.publish()
         return f"Remembered{label}: {note} The user sees it and can undo it."
 
@@ -3538,12 +3565,13 @@ class MemoryTools(BaseToolProvider):
     async def remember(
         self, text: str = "", topic: str = "", **_: Any
     ) -> str | ToolOutput:
-        """The reply of :meth:`ChatMemory.remember`; once the turn is out of tries
-        the tool takes no more calls in this run (``ToolOutput.no_more_calls``),
-        which the turn's own count says, not the reply's words."""
+        """The reply of :meth:`ChatMemory.remember`; once the turn is out of tries,
+        or the model sends again a note the turn already saved, the tool takes no
+        more calls in this run (``ToolOutput.no_more_calls``), which the turn's own
+        record says (:attr:`ChatTurn.closed`), not the reply's words."""
         reply = await self._memory.remember(str(text), str(topic))
         turn = CHAT_TURN.get()
-        if turn is not None and turn.out_of_tries:
+        if turn is not None and turn.closed:
             return ToolOutput(text=reply, no_more_calls=True)
         return reply
 
