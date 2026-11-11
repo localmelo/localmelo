@@ -161,7 +161,7 @@ def step_words(categories: list[str]) -> str:
 
 
 def go_ahead_text(categories: list[str]) -> str:
-    """The person's message Allow once sends (decision 7)."""
+    """melo's own message Allow once sends (decision 7): never the person's words."""
     return t("auto.goAhead", what=step_words(categories))
 
 

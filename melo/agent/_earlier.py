@@ -53,8 +53,11 @@ def _quoted(line: str) -> str:
 
 
 def _turn_lines(user: str, answer: str) -> str:
-    said = redact_secrets(_clip(user, EARLIER_USER_CHARS))[0]
+    """One turn's lines; ``""`` for a turn with neither words nor an answer."""
     reply = _clip(split_thinking(answer)[1], EARLIER_ANSWER_CHARS)
+    if not user.strip():  # nothing the user said: the answer alone shows
+        return _quoted(f"- melo: {redact_secrets(reply)[0]}") if reply else ""
+    said = redact_secrets(_clip(user, EARLIER_USER_CHARS))[0]
     lines = [_quoted(f"- the user: {said}")]
     if reply:
         lines.append(_quoted(f"  melo: {redact_secrets(reply)[0]}"))
@@ -85,13 +88,14 @@ def earlier_block(turns: Sequence[tuple[str, str]]) -> str:
     side is put on one line and cut (the user's words at
     :data:`EARLIER_USER_CHARS`, the answer, without its thinking, at
     :data:`EARLIER_ANSWER_CHARS`), with secrets redacted; a turn with no user
-    words is left out. Older turns are left out until the block fits
+    words shows its answer alone (``- melo: ...``), and one with neither is
+    left out. Older turns are left out until the block fits
     :data:`EARLIER_BLOCK_CHARS`. ``""`` when no turn is left.
     """
     kept = [
-        _turn_lines(user, answer)
+        lines
         for user, answer in turns[-EARLIER_TURNS:]
-        if user.strip()
+        if (lines := _turn_lines(user, answer))
     ]
     while kept:
         block = "\n".join([EARLIER_HEAD, *kept, EARLIER_END])

@@ -719,6 +719,13 @@ def test_the_first_task_is_not_put_in_twice() -> None:
     assert reviewer.earlier == ()
 
 
+def test_a_blank_earlier_word_takes_no_place_among_the_newest() -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.earlier_words(["one", "two", ""])  # the third is a go-ahead turn's
+    reviewer.user_message("now")
+    assert reviewer.requests == ("one", "two", "now")
+
+
 @pytest.mark.asyncio
 async def test_a_first_task_that_is_not_text_is_refused(tmp_path: Path) -> None:
     llm = FakeModel([], [])

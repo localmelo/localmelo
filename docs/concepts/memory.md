@@ -6,7 +6,7 @@ In the web console and the app, today:
 
 - melo keeps a note about you when you ask it to, or when it judges one worth keeping; a line under your message says `Remembered: … · Undo`.
 - The **Memory** tab lists the notes, and you can reword or forget any of them.
-- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up; `Used … memory` under your message shows each source.
+- Before it answers, melo recalls notes and earlier chats by words, and by meaning when an embedding model is set up (without one, your chat model picks among the notes the words find); `Used … memory` under your message shows each source.
 
 ## What localmelo remembers
 
@@ -73,7 +73,7 @@ What code checks before a note is kept:
 
 **Recall.** Before a message goes to the model, melo searches both files and adds what it finds, quoted, with where it came from.
 
-- It searches by words always (BM25 over words and Chinese characters), and by meaning too when an embedding model is set up (see [Set up an embedding model](../guides/embedding.md); for example Qwen3-Embedding-0.6B on the same oMLX server as the chat model).
+- It searches by words always (BM25 over words and Chinese characters), and by meaning too when an embedding model is set up (see [Set up an embedding model](../guides/embedding.md); for example Qwen3-Embedding-0.6B on the same oMLX server as the chat model). Without one, your chat model picks among the notes the words find.
 - At most 3 notes and 2 earlier turns of other chats, within 4000 characters (a turn takes up to 900 of them), are added once to the end of your message.
 
 ```text
@@ -220,10 +220,10 @@ With `recall_source = "auto"` (a developer setting) melo encodes in the idle tim
 
 | Value | How it finds notes | What it costs |
 |---|---|---|
-| `auto` (default) | By words, and by meaning too when an embedding model is set up. | One small embedding request per message, with the 1.5 s limit above. Nothing extra without an embedding model. |
+| `auto` (default) | By words, and by meaning too when an embedding model is set up. With no embedding model and a chat model set up, the same as `llm`; with neither, by words only. | With an embedding model: one small embedding request per message, with the 1.5 s limit above. Without one: one chat request per message that shares a word with a note or earlier chat, about a second with a thinking model, and the words alone if it takes over 4 s. |
 | `bm25` | By words only. | Nothing: no model request at all. It misses a question that shares no word with the note. |
 | `embedding` | The same as `auto` with a model; `melo serve` refuses to start without one. | The same as `auto`. |
-| `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. |
+| `llm` | Words pick up to 20 notes and turns that share a word with the message, and the chat model (the one you chat with, on the same server) chooses the relevant ones. No embedding model is used. | One extra chat request per message that has any candidate, up to 4 s of waiting; it reads about 20 short lines and answers with a few ids. On a timeout, an error or a reply it cannot read, the message is searched by words alone. A question that shares no word with a note finds nothing. With a hosted chat model those lines go to that service, as the recalled ones already do. |
 
 Every recall is timed. The page shows nothing new, but the `turn.memory` event of each turn has a `recall` object:
 
@@ -295,7 +295,7 @@ The context pack:
 - It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
 - In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out. Notes of one subject with different values are ordered and marked as in the recall block (the notes of yours first, the older ones marked), so when the characters run short a note from a page, a file or a task's result goes before yours.
 - Never in it: People and Decisions notes. A worker browses and calls outside tools, so it gets the least that it needs.
-- At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. Building it asks no chat model; with an embedding model set up, the objective is matched by meaning too, with the 1.5 s limit above.
+- At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. The notes that match the objective are found as a message's recall finds them: by meaning too with an embedding model set up (the 1.5 s limit above), or, without one, by the chat model's choice among the word matches (the 4 s limit below).
 
 ### A task reads its project's own instruction file
 
@@ -324,7 +324,7 @@ The **Memory** tab of the console's panel, `/memory` in the terminal and `melo m
 
 The **Memory** tab:
 
-- The switch **Remember across chats** turns memory on or off (`[memory] across_chats`); a line under it says how melo searches: by meaning with the embedding model and by words, or by words only.
+- The switch **Remember across chats** turns memory on or off (`[memory] across_chats`); a line under it says how melo searches: by meaning with the embedding model and by words, or by words with your chat model picking the notes that matter.
 - Then come the notes, newest first, each with its topic and where it came from (`From chat “Planning”, Oct 30`); the search box filters the list.
 - **Edit** rewords a note; **Delete** asks `Forget this note?` first.
 - **Forget everything…** names what goes (the notes and melo's search index of your chat turns; your chats stay) with `Keep everything` as the first answer.
@@ -337,7 +337,7 @@ The other places:
 |---|---|
 | In the terminal | `/memory` lists the notes (type to filter). Enter on a note offers `Back`, `Edit it` and `Delete it`; the last row, `Forget everything…`, names what goes and offers `Keep everything` first. `/memory window` shows what it used to: the model's working window. |
 | On the command line | `melo memory list [-n N]` prints the notes. `melo memory forget [ID] [-y]` forgets one or, with no ID, everything after a question (a list on a terminal, a number when input is piped; `-y` skips it). `melo memory status` says whether memory is on, how many notes and indexed turns there are, and how it searches. `melo memory reindex` rebuilds the chat index from your chats and gives every note a vector of the embedding model now set. |
-| Setup | `melo setup` and the console's Settings ask `Remember across chats with <model>?` when the server lists an embedding model; `Yes, with it` saves it after one embeddings probe, and `No, by words only` leaves memory on without it. Without a listed model they say so plainly: melo remembers across chats by words only. |
+| Setup | `melo setup` and the console's Settings ask `Remember across chats with <model>?` when the server lists an embedding model; `Yes, with it` saves it after one embeddings probe, and `No, without it` leaves memory on without it. Without a listed model they say so plainly: melo remembers across chats by words. |
 
 - **A note outlives its chat.** Deleting a chat removes its entries from the chat index but keeps the notes it made, which then read `From a deleted chat, Oct 30`, because what melo learned about you does not stop being true when the chat is gone. When the chat has notes, the console asks `Also forget the 2 notes from this chat?` with `Keep the notes` first.
 - **Rewording and deleting are final.** A reworded note replaces the old wording in place (the old text is overwritten, not kept as history) and is embedded again; a wording that looks like a password or key is refused.

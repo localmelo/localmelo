@@ -777,6 +777,7 @@ class CliSession:
         *,
         typed_text: str | None = None,
         attachments: tuple[Attachment, ...] = (),
+        composed: bool = False,
     ) -> None:
         started = self._clock()
         runner = self.runner
@@ -819,6 +820,7 @@ class CliSession:
                 text,
                 approval=self.approvals.policy(),
                 title=text if typed_text is None else typed_text,
+                composed=composed,
                 **kwargs,
             )
         except _StoppedBeforeSendError:
@@ -1636,6 +1638,8 @@ class CliSession:
         # An older turn has its files in its text: the words are what comes before
         # them, never a file's text (#626); the person is told the file is left out.
         message = turn.typed_text if staged else words_before_files(turn.user_text)
+        if turn.composed:  # melo's own wording again, as melo's
+            message = turn.user_text
         if not staged and message != turn.user_text:
             self.out.print(
                 self._text(
@@ -1646,7 +1650,12 @@ class CliSession:
             )
         self.renderer.begin_turn(message, first_turn=False)
         self._work = self.spawn(
-            self._turn(message, typed_text=turn.typed_text, attachments=staged)
+            self._turn(
+                message,
+                typed_text=turn.typed_text,
+                attachments=staged,
+                composed=turn.composed,
+            )
         )
 
     def mcp(self) -> None:

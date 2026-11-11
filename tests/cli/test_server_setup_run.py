@@ -180,7 +180,7 @@ def test_each_skip_leaves_out_exactly_its_step(
         assert job.items["melo_serve"].line == "already installed (0.4.0), skipped"
     path = Path(config.config_path())
     assert path.exists() is saved
-    if saved:  # without the embedding model, memory goes by words only
+    if saved:  # without the embedding model, memory goes by words
         assert config.load().embedding_backend == (
             "melo_serve" if EMBED in picks else "none"
         )
