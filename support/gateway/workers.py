@@ -449,7 +449,7 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
     own = typed or words_of(objective)
-    if _melos_card(text):
+    if _melos_card(text) or record.card_by == "melo":
         return text, own
     words = text.replace(objective, own, 1) if typed or own != objective else None
     said = text if words is None else words
@@ -552,7 +552,7 @@ class TaskInbox:
     """
 
     def __init__(self) -> None:
-        self._items: list[tuple[int, str]] = []
+        self._items: list[tuple[int, str, str]] = []
         self._next = 0
         # What the run read, in order: the person's words, asked of the task too.
         self.read: list[str] = []
@@ -560,20 +560,27 @@ class TaskInbox:
     def validate(self, workspace: str | None = None) -> None:
         return None
 
-    def put(self, text: str) -> None:
+    def put(self, text: str, by: str = "person") -> None:
+        """Queue *text*, worded by the person or by ``"melo"`` (Allow once's go-ahead)."""
         self._next += 1
-        self._items.append((self._next, text))
+        self._items.append((self._next, text, by))
 
     def poll(self) -> list[tuple[int, str]]:
-        return list(self._items)
+        return [(at, text) for at, text, _ in self._items]
+
+    def melos(self, offset: int) -> bool:
+        return any(at == offset and by == "melo" for at, _, by in self._items)
 
     def accept(self, offset: int) -> None:
-        self.read += [text for at, text in self._items if at == offset]
+        # What melo worded is no words the person said.
+        self.read += [t for at, t, by in self._items if at == offset and by != "melo"]
         self._items = [item for item in self._items if item[0] != offset]
 
-    def drain(self) -> list[str]:
-        items, self._items = self._items, []
-        return [text for _, text in items]
+    def drain(self, by: str = "person") -> list[str]:
+        """The messages the run never read that *by* worded; the others stay."""
+        taken = [text for _, text, who in self._items if who == by]
+        self._items = [item for item in self._items if item[2] != by]
+        return taken
 
 
 class _WorkerLLM(GatedLLM):
@@ -1197,8 +1204,14 @@ class TaskWorkers:
         level: int | None = None,
         reason: str = "",
         same_job: bool = False,
+        by: str = "person",
     ) -> tuple[dict, str]:
-        """Give *task_id* the person's message; the task's body and what happened.
+        """Give *task_id* the message *text*; the task's body and what happened.
+
+        *by* says who worded it: the ``person`` (default) or ``melo`` (Allow once's
+        go-ahead), which the task reads but no reader takes for the person's words;
+        melo's wording is never the answer to a question the task waits on, it is
+        queued for the run as melo's.
 
         ``queued``: a task that has not finished reads it at its next step
         (a paused one when it resumes). ``answered``: it waited on an answer,
@@ -1214,8 +1227,10 @@ class TaskWorkers:
         (:meth:`successor`, ``Front.follow``). With *same_job* a task that
         finished its job raises it too, whoever started it.
 
-        Any message here is the person's, and lifts the refusal of steps
-        blocked earlier that a chat's own continue set (``meta.followup_guard``).
+        Any message here, melo's go-ahead too, lifts the refusal of steps blocked
+        earlier that a chat's own continue set (``meta.followup_guard``): a fresh
+        decision, not an allowance. It also counts as a newer message for the step
+        review, which takes no words from it.
         """
         text = text.strip()
         if not text:
@@ -1227,8 +1242,12 @@ class TaskWorkers:
         if task_id in self._quarantined:
             raise TaskStoreError("worker cleanup failed; slot held until restart")
         await self._set_guard(task_id, False)
-        if self.owner is not None and await self.owner.reply(task_id, text):
-            # It waited on an answer: the person's words are the answer.
+        # Only the person's words answer a question; melo's go-ahead queues instead.
+        if (
+            by == "person"
+            and self.owner is not None
+            and await self.owner.reply(task_id, text)
+        ):
             return await self.get(task_id), "answered"
         async with self._lock:
             if self._closed:
@@ -1239,7 +1258,9 @@ class TaskWorkers:
             if current.state in _CONTINUABLE:
                 if await self.one_time(task_id):
                     raise JobFinishedError("it ended; a chat's worker runs once")
-                record = await self._continue(current, text, level=level, reason=reason)
+                record = await self._continue(
+                    current, text, level=level, reason=reason, by=by
+                )
                 await self._schedule()
                 return await self._body(record), "continued"
             if current.state in TERMINAL_PHASES:
@@ -1248,7 +1269,7 @@ class TaskWorkers:
                 raise TaskStoreError(
                     "it was stopped by a restart; resume it from its page first"
                 )
-            self._inboxes.setdefault(task_id, TaskInbox()).put(text)
+            self._inboxes.setdefault(task_id, TaskInbox()).put(text, by)
             return await self._body(current), "queued"
 
     async def one_time(self, task_id: str) -> bool:
@@ -1437,8 +1458,9 @@ class TaskWorkers:
         """Allow once a step auto mode blocked in *task_id*, and ask it to go ahead.
 
         The block is found in the task's records; the allowance is kept in
-        the task's :class:`AutoPolicy`, and the message goes as the person's
-        (:meth:`message`): queued for a running task, or continuing one that
+        the task's :class:`AutoPolicy`, and the message goes as melo's own wording
+        (:meth:`message`, ``by="melo"``): queued for a running task (also one that
+        waits on a question: it does not answer it), or continuing one that
         stopped before its job was done. :class:`BlockError` for an unknown
         block, one that cannot be allowed (also when its job went on in a newer
         task, #571), or one allowed already (it ran on its allowance, or one
@@ -1458,7 +1480,9 @@ class TaskWorkers:
         policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
         policy.allow_once(key, categories, tool)
         try:
-            return await self.message(task_id, go_ahead_text(categories), same_job=True)
+            return await self.message(
+                task_id, go_ahead_text(categories), same_job=True, by="melo"
+            )
         except JobFinishedError:
             policy.withdraw(key)
             record = await self.tasks.get_task(task_id)
@@ -1712,7 +1736,13 @@ class TaskWorkers:
         return await self.message(record.task_id, text)
 
     async def _continue(
-        self, current: TaskRecord, text: str, *, level: int | None, reason: str
+        self,
+        current: TaskRecord,
+        text: str,
+        *,
+        level: int | None,
+        reason: str,
+        by: str = "person",
     ) -> TaskRecord:
         """Queue the finished *current* again with *text* as its next turn; under the lock."""
         task_id = current.task_id
@@ -1732,7 +1762,12 @@ class TaskWorkers:
             [words_before_files(text)], continued=True, ran_before=ran
         )
         record = await self.tasks.reopen(
-            task_id, text, level=level, reason=reason, finishing=finishing
+            task_id,
+            text,
+            level=level,
+            reason=reason,
+            finishing=finishing,
+            by="melo" if by == "melo" else "",
         )
         self._register(record)
         self._eligible.add(task_id)
@@ -2903,7 +2938,8 @@ class TaskWorkers:
         launch_committed = execution_id is not None
         turn_started = False
         post_fence_failure = False
-        unread: list[str] = []
+        unread: list[str] = []  # the person's messages the run never read
+        melos: list[str] = []  # and melo's own wording (Allow once's go-ahead)
         tool_token: contextvars.Token[Any] | None = None
         process_token: contextvars.Token[Any] | None = None
         try:
@@ -3243,7 +3279,7 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
-                            composed = _melos_card(text)
+                            composed = _melos_card(text) or record.card_by == "melo"
                             continued = await self.tasks.continued(task_id)
                             if (
                                 continued is not None
@@ -3463,10 +3499,10 @@ class TaskWorkers:
                         and task_id not in self._invalid_workspace
                         and task_id not in self._stopping
                     ):
-                        unread = inbox.drain()
+                        unread, melos = inbox.drain(), inbox.drain("melo")
                     if followed is not None and followed.mode != task_mode:
                         await self._keep_mode(task_id, followed.mode)
-                    if not unread:
+                    if not (unread or melos):
                         # Finished: its allowances go, used or not (#339).
                         self._auto.pop(task_id, None)
                     try:
@@ -3504,12 +3540,14 @@ class TaskWorkers:
                 self._runners.pop(task_id, None)
                 self._runs.pop(task_id, None)
                 self._live.pop(task_id, None)
-                if unread and not self._closed:
+                if (unread or melos) and not self._closed:
                     # Messages that came after the run's last step: the task
-                    # goes on with them as its next turn. A chat's worker runs
-                    # once (#571): its job goes on in a successor instead, once
-                    # this lock is free, with what was allowed once and not used
-                    # (its go-ahead is among the messages).
+                    # goes on with them as its next turn: the person's, or melo's
+                    # go-ahead alone. A chat's worker runs once (#571): its job
+                    # goes on in a successor instead, once this lock is free,
+                    # with what was allowed once and not used. Melo's go-ahead
+                    # that came with the person's messages stays melo's: it goes
+                    # into the next run's inbox, never into their words.
                     try:
                         current = await self.tasks.get_task(task_id)
                         if current.state not in _CONTINUABLE:
@@ -3517,13 +3555,18 @@ class TaskWorkers:
                         elif await self.one_time(task_id):
                             going_on = (
                                 current,
-                                "\n\n".join(unread),
+                                "\n\n".join(unread or melos),
                                 self._auto.pop(task_id, None),
                             )
                         else:
                             await self._continue(
-                                current, "\n\n".join(unread), level=None, reason=""
+                                current,
+                                "\n\n".join(unread or melos),
+                                level=None,
+                                reason="",
+                                by="person" if unread else "melo",
                             )
+                            self._hand_melos(task_id, unread, melos)
                     except Exception:
                         log.exception(
                             "Task %s could not go on with its messages", task_id
@@ -3532,12 +3575,24 @@ class TaskWorkers:
             if going_on is not None:
                 ended, text, allowed = going_on
                 try:
-                    await self.successor(ended, text, by="person", auto=allowed)
+                    body, _ = await self.successor(
+                        ended, text, by="person" if unread else "melo", auto=allowed
+                    )
+                    self._hand_melos(body["task_id"], unread, melos)
                 except Exception as exc:
                     log.exception("Task %s could not go on with its messages", task_id)
                     with contextlib.suppress(Exception):
                         if self.on_unsent is not None:
                             await self.on_unsent(ended, str(exc) or type(exc).__name__)
+
+    def _hand_melos(
+        self, task_id: str, unread: builtins.list[str], melos: builtins.list[str]
+    ) -> None:
+        """Melo's go-ahead that came with the person's messages goes into the next run's inbox."""
+        if unread and melos:
+            inbox = self._inboxes.setdefault(task_id, TaskInbox())
+            for text in melos:
+                inbox.put(text, "melo")
 
     async def _cut_off(self, task_id: str) -> None:
         """Leave a run the gateway stop cut off where the next start continues it.
@@ -3729,7 +3784,7 @@ class TaskWorkers:
         # A continued task's message is asked too (a park's card is not one,
         # nor its chat's own note: only the person's words ask, #411).
         continued = bool(record.card) and not record.card.startswith(CARD_START)
-        if continued and NOTE_START not in record.card:
+        if continued and NOTE_START not in record.card and record.card_by != "melo":
             # The card carries the request when the task never ran: its words only.
             words = _turn_text(record)[1]
             said.append(record.card if words is None else words)

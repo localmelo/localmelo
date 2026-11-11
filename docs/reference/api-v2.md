@@ -777,7 +777,8 @@ Tools run with the user's permissions, not in a sandbox.
   only when set and never accepted in a request: `context_pack` (the notes),
   `own_words` (what the person typed, when the objective does not hold it),
   `chat_turns` (the starting chat's newest earlier turns, `- the user: …` with
-  an indented `melo: …` line each) and `chat_picked` (one `- ` line for each
+  an indented `melo: …` line each; a turn a press of the person's began, such as
+  Allow once, is a `- melo: …` line alone) and `chat_picked` (one `- ` line for each
   thing that chat's turn opened, searched or recalled). The task reads them as
   data after its request; the task page folds them under "What melo told the
   task".
@@ -1540,7 +1541,7 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 The chat's internal turn is a turn with `"origin": "ask_owner"` (the key is
 absent on the person's turns, in the turn row and in `turn.started`), empty
 typed text and the question as its user text. A turn whose text is not what a person typed (where a
-stopped task goes on, the restart's check, the request of a task another agent or a channel made) has
+stopped task goes on, the restart's check, the go-ahead Allow once sends in a chat, the request of a task another agent or a channel made) has
 `"composed": true`, absent otherwise, in the turn row and in `turn.started`. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
 "owner" | "person"}` while it waits, else `null`.
 
@@ -2297,7 +2298,7 @@ folders fails, and its output starts with a line that says so.
 ### POST /api/sessions/{id}/blocks/{request_id}/allow
 
 Allow once the step blocked with `approval.request_id` *request_id*, and send
-the person's message that asks melo to go ahead.
+melo's own message that asks it to go ahead.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blocks/5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69/allow
@@ -2313,7 +2314,8 @@ the person's message that asks melo to go ahead.
   it. The retried call is recorded with origin `user` and
   `allowance: "once"`.
 - The message (in the console's language) starts a turn as
-  `POST /api/sessions/{id}/turns` does; 202 with that turn.
+  `POST /api/sessions/{id}/turns` does; 202 with that turn, which has
+  `composed: true`: its text is melo's, not words the person typed.
 - 404 `not_found` for no such block in this chat; 409 `not_allowable` for a
   step that changes localmelo itself or a call a stopped turn did not run;
   409 `already_allowed` once the step ran on an allowance after the block,
