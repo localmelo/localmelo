@@ -13,9 +13,10 @@ inference), which no level writes now and recall still reads.
   fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
   address or file name the user typed, or that the user's words in that turn call
   theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
-  at an address the user gave when they called a page theirs and a note of their own
-  kept that (:func:`given_places`), since the phrase alone never points to a page the
-  model chose. A page the user did not point to is no source at
+  at the address of a sentence that called a page theirs and gave one address, which
+  a note of their own words kept and they did not edit (:func:`given_places`), since
+  the phrase alone never points to a page the model chose. A page the user did not
+  point to is no source at
   any level, and a page the user called someone else's supports no note about the
   user.
 - ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
@@ -276,14 +277,16 @@ def typed_places(text: str) -> list[Place]:
 
 
 def given_places(quote: str) -> list[Place]:
-    """The places a note of the user's own gives for "my website": those of its *quote*
-    (the sentence the user typed for it) when that calls a page theirs
-    (:data:`THEIRS`) and none someone else's, else none. The host of an e-mail
-    address is no place."""
+    """The place a note of the user's own gives for "my website": the one address of
+    its *quote* (the sentence the user typed for it) when that calls a page theirs
+    (:data:`THEIRS`), calls none someone else's and, with e-mail addresses left out,
+    names exactly one place; else none. A sentence with two addresses gives none:
+    which one is whose is not read out of a sentence."""
     folded = fold(quote)
     if _THEIRS.search(folded) is None or _OTHERS.search(folded) is not None:
         return []
-    return typed_places(_EMAIL.sub(" ", quote))
+    named = set(typed_places(_EMAIL.sub(" ", quote)))
+    return list(named) if len(named) == 1 else []
 
 
 def _covers(typed: Place, page: Place) -> bool:

@@ -519,6 +519,18 @@ def test_the_places_the_user_typed(words: str, places: list[tuple[str, str]]) ->
         # whose is not read out of a sentence.
         ("My website is jane.example.com and Bob's site is bob.example.org.", []),
         ("我的网站是 jane.example.com，朋友的网站是 bob.example.org。", []),
+        # One address is the place; the same address said twice is still one.
+        ("My site is jane.example.com (jane.example.com).", [("jane.example.com", "")]),
+        # A sentence with two addresses gives none, whoever's the second is called.
+        (
+            "My site is at https://jane.example.com/blog and Bob's is bob.example.org.",
+            [],
+        ),
+        ("My site is at jane.example.com and Bob runs a blog at bob.example.org.", []),
+        ("My site is jane.example.com, not bob.example.org.", []),
+        ("My site is jane.example.com and my blog is jane.example.com/blog.", []),
+        # One address, but the sentence calls a page someone else's.
+        ("Bob's blog is at bob.example.org, nicer than my blog.", []),
         ("I run a site at jane.example.com.", []),
         ("", []),
     ],

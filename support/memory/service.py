@@ -1986,8 +1986,10 @@ class ChatMemory:
         ``tool.started`` with its ``tool.finished`` output, in turns the user began
         and did not undo, the turn under way included. The places that "my website"
         may stand for are those a note the person's own words made gives
-        (:func:`note_gate.given_places`: the address they typed when they called a
-        page theirs); a note kept from a page, a file or a result gives none."""
+        (:func:`note_gate.given_places`: the one address of the sentence they typed
+        when they called a page theirs); a note kept from a page, a file or a result
+        gives none, and neither does one they edited by hand (its quote is the
+        edited wording, not a sentence they typed in a chat)."""
         typed: dict[int, str] = {}
         for earlier in await turn.store.list_turns(turn.info.session_id):
             if earlier.turn < turn.info.turn and not (
@@ -2019,7 +2021,7 @@ class ChatMemory:
         own = [
             place
             for entry in active
-            if records.by_person(entry)
+            if records.by_person(entry) and not entry.provenance.get("edited")
             for place in note_gate.given_places(
                 str(entry.provenance.get("quote") or "")
             )
