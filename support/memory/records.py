@@ -230,6 +230,74 @@ _FRAMING: Final = frozenset(
         "when",
     ]
 )
+# Joining words: they state no relation, so a paraphrase may add or drop them
+# ("so", "now", "will", "plus", "some", "about"; the "re", "ll" and "ve" a
+# contraction leaves). A negation ("not", "no", "never") turns a fact round, and
+# a word of relation ("over", "after", "before", "since", "off", "under") says
+# how two things stand, so those stay content words. A joining word is skipped
+# only where the note writes it in lower case: one written with a capital
+# anywhere, first word of a sentence included, may be a given name ("Will Park",
+# "Per Andersson") and stays a word that has to be found.
+_JOINING: Final = frozenset(
+    ["per", "now", "so", "will", "would", "could", "plus", "some", "currently"]
+    + ["including", "about", "around", "re", "ll", "ve"]
+)
+# Past and participle forms that stemming cannot reduce, each with its base, so a
+# note's "kept" finds the user's "keep" (the common irregular verbs only). A form
+# that is also a name ("Ran") is compared by its base like any other.
+_IRREGULAR: Final = {
+    form: base
+    for base, forms in {
+        "be": "was were been",
+        "begin": "began begun",
+        "bring": "brought",
+        "build": "built",
+        "buy": "bought",
+        "catch": "caught",
+        "choose": "chose chosen",
+        "come": "came",
+        "do": "did done",
+        "drive": "drove driven",
+        "eat": "ate eaten",
+        "feel": "felt",
+        "find": "found",
+        "fly": "flew flown",
+        "forget": "forgot forgotten",
+        "get": "got gotten",
+        "give": "gave given",
+        "go": "went gone",
+        "grow": "grew grown",
+        "have": "had",
+        "hear": "heard",
+        "hold": "held",
+        "keep": "kept",
+        "know": "knew known",
+        "lead": "led",
+        "leave": "left",
+        "lose": "lost",
+        "make": "made",
+        "mean": "meant",
+        "meet": "met",
+        "pay": "paid",
+        "ride": "rode ridden",
+        "run": "ran",
+        "see": "saw seen",
+        "sell": "sold",
+        "send": "sent",
+        "sit": "sat",
+        "sleep": "slept",
+        "speak": "spoke spoken",
+        "spend": "spent",
+        "stand": "stood",
+        "take": "took taken",
+        "teach": "taught",
+        "think": "thought",
+        "understand": "understood",
+        "wear": "wore worn",
+        "write": "wrote written",
+    }.items()
+    for form in forms.split()
+}
 # Terms that are values: a change in one is a different fact. A word is a value
 # when it has a digit, is a number word or a weekday, is capitalised inside a
 # sentence or sits in a quoted span. A Chinese or Japanese character or pair is
@@ -893,7 +961,7 @@ def claimed(answer: str) -> str | None:
             return ""
         if _TO_USER.search(note):
             return note
-        if len(note_terms(note)) >= CLAIM_TERMS:
+        if len(note_terms(note, joining=True)) >= CLAIM_TERMS:
             return note if _STATEMENT.search(note) else ""
     return "" if _BARE.search(text) else None
 
@@ -1085,18 +1153,25 @@ def said(typed: str) -> tuple[tuple[str, str], ...]:
 
 
 def _stem(word: str) -> str:
-    """*word* without its endings, twice, so "meetings" finds "meets"."""
-    return stem(stem(word))
+    """*word* without its endings, twice, so "meetings" finds "meets"; an
+    irregular verb form is its base ("kept" is "keep")."""
+    return stem(stem(_IRREGULAR.get(word, word)))
 
 
-def note_terms(text: str) -> list[str]:
-    """The content words a note must find in the evidence, in order."""
+def note_terms(text: str, *, joining: bool = False) -> list[str]:
+    """The content words a note must find in the evidence, in order; with
+    *joining*, the joining words (:data:`_JOINING`) are counted too."""
     terms: list[str] = []
     # "the user's name" restates; its "s" is not a word the user typed.
     text = _POSSESSIVE.sub("", _CJK_FRAMING.sub(" ", text))
+    capitalised = {w.lower() for w in _CASED.findall(text) if w[0].isupper()}
     for term in tokenize(normalise(text)):
         if term.isascii():
-            if term in STOPWORDS or term in _FRAMING:
+            if (
+                term in STOPWORDS
+                or term in _FRAMING
+                or (term in _JOINING and not joining and term not in capitalised)
+            ):
                 continue
             term = _stem(term)
         elif _CJK_FILLER.intersection(term):
@@ -1125,8 +1200,9 @@ def _missing(note: str, evidence: Sequence[str]) -> list[str]:
     """The content words of *note* that none of the *evidence* texts holds.
 
     A word counts when the evidence has it after stemming, or a word at most
-    two letters longer that starts with it ("named" finds "name"); the words a
-    note adds to restate a fact ("The user prefers…") need not be found.
+    two letters longer that starts with it ("named" finds "name"), or, for an
+    adverb, its base ("fluently" finds "fluent"); the words a note adds to
+    restate a fact ("The user prefers…") need not be found.
     """
     words = _evidence(evidence)
     ascii_words = [w for w in words if w.isascii()]
@@ -1139,7 +1215,24 @@ def _missing(note: str, evidence: Sequence[str]) -> list[str]:
             and len(term) >= 3
             and any(w.startswith(term) and len(w) <= len(term) + 2 for w in ascii_words)
         )
+        and not any(base in words for base in _adverb_bases(term))
     ]
+
+
+def _adverb_bases(term: str) -> list[str]:
+    """The bases an adverb in "-ly" can come from, stemmed like the evidence:
+    "fluently" from "fluent", "happily" from "happy", "basically" from "basic".
+    A base has at least four letters, so "apply" is not "app", and a word in
+    "-ily" has only the base in "-y" ("family" is not "fami")."""
+    if not (term.isascii() and term.endswith("ly")):
+        return []
+    if term.endswith("ily"):
+        bases = [term[:-3] + "y"]
+    else:
+        bases = [term[:-2]]
+        if term.endswith("ally"):
+            bases.append(term[:-4])
+    return [_stem(base) for base in bases if len(base) >= 4]
 
 
 def missing_terms(note: str, evidence: Sequence[str]) -> list[str]:
