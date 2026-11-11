@@ -29,6 +29,7 @@ from localmelo.support import config, gateway_endpoint
 from localmelo.support.cli import hanging, main_chat
 from localmelo.support.cli.main_chat import (
     GatewayClient,
+    GatewayError,
     Link,
     MainChat,
     Offline,
@@ -413,7 +414,7 @@ async def test_a_message_in_the_main_chat_is_a_turn_of_the_gateway(
 
 
 async def test_retry_runs_the_newest_turn_again_through_the_gateway(
-    chat: tuple[Setup, FakeGateway],
+    chat: tuple[Setup, FakeGateway], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup, gateway = chat
     session = setup.session
@@ -430,6 +431,18 @@ async def test_retry_runs_the_newest_turn_again_through_the_gateway(
     assert ("POST", f"/api/sessions/{MAIN}/retry", {"turn_id": f"{MAIN}-t1"}) in (
         gateway.requests
     )
+    # A turn melo worded itself (Allow once's go-ahead) that cannot be started
+    # again is never put in the input box, as a typed one is.
+    gateway.turns[MAIN][-1]["composed"] = True
+
+    async def refused(*args: Any) -> Any:
+        raise GatewayError("the gateway refused it")
+
+    assert session.remote is not None
+    monkeypatch.setattr(session.remote.client, "retry", refused)
+    assert session.enter("/retry") is None
+    await setup.idle()
+    assert setup.app.buffer.text == ""
 
 
 async def test_task_goes_to_the_main_chat_and_its_echo_is_one_line(

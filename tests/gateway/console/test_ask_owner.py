@@ -35,7 +35,11 @@ from localmelo.support.gateway.console.running import item_activity
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
 from localmelo.support.sessions.agents import session_options
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    stand_in,
+)
 from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
@@ -619,39 +623,58 @@ def test_an_answer_with_a_file_is_framed_as_words_with_the_files_as_data() -> No
     assert "attach" in files.split("\n", 1)[0], "one line says what they are"
 
 
-@pytest.mark.parametrize("via", ["box", "message"])
+FILES_ONLY = compose_user_text(stand_in(0, 1), (TextAttachment("a.txt", "B is it"),))
+
+
+@pytest.mark.parametrize(
+    ("via", "sent"),
+    [
+        pytest.param("box", "B, please", id="box"),
+        pytest.param("message", "B, please", id="message"),
+        pytest.param("message", FILES_ONLY, id="files-only"),
+    ],
+)
 async def test_the_persons_reply_answers_the_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, via: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, via: str, sent: str
 ) -> None:
     main: list[Reply] = [asks_person, answer("The task needs your answer.")]
     heard: list[StoredEvent] = []
+    kept: list[str] = []
     async with ask_console(
         tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done with B")]]
     ) as (console, client, models):
+
+        async def index_exchange(task_id: str, request: str, answer: str) -> None:
+            kept.append(answer)
+
+        monkeypatch.setattr(console.memory, "index_exchange", index_exchange)
         console.asks.add_listener(heard.append)
         task_id = await start(console, "a job")
         await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
         escalation = (await rows(console, console.main_id))[-1]
         if via == "box":
             url = f"/api/front/echoes/{escalation['id']}"
-            response = await client.post(url, json={"do": "reply", "text": "B, please"})
+            response = await client.post(url, json={"do": "reply", "text": sent})
             assert response.status_code == 200, response.text
             assert response.json()["echo"]["how"] == "person"
             again = await client.post(url, json={"do": "reply", "text": "A"})
             assert again.status_code == 409
         else:
-            _, how = await console.workers.message(task_id, "B, please")
+            _, how = await console.workers.message(task_id, sent)
             assert how == "answered"
         await ended(console, task_id)
         [result] = tool_results(models["workers"][0])
-        assert result == "[answer from the user, in their own words]\nB, please"
+        assert result == framed_answer(sent)
         end = (await rows(console, console.main_id))[-1]
         assert (end["how"], end["text"], end["of"]) == (
             "person",
-            "B, please",
+            sent,
             escalation["id"],
         )
         assert heard[-1].event["data"]["by"] == "person"
+        await console.asks.settle()
+    # Files alone are no answer to keep for recall ("Answer: [1 file]").
+    assert kept == ([] if sent == FILES_ONLY else ["B, please"])
 
 
 async def test_melos_go_ahead_does_not_answer_a_question_the_task_waits_on(

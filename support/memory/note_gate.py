@@ -1,33 +1,25 @@
 """The note gate: where a note the chat's model keeps with ``remember`` may come from.
 
-Setting ``[memory] note_gate`` (#442), two cumulative levels. A note is
-kept when something the chat shows supports it, and the gate tags the note with that
-source (source monitoring): what the user typed (``typed``), material the user
-pointed to (``pointed``) or a finished task's result (``result``), in that order of
-trust. A note kept by an earlier version may also carry ``inferred`` (the model's own
-inference), which no level writes now and recall still reads.
+A note is kept when something the chat shows supports it, and the gate tags the note
+with that source (source monitoring): what the user typed (``typed``), material the
+user pointed to (``pointed``) or a finished task's result (``result``), in that order
+of trust. A note kept by an earlier version may also carry ``inferred`` (the model's
+own inference), which the gate no longer writes and recall still reads.
 
-- ``pointed``, the default: the note's words are in what the user typed in this chat,
-  in a page or file the user pointed to, or in a finished task's result shown in it
-  (:func:`records.unsupported`). A page or file the user pointed to is one the chat
-  fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
-  address or file name the user typed, or that the user's words in that turn call
-  theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
-  at the address of a sentence that called a page theirs and gave one address, which
-  a note of their own words kept and they did not edit (:func:`given_places`), since
-  the phrase alone never points to a page the model chose. A page the user did not
-  point to is no source at
-  any level, and a page the user called someone else's supports no note about the
-  user.
-- ``meaning`` adds support by meaning: the note's key tokens (:func:`key_tokens`:
-  numbers, dates, addresses, e-mail addresses, names) must be found in a source, and
-  the rest of it may say the same in other words or another language, judged by the
-  cosine between its embedding and the best window of the sources
-  (:func:`windows`). Without an embedding model that is the ``pointed`` word check.
+The rule: the note's words are in what the user typed in this chat, in a page or file
+the user pointed to, or in a finished task's result shown in it
+(:func:`records.unsupported`). A page or file the user pointed to is one the chat
+fetched or read (:func:`pointed_material`, from the chat's stored tool events) whose
+address or file name the user typed, or that the user's words in that turn call
+theirs (:data:`THEIRS`): for a file, the first one the turn read; for a page, one
+at the address of a sentence that called a page theirs and gave one address, which
+a note of their own words kept and they did not edit (:func:`given_places`), since
+the phrase alone never points to a page the model chose. A page the user did not
+point to is no source, and a page the user called someone else's supports no note
+about the user.
 
-Both levels refuse a note that is an instruction to the assistant
-(:func:`is_instruction`), not a fact about the user. Secrets are refused before this
-module is asked.
+A note that is an instruction to the assistant (:func:`is_instruction`) is refused,
+not a fact about the user. Secrets are refused before this module is asked.
 
 What a page, a file or a finished task's result may support is what it *states*, not
 what it hides or asks the assistant to do. Material (a page or a file) goes through
@@ -64,8 +56,6 @@ from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 from urllib.parse import unquote, urlsplit
 
-import numpy as np
-
 from localmelo.melo.agent._step_review import named_sites
 from localmelo.support.memory import markup, records
 from localmelo.support.memory.index import CHUNK_OVERLAP
@@ -77,16 +67,6 @@ POINTED: Final = records.POINTED
 RESULT: Final = records.RESULT
 INFERRED: Final = records.INFERRED
 
-# The default bar for the meaning of a note against its source.
-MIN_COSINE: Final = 0.55
-# A window of a source, in characters, and the most that one call compares: the user's
-# newest typed windows, the pointed material's windows that hold most key tokens, and
-# the results'.
-WINDOW_CHARS: Final = 300
-MIN_WINDOW_CHARS: Final = 8
-TYPED_WINDOWS: Final = 16
-POINTED_WINDOWS: Final = 40
-RESULT_WINDOWS: Final = 8
 # The pages and files of one chat that count, newest first.
 MAX_MATERIAL: Final = 20
 
@@ -105,11 +85,6 @@ _WHERE: Final = (
     "finished task's result shown here"
 )
 NOT_SUPPORTED: Final = f"Not remembered: no source supports it. Words not in {_WHERE}: "
-NOT_FOUND: Final = f"not found in {_WHERE}."
-TOO_FAR: Final = (
-    f"Not remembered: its meaning is not close enough to {_WHERE}. Keep only what "
-    "those show."
-)
 
 # ── The pointed material ──
 
@@ -769,15 +744,6 @@ def keys_of(note: str) -> list[Key]:
     return keys
 
 
-def key_tokens(note: str) -> list[str]:
-    """The key tokens of *note*, in order, each once: the numbers (digit runs and
-    years), the dates (months and weekdays written out), the web and e-mail
-    addresses, and the names in Latin script (a capitalised word that does not
-    start its sentence, or an acronym of two letters or more). Words of other
-    scripts, and every other word, are not key tokens."""
-    return [key.text for key in keys_of(note)]
-
-
 class Evidence:
     """The texts a note is checked against, folded once."""
 
@@ -1233,61 +1199,3 @@ def joined_result(chunks: Sequence[str]) -> str:
         if more:
             answer += _following(answer, more)
     return asked + label + answer
-
-
-# ── Meaning ──
-
-
-def windows(text: str, size: int = WINDOW_CHARS) -> list[str]:
-    """*text* in windows of whole sentences of at most *size* characters (a sentence
-    longer than that is cut), the shortest dropped."""
-    out: list[str] = []
-    current = ""
-    for piece in re.split(r"(?<=[。！？])|(?<=[.!?])\s+|\n+", text):
-        piece = " ".join(piece.split())
-        while len(piece) > size:
-            if current:
-                out.append(current)
-                current = ""
-            out.append(piece[:size])
-            piece = piece[size:]
-        if not piece:
-            continue
-        if current and len(current) + 1 + len(piece) > size:
-            out.append(current)
-            current = piece
-        else:
-            current = f"{current} {piece}" if current else piece
-    if current:
-        out.append(current)
-    return [window for window in out if len(window) >= MIN_WINDOW_CHARS]
-
-
-def recent_windows(texts: Sequence[str], limit: int) -> list[str]:
-    """The last *limit* windows of *texts*, taken in order."""
-    return [w for text in texts for w in windows(text)][-limit:]
-
-
-def keyed_windows(
-    material: Sequence[Material], keys: Sequence[Key], limit: int
-) -> list[tuple[str, str]]:
-    """At most *limit* windows of *material* as ``(ref, window)``: those that hold
-    most of *keys* first, the others in order; the chosen ones stay in order."""
-    every = [(m.ref, w) for m in material for w in windows(m.text)]
-    if len(every) <= limit:
-        return every
-    score = [sum(Evidence([w]).supports(key) for key in keys) for _, w in every]
-    best = sorted(range(len(every)), key=lambda n: (-score[n], n))[:limit]
-    return [every[n] for n in sorted(best)]
-
-
-def cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    """The cosine of two vectors (0 when either has no length)."""
-    a, b = np.asarray(left, dtype=float), np.asarray(right, dtype=float)
-    norm = float(np.linalg.norm(a) * np.linalg.norm(b))
-    return float(a @ b) / norm if norm else 0.0
-
-
-def best_cosine(vector: Sequence[float], group: Sequence[Sequence[float]]) -> float:
-    """The highest cosine of *vector* to a vector of *group* (0 for none)."""
-    return max((cosine(vector, other) for other in group), default=0.0)

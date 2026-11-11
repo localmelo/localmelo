@@ -73,7 +73,7 @@ from localmelo.support.cli.render import (
     ToolOutput,
     TurnRenderer,
 )
-from localmelo.support.cli.session_tools import SessionTools
+from localmelo.support.cli.session_tools import SessionTools, shown_text
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.steps import STEPS_KEY, learned_total, step_figure
 from localmelo.support.cli.text import expand_tabs, wrap_cells
@@ -844,8 +844,8 @@ class CliSession:
             symbols = self.renderer.symbols
             self.out.print(
                 self._text(
-                    f"{symbols.stopped} Stopped {symbols.dot} nothing was sent; "
-                    "your message is back",
+                    f"{symbols.stopped} Stopped {symbols.dot} nothing was sent"
+                    + ("" if composed else "; your message is back"),
                     "warn",
                 )
             )
@@ -855,18 +855,28 @@ class CliSession:
         if (error is not None or unsent) and attachments:
             self._attachments = attachments + self._attachments
         completed = result is not None and result.status == "completed"
+        # A sentence melo worded itself is never given back to the input box.
         self._after_turn(
-            text, started, completed=completed, failed=error is not None or unsent
+            "" if composed else text,
+            started,
+            completed=completed,
+            failed=error is not None or unsent,
         )
 
     async def _remote_turn(
-        self, text: str, *, typed: bool = True, retry: str = ""
+        self,
+        text: str,
+        *,
+        typed: bool = True,
+        retry: str = "",
+        composed: bool = False,
     ) -> None:
         """One turn of the main chat or a side chat, run by the gateway.
 
         *typed* is False for a turn sent in another window, which the
         terminal only follows: its message is never given back. *retry* is
-        the turn that ``/retry`` runs again.
+        the turn that ``/retry`` runs again; *composed*, that *text* is a
+        sentence melo worded itself, which is never given back either.
         """
         assert self.remote is not None
         started = self._clock()
@@ -892,7 +902,7 @@ class CliSession:
         self.renderer.end_turn(None, None, cause=cause)
         completed = status in ("completed", "echo")
         self._after_turn(
-            text if typed else "",
+            text if typed and not composed else "",
             started,
             completed=completed,
             failed=error is not None,
@@ -1581,13 +1591,15 @@ class CliSession:
             if last is None:
                 self.out.print(self._text("✗ Nothing to retry.", style="error"))
                 return
-            turn_id, text = last
+            turn_id, text, composed = last
             first = " ".join(text.split())[:60]
             self.out.print(self._text(f"↻ Retrying: {first}"))
             self._state = "running"
             self._stop_wanted = self._stop_landed = False
             self.renderer.begin_turn(text)
-            self._work = self.spawn(self._remote_turn(text, retry=turn_id))
+            self._work = self.spawn(
+                self._remote_turn(text, retry=turn_id, composed=composed)
+            )
             return
         if self.runner is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
@@ -1615,7 +1627,7 @@ class CliSession:
                         self.navigation.mark = SessionMark(
                             mark.foreign_newest, mark.undone + 1
                         )
-                        if self.app is not None:
+                        if self.app is not None and not turn.composed:
                             self._give_back(turn.user_text)
                     raise
         except SessionBusyError:
@@ -1627,7 +1639,7 @@ class CliSession:
         if did_undo:
             mark = self.navigation.mark
             self.navigation.mark = SessionMark(mark.foreign_newest, mark.undone + 1)
-        first = " ".join(turn.typed_text.split())[:60]
+        first = " ".join(shown_text(turn).split())[:60]
         self.out.print(self._text(f"↻ Retrying turn {turn.turn}: {first}"))
         self._state = "running"
         self._stop_wanted = self._stop_landed = False

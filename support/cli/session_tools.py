@@ -18,6 +18,12 @@ if TYPE_CHECKING:
     from localmelo.support.cli.session import CliSession
 
 
+def shown_text(turn: TurnInfo) -> str:
+    """What a line about *turn* shows: the words typed, else the turn's own text
+    (a turn melo worded itself has none typed)."""
+    return turn.typed_text or turn.user_text
+
+
 class SessionTools:
     def __init__(self, session: CliSession) -> None:
         self.session = session
@@ -119,7 +125,8 @@ class SessionTools:
         s.navigation.mark = SessionMark(mark.foreign_newest, mark.undone + 1)
         if s.app is not None:
             buffer = s.app.buffer
-            buffer.history.append_string(turn.typed_text or turn.user_text)
+            if not turn.composed:  # melo's own sentence is not for ↑ to bring back
+                buffer.history.append_string(shown_text(turn))
             buffer.reset(document=buffer.document)
 
     async def undo(self) -> None:
@@ -147,7 +154,7 @@ class SessionTools:
         if turn is None:
             raise ValueError("Nothing to undo.")
         self._remember_undo(turn)
-        line = ((turn.typed_text or turn.user_text).splitlines() or [""])[0]
+        line = (shown_text(turn).splitlines() or [""])[0]
         first = cut_cells(clean_output(line).strip(), 60, s.renderer.symbols.ellipsis)
         ending = "" if first.endswith((".", "!", "?", "。", "！", "？", "…")) else "."
         s.out.print(
