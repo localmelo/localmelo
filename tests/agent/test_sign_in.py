@@ -422,6 +422,16 @@ def test_the_review_takes_the_words_before_a_files_block_as_the_persons_words(
         )
 
 
+def test_a_text_that_begins_with_a_files_block_has_no_words() -> None:
+    """A message with no words, once its line breaks before the first block are taken off, is still all file (#626)."""
+    only = compose_user_text("", (TextAttachment("notes.txt", FILE_LINES),))
+    for text in (only, only.strip()):
+        reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+        reviewer.user_message(text)
+        assert reviewer.requests == ()
+        assert not reviewer.names_host("only-in-the-file.example")
+
+
 @pytest.mark.parametrize(
     ("site", "typed"),
     [

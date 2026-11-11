@@ -24,7 +24,11 @@ def words_before_files(text: str) -> str:
     It never reads a block: it cuts at the opener, so a block that is cut short,
     mis-sized or escaped in a way a reader would not undo cannot leave a file's
     text in the words. Typed text that holds an opener is cut short too, which
-    is the safe direction. A text with no opener comes back as it is.
+    is the safe direction. A text that begins with a block, as a message with no
+    words does once the line breaks before its first block are taken off, has no
+    words. A text with no opener comes back as it is.
     """
     cut = text.find(FILE_OPENER)
-    return text if cut < 0 else text[:cut]
+    if cut < 0:
+        return "" if text.lstrip().startswith(FILE_OPENER.lstrip()) else text
+    return text[:cut]
