@@ -21,6 +21,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A short follow-up such as "go look it up" or "continue" works from what you said just before.
 - A chat replies in the language of your latest message, even after tool output in another language.
 - Reminders: say "remind me to send the report on Friday at 9" and melo tells you at that time.
+- "Remind me of/about …" with no time is a question melo answers, not a request for a reminder time.
 - Chores that run on time, with a check-in every 30 minutes that says what finished or waits.
 - Pictures and files in the console and the app, and words you add while melo works reach the turn.
 - melo reads PDFs and public web pages in the chat, and can search the web with one switch for every chat and task.

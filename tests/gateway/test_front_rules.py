@@ -75,6 +75,7 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
         ("每周一提醒我交周报", "chore"),
         # Not reminders: questions, a cue with no work, a weak cue with no time.
         ("remind me what the report said", "plan"),
+        ("can you remind me of the website that had free exercises?", "plan"),
         ("what reminders do I have?", "plan"),
         ("我记得明天有会", "plan"),
         ("记得保存文件", "plan"),

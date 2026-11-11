@@ -136,8 +136,10 @@ redaction limitations.
   question, `TurnInfo.origin`, which gives a session no title). Every
   version-3 file gains `turns.composed` when it is opened (`0` on the turns it
   had; `1` on a turn whose text is not what a person typed,
-  `TurnInfo.composed`), with no new version, so an older localmelo still
-  opens it.
+  `TurnInfo.composed`) and `turns.typed_apart` (`1` on a turn begun with its
+  typed text given apart from its text, `TurnInfo.typed_apart`; `0` on the
+  turns it had and on a turn whose `typed_text` is only its title), with no new
+  version, so an older localmelo still opens it.
 - **The owner lock.** The gateway's store holds a lock on `<path>.owner` for
   its life. A second gateway on the file gets `StoreOwnedError`:
   `Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.`
