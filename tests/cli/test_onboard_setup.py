@@ -171,7 +171,7 @@ def test_a_found_server_is_offered_with_one_question_and_its_models_are_listed(
         "  [1] Qwen3-8B\n"
         "  [2] bge-m3-embed  (embedding)\n"
         f"✓ {URL} lists 2 models; using Qwen3-8B.\n"
-        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
+        "melo remembers across chats by words; melo setup adds search by meaning.\n"
         f"Saved to {config_path} (melo setup changes it).\n"
     )
     cfg = config.load()
@@ -648,7 +648,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Qwen3-Embedding-0.6B",
     )
     out = capsys.readouterr().out
-    assert "remembers across chats by words only; melo setup adds" not in out
+    assert "remembers across chats by words; melo setup adds" not in out
 
 
 def test_a_first_run_on_ollama_saves_the_embedding_in_its_table(
@@ -688,7 +688,7 @@ def test_a_first_run_that_declines_saves_embedding_off(
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
     assert (
-        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
+        "melo remembers across chats by words; melo setup adds search by meaning.\n"
         in (capsys.readouterr().out)
     )
 
@@ -700,7 +700,7 @@ def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
     assert result == FirstSetup(url=URL, model="only", saved=True)
     out = capsys.readouterr().out
     assert (
-        "melo remembers across chats by words only; melo setup adds search by meaning.\n"
+        "melo remembers across chats by words; melo setup adds search by meaning.\n"
         in out
     )
     assert "No embedding model" not in out and "Qwen3-Embedding" not in out
@@ -713,13 +713,13 @@ def test_a_first_run_without_a_candidate_says_only_that_memory_is_off(
         (
             False,
             "This server lists no embedding model, so melo remembers across "
-            "chats by words only. For search by meaning, serve "
+            "chats by words. For search by meaning, serve "
             "Qwen3-Embedding-0.6B on it, then melo setup.",
         ),
         (
             True,
             "This server lists no embedding model, so melo remembers across "
-            "chats by words only. For search by meaning: ollama pull "
+            "chats by words. For search by meaning: ollama pull "
             "qwen3-embedding:0.6b, then melo setup.",
         ),
     ],
@@ -741,7 +741,7 @@ def test_melo_setup_says_how_to_get_an_embedding_model(
     out = capsys.readouterr().out
     assert (
         f"{hint}\n" in out
-        and "remembers across chats by words only; melo setup adds" not in out
+        and "remembers across chats by words; melo setup adds" not in out
     )
 
 
@@ -2439,8 +2439,8 @@ def test_a_skip_reaches_the_job_and_the_list_says_what_it_leads_to(
         "Start the gateway at login?",
     ]
     out = capsys.readouterr().out
-    assert out.count("Without Qwen3 Embedding 0.6B, memory goes by words only.") == 1
-    assert "melo remembers across chats by words only" in out
+    assert out.count("Without Qwen3 Embedding 0.6B, memory goes by words.") == 1
+    assert "melo remembers across chats by words" in out
 
 
 def test_another_model_is_planned_with_its_id_and_the_skips_start_again(

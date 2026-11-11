@@ -28,6 +28,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - melo reads PDFs and public web pages in the chat, and can search the web with one switch for every chat and task.
 - A thinking model's answer is no longer lost, and a reply that is only unfinished thinking or a broken tool call is never shown as the answer.
 - A question that asks for a short answer gets one in at most two steps.
+- A turn in which melo repeats the same step now ends with an answer from what it found, not with nothing.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
 - Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
 - Long work that outgrows the model's context keeps what it learned: when the context is nearly full, melo writes down where the work stands and what it already read, and the oldest results make room.
@@ -78,6 +79,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Tidying notes while you are away is built and off by default while it is tested; one tap undoes a tidy.
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
+- With no embedding model set up, melo now finds a note you ask about in other words: the chat model picks among the notes that share a word with your message, within 4 seconds.
+- The Memory tab, `melo memory status`, Settings and setup say how melo searches from the models you have set up, not from a fixed guess.
 - A note from a page, a file or a task's result is never shown to the model as your words.
 - What you ask melo to remember from a page or file you pointed to in the chat can now be kept, and the note says where it came from; before, such a note was refused. A saved `note_gate = "typed"` reads as `pointed`.
 - A note melo takes from a page, a file or a task's result now replaces only an older note of that kind: one you typed, reworded or imported, or that sleep wrote, is kept beside it with its source, and your own words are listed first.

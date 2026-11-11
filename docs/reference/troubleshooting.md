@@ -212,7 +212,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: embedding probe failed: …
-  Saving without the embedding model: melo remembers across chats by words only (melo setup sets it again).
+  Saving without the embedding model: melo remembers across chats by words (melo setup sets it again).
 ```
 
 - **Cause:** the `POST /v1/embeddings` probe failed. **HTTP 404** means the
@@ -370,7 +370,9 @@ melo: run ended with status stuck: Stuck: the same tool calls or errors repeated
 ```
 
 - **Cause:** with `--attempt-policy none`, the same tool calls, or the same
-  errors, repeated three steps in a row.
+  errors, repeated three steps in a row. With `answer_on_stop` (the default),
+  the run still ends `stuck`, and what it printed is an answer from what it
+  gathered.
 - **Fix:** use the default policy, `reflect`, which reflects and tries
   again, or check which call kept failing in the run's history.
 
