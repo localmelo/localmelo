@@ -259,6 +259,11 @@ def _split_inline_reasoning(response: Message) -> Message:
     return dataclasses.replace(response, content=content, thinking=block)
 
 
+# The ends of a run that stopped with its work unfinished: ``answer_on_stop``
+# asks them for an answer, and adds the closing line the task asks for.
+_STOPPED_STATUSES = ("gate_stopped", "budget_exhausted", "stuck")
+
+
 def _answer_of(reply: Message) -> str:
     """The answer in the reply to a request without tools, or "".
 
@@ -3619,11 +3624,13 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
           request would pass ``max_calls``: the error says ``Call budget
           reached``, and the result is the latest text the model wrote in the
           run, if any. With ``answer_on_stop``, a
-          ``gate_stopped`` or ``budget_exhausted`` run with no result asks
-          once more for one (see :meth:`_answer_on_stop`);
+          ``gate_stopped``, ``budget_exhausted`` or ``stuck`` run with no
+          result asks once more for one (see :meth:`_answer_on_stop`);
         - ``context_budget_exceeded``: the pinned request cannot fit the
           configured input budget, or the smaller overflow retry was refused;
-        - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
+        - ``stuck``: stuck detection fired with ``attempt_policy="none"`` (with
+          ``reflect``, a reflection follows a stuck attempt). The result is
+          blank, or, with ``answer_on_stop``, the answer of its extra request;
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
           chat request after its retries, or an embedding request. The
@@ -4967,17 +4974,17 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     async def _answer_on_stop(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: one more request for the answer a stopped run lacks.
 
-        Only for a run that ended ``gate_stopped`` or ``budget_exhausted``,
-        or ``provider_error`` after the server refused a request for a budget
-        or rate limit (see :meth:`_run_attempts`), with a blank result. The
-        request (:meth:`Chat.final_answer`) carries the working window and the
-        latest reflection. A non-blank reply becomes the run's result (its
-        ``<think>`` block removed), the status stays, and
+        Only for a run that ended ``gate_stopped``, ``budget_exhausted`` or
+        ``stuck``, or ``provider_error`` after the server refused a request
+        for a budget or rate limit (see :meth:`_run_attempts`), with a blank
+        result. The request (:meth:`Chat.final_answer`) carries the working
+        window and the latest reflection. A non-blank reply becomes the run's
+        result (its ``<think>`` block removed), the status stays, and
         ``RunResult.answered_on_stop`` is true. A request that fails or that
         ``max_calls`` leaves no call for, or a blank reply, leaves the run as
         it was.
         """
-        stopped = run.status in ("gate_stopped", "budget_exhausted")
+        stopped = run.status in _STOPPED_STATUSES
         if run.result.strip() or not (stopped or run.early_stop == "refused"):
             return
         # The reflection comes as its own block: leave out the request and reply
@@ -5031,9 +5038,10 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
 
-        For a run that ended ``completed``, ``gate_stopped`` or
-        ``budget_exhausted`` with an answer. The line is detected in the person's
-        own words (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
+        For a run that ended ``completed``, ``gate_stopped``,
+        ``budget_exhausted`` or ``stuck`` with an answer. The line is detected in
+        the person's own words
+        (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
         a task that names none is left as it is. One request, without tools
         (:meth:`Chat.closing_line`), gives the line from the answer alone, and
         it is added after the answer, which stays as it was.
@@ -5042,11 +5050,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         the run as it was, and so does a run that handed its work on: its
         result is the receipt of that hand-off, not an answer.
         """
-        if run.handed_off or run.status not in (
-            "completed",
-            "gate_stopped",
-            "budget_exhausted",
-        ):
+        if run.handed_off or run.status not in ("completed", *_STOPPED_STATUSES):
             return
         _, answer = split_thinking(run.result)
         label = requested_closing_label(run.words) if answer else None

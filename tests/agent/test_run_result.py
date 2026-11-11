@@ -403,7 +403,8 @@ class TestStatuses:
     @pytest.mark.asyncio
     async def test_stuck(self) -> None:
         llm = FakeLLM([_echo_call("same") for _ in range(5)])
-        agent = _agent(llm, _options(attempt_policy="none", max_steps=10))
+        options = _options(attempt_policy="none", max_steps=10, answer_on_stop=False)
+        agent = _agent(llm, options)
         result = await agent.run_task("echo q")
         assert (result.status, result.result) == ("stuck", "")
         assert result.error == "Stuck: the same tool calls or errors repeated"

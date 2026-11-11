@@ -267,6 +267,32 @@ class TestAnswerOnStop:
         assert result.answered_on_stop is True
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reply", "on", "result", "asked"),
+        [
+            ("FINAL ANSWER: 1", True, "FINAL ANSWER: 1", 1),
+            ("   ", True, "", 1),  # a blank reply: the run stays as it was
+            ("FINAL ANSWER: 1", False, "", 0),
+        ],
+        ids=["answered", "blank reply", "off"],
+    )
+    async def test_a_stuck_run_gets_one_too(
+        self, reply: str, on: bool, result: str, asked: int
+    ) -> None:
+        # Two different calls, then the same call three times.
+        calls = [_echo_call("a"), _echo_call("b")] + [_echo_call("same")] * 3
+        llm = FakeLLM(calls + [_answer(reply)])
+        agent = _agent(llm, attempt_policy="none", answer_on_stop=on)
+        run = await agent.run_task(TASK)
+        assert run.status == "stuck"
+        assert run.error == "Stuck: the same tool calls or errors repeated"
+        assert (run.result, run.answered_on_stop) == (result, bool(result))
+        assert len(_answer_requests(llm)) == asked
+        assert len(llm.calls) == 5 + asked
+        if result:
+            assert not _answer_requests(llm)[0]["tools"]
+
+    @pytest.mark.asyncio
     async def test_a_think_block_is_not_part_of_the_answer(self) -> None:
         result, _ = await _stopped(
             _answer("<think>maybe</think>FINAL ANSWER: 5"), answer_on_stop=True

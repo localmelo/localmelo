@@ -2094,6 +2094,8 @@ test('a failed turn draws a shared glyph, a plain title and one filled next step
     assert.equal(filled(node)?.textContent, label, status);
   }
   assert.equal(filled(make('budget_exhausted', {}, {n_tool: 0}))?.textContent, 'Try again', 'Continue needs a run that used tools');
+  const offers = (node) => findNode(node, (item) => item.className === 'failure-actions').children.map((item) => item.textContent);
+  assert.deepEqual(offers(make('stuck')), ['Try again', 'Continue', 'Copy error'], 'a run that repeated itself can go on, as one that ran out of steps can');
   const old = turns.newTurn(turnRow({id: 'old', turn: 1, status: 'stuck'}));
   h.state().view.turns = [old, turns.newTurn(turnRow({id: 'new', turn: 2}))];
   h.context.turn = old;
