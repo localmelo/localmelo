@@ -2596,7 +2596,11 @@ class SessionStore:
                 # 6. The lease, and 7. the first title.
                 new_title = None
                 if not current_title and not origin:
-                    new_title = short_title(typed or user_text)
+                    # The words before the files first: a file's opening line
+                    # names the chat only when there are none.
+                    new_title = short_title(
+                        typed or words_before_files(user_text).strip() or user_text
+                    )
                 await conn.execute(
                     "UPDATE sessions SET lease_holder = ?, lease_until = ?, "
                     "updated_at = ?, title = COALESCE(?, title) WHERE id = ?",

@@ -1221,8 +1221,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         # Runs under way: run_task calls, each until it returns or raises,
         # or after an interactive cancellation until its finalizer ends.
         self._active_runs = 0
-        # The latest run's earlier-turns block, for closing_answer after it.
-        self._earlier_block = ""
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
@@ -3840,7 +3838,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         ``(what the user said, the answer)``, oldest first, from a caller that
         keeps the chat (a session's runner): the working window drops its
         oldest turns as tool output fills it, so the reflection, the answer on
-        stop (``answer_on_stop``, and :meth:`closing_answer` after the run)
+        stop (``answer_on_stop``)
         and a planning request whose window has lost what it held before the
         query (a window that began the run empty is not) carry them as one
         data block (see
@@ -3957,7 +3955,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             hidden=frozenset(hide_tools),
             earlier_block=earlier,
         )
-        self._earlier_block = earlier
         # The user's own words, which a step review reads (never tool output).
         # A window that starts over takes the person's earlier words first,
         # never the answers (#465).
@@ -5029,29 +5026,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run.result = answer
         run.answered_on_stop = True
         run.answer_thinking = reply.thinking
-
-    async def closing_answer(self, query: str, *, note: str = "") -> str:
-        """After a run: one request, without tools, for the answer to *query* from what it found.
-
-        For a caller whose run ended with no answer it can use (a reply that
-        only said what it would do, a run that got stuck): the request is
-        the one ``answer_on_stop`` makes (the working window and the latest
-        reflection), with *note* in place of its closing instruction when
-        given. Returns the reply without its thinking, or ``""`` when it is
-        blank or a tool call written as text. A failed request raises.
-        """
-        prefix_run = self.chat.begin_prefix()
-        try:
-            reply = await self.chat.final_answer(
-                self.hippo.working.get_window(),
-                query,
-                self.hippo.working.get_reflections(),
-                note=note,
-                earlier=self._earlier_block,
-            )
-        finally:
-            PREFIX_RUN.reset(prefix_run)
-        return _answer_of(_split_inline_reasoning(reply))
 
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
