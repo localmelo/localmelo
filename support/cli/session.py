@@ -33,6 +33,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.streaming import StreamDisplay
 from localmelo.melo.schema import WINDOW_MESSAGES_MAX, RunResult
 from localmelo.support import config
@@ -80,10 +81,7 @@ from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.cli.views import SOURCE_TEXT, BackendInfo, hang
 from localmelo.support.cli.work import WorkBeside, work_parts
 from localmelo.support.progress_line import run_elapsed, wall_range
-from localmelo.support.sessions.attachments import (
-    TextAttachment,
-    words_before_files,
-)
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.display import (
     clean_output,
     format_duration,

@@ -194,16 +194,19 @@ async def test_a_version_2_file_gains_turn_origins(tmp_path: Path) -> None:
     assert columns["origin"][4] == "''"
 
 
-async def test_a_version_3_file_gains_composed_turns_at_the_same_version(
+async def test_a_version_3_file_gains_later_turn_columns_at_the_same_version(
     tmp_path: Path,
 ) -> None:
-    """A file from before ``turns.composed`` opens and gets it, still version 3,
-    so a build from before it opens the file too."""
+    """A file from before ``turns.composed`` and ``turns.typed_apart`` opens and
+    gets both, still version 3, so a build from before them opens the file too; a
+    row that holds a title reads as its text."""
     path = tmp_path / "v3.db"
     with sqlite3.connect(path) as conn:
         for statement in store_mod._SCHEMA:
             conn.execute(
-                statement.replace("    composed    INTEGER NOT NULL DEFAULT 0,\n", "")
+                statement.replace(
+                    "    composed    INTEGER NOT NULL DEFAULT 0,\n", ""
+                ).replace("    typed_apart INTEGER NOT NULL DEFAULT 0,\n", "")
             )
         conn.execute("INSERT INTO store_info VALUES ('writer', 'gateway')")
         conn.execute("PRAGMA user_version = 3")
@@ -211,16 +214,19 @@ async def test_a_version_3_file_gains_composed_turns_at_the_same_version(
             "INSERT INTO sessions (id, created_at, updated_at) VALUES ('old', 1, 1)"
         )
         conn.execute(
-            "INSERT INTO turns (session_id, turn, id, user_text, holder, started_at, "
-            "status) VALUES ('old', 1, 'oldturn', 'legacy', 'h', 1, 'completed')"
+            "INSERT INTO turns (session_id, turn, id, user_text, typed_text, holder, "
+            "started_at, status) VALUES ('old', 1, 'oldturn', 'I live in Lisbon.', "
+            "'Trip plans', 'h', 1, 'completed')"
         )
-    assert "composed" not in {row[1] for row in rows(path, "PRAGMA table_info(turns)")}
+    have = {row[1] for row in rows(path, "PRAGMA table_info(turns)")}
+    assert not {"composed", "typed_apart"} & have
     store = gateway(path)
     [old] = await store.list_turns("old")
     card = await store.begin_turn(
         "old", "Where stopped: …", holder=HOLDER, composed=True
     )
     assert (old.composed, card.composed) == (False, True)
+    assert (old.typed_apart, typed_words(old)) == (False, "I live in Lisbon.")
     await store.aclose()
     assert rows(path, "PRAGMA user_version") == [(3,)]
 
@@ -2657,7 +2663,44 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
             },
             "sign in",
         ),
-        ({"user_text": "a request melo built", "typed_text": "chart it"}, "chart it"),
+        (
+            {
+                "user_text": "a request melo built",
+                "typed_text": "chart it",
+                "typed_apart": True,
+            },
+            "chart it",
+        ),
+        # A title is not words: the row's text is, marked or not.
+        (
+            {"user_text": "I live in Lisbon.", "typed_text": "Trip plans"},
+            "I live in Lisbon.",
+        ),
+        (
+            {
+                "user_text": "Summarize the long report about the quarter's sales in detail",
+                "typed_text": "Summarize the long report about the quarter's…",
+            },
+            "Summarize the long report about the quarter's sales in detail",
+        ),
+        # An unmarked row with a title and file blocks in its text: the head of the text.
+        (
+            {
+                "user_text": compose_user_text("sign in", (FILE,)),
+                "typed_text": "Sign in help",
+            },
+            "sign in",
+        ),
+        # A row with files gives its typed text, marked or not.
+        (
+            {
+                "user_text": compose_user_text("sign in", (FILE,)),
+                "typed_text": "sign in",
+                "attachments": (FILE,),
+                "typed_apart": True,
+            },
+            "sign in",
+        ),
         (
             {"user_text": "a plain retried turn", "typed_text": ""},
             "a plain retried turn",
@@ -2701,6 +2744,10 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
         "composed",
         "files",
         "words given",
+        "title only",
+        "cut title only",
+        "title and file blocks",
+        "files and words given",
         "plain",
         "legacy blocks",
         "stand-in",

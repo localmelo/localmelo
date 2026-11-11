@@ -998,11 +998,19 @@ class ToolCall:
 
 @dataclass
 class ToolResult:
+    """What a tool call gave back.
+
+    ``no_more_calls`` is set by the tool's own code, never read from its text:
+    the tool takes no more calls in this run, so the agent stops offering it
+    (see :class:`~localmelo.melo.executor.models.ToolOutput`).
+    """
+
     tool_name: str
     output: str = ""
     error: str = ""
     duration_ms: float = 0.0
     images: list[ImagePart] = field(default_factory=list)
+    no_more_calls: bool = False
 
 
 def new_record_id() -> str:
