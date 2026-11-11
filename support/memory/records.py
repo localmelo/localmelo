@@ -20,7 +20,9 @@ subject an active note holds (:func:`changes`: "My weekly sync is on Friday." af
 said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
 Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
-kept, not recalled, and comes back with an undo of the new one. The subject is
+kept, not recalled, and comes back with an undo of the new one; a note from a page, a
+file or a result never replaces one the user's own words made, and both stand
+(:func:`write`). The subject is
 what a note is about without its value (:func:`subject`); with an embedding
 model, a note close in meaning that differs from an old one in one short span
 is the same subject too (:func:`value_apart`). A third party's fact names its
@@ -1492,6 +1494,12 @@ async def write(
 
     *origin* and *created_at* are what the store keeps as the row's source and
     time; sleep writes as ``sleep``, at the time of the turn it read.
+
+    A candidate admitted as ``outcome`` (a note from a page, a file or a result)
+    never replaces a record the person's own words made (:func:`by_person`): it is
+    written beside it, each with its source. It still replaces an older note from a
+    page, a file or a result, and a note of the person's own still replaces any
+    older note of its subject.
     """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
@@ -1499,6 +1507,18 @@ async def write(
         action, target = decide(
             cand.text, active, kind=cand.kind, vector=vector, embed_model=embed_model
         )
+        if (
+            action == "UPDATE"
+            and cand.admitted_by == "outcome"
+            and any(e.id == target and by_person(e) for e in active)
+        ):
+            action, target = decide(
+                cand.text,
+                [e for e in active if not by_person(e)],
+                kind=cand.kind,
+                vector=vector,
+                embed_model=embed_model,
+            )
         if action == "IGNORE":
             continue
         provenance = {

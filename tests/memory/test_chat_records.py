@@ -532,6 +532,122 @@ async def test_different_preferences_are_both_kept(
     assert len(await memory.records()) == 2
 
 
+# ── a note from a page, a file or a result never replaces the person's own note ──
+
+OWN_SIGNALS = ["user_statement", "user_request"]
+BOB, ALICE, CARLA = (
+    "Your manager is Bob.",
+    "Your manager is Alice Wu.",
+    "Your manager is Carla Reyes.",
+)
+
+
+async def _put(
+    memory: ChatMemory, text: str, signal: str, **provenance: str
+) -> records.Written:
+    """Write one note of the people topic as *signal* admits it; *provenance* adds
+    to its source (``source="pointed"``, as a note from a page has it)."""
+    where = {"session_id": "s1", "turn": 1, "chat": "Main chat", **provenance}
+    (written,) = await records.write(
+        memory.stores()[0],
+        [records.Candidate(text, "", "people", signal)],
+        [None],
+        source=where,
+        embed_model="",
+    )
+    return written
+
+
+async def _texts(memory: ChatMemory) -> list[str]:
+    return sorted(entry.text for entry in await memory.records())
+
+
+@pytest.mark.parametrize("how", ["pointed", "result"])
+@pytest.mark.parametrize("own", OWN_SIGNALS)
+async def test_a_note_from_a_page_or_a_result_stands_beside_the_persons_own_note(
+    memory: ChatMemory, own: str, how: str
+) -> None:
+    mine = await _put(memory, BOB, own)
+    other = await _put(memory, ALICE, "outcome", source=how)
+    assert other.replaced is None and other.id != mine.id
+    assert await _texts(memory) == [ALICE, BOB]
+
+
+async def test_the_persons_own_note_replaces_a_note_from_a_page(
+    memory: ChatMemory,
+) -> None:
+    page = await _put(memory, ALICE, "outcome", source="pointed")
+    mine = await _put(memory, BOB, "user_statement")
+    assert mine.replaced == page.id
+    assert await _texts(memory) == [BOB]
+
+
+@pytest.mark.parametrize("first", ["pointed", "result"])
+async def test_a_note_from_a_page_replaces_an_older_note_from_a_page_or_a_result(
+    memory: ChatMemory, first: str
+) -> None:
+    old = await _put(memory, ALICE, "outcome", source=first)
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [CARLA]
+
+
+async def test_a_note_from_a_page_replaces_the_page_note_that_stands_beside_the_typed_one(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    old = await _put(memory, ALICE, "outcome", source="pointed")
+    new = await _put(memory, CARLA, "outcome", source="pointed")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [BOB, CARLA]
+
+
+async def test_the_same_text_from_a_page_is_not_written_beside_the_persons_own(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    assert (
+        await records.write(
+            memory.stores()[0],
+            [records.Candidate(BOB, "", "people", "outcome")],
+            [None],
+            source={"session_id": "s1", "turn": 2, "source": "pointed"},
+            embed_model="",
+        )
+        == []
+    )
+    assert await _texts(memory) == [BOB]
+
+
+async def test_a_note_sleep_writes_still_replaces_the_persons_own_note(
+    memory: ChatMemory,
+) -> None:
+    old = await _put(memory, BOB, "user_statement")
+    new = await _put(memory, ALICE, "sleep", source="sleep")
+    assert new.replaced == old.id
+    assert await _texts(memory) == [ALICE]
+
+
+async def test_only_a_note_the_persons_own_words_made_is_theirs(
+    memory: ChatMemory,
+) -> None:
+    await _put(memory, BOB, "user_statement")
+    await _put(memory, "You like tea.", "user_request")
+    await _put(memory, "Your lab is in Leeds.", "outcome", source="pointed")
+    await _put(memory, "Your desk is D4.", "outcome", source="result")
+    await _put(memory, "You run on Fridays.", "user_statement", source="pointed")
+    await _put(memory, "Your team is Atlas.", "sleep", source="sleep")
+    mine = {e.text: records.by_person(e) for e in await memory.records()}
+    assert mine == {
+        BOB: True,
+        "You like tea.": True,
+        "Your lab is in Leeds.": False,
+        "Your desk is D4.": False,
+        "You run on Fridays.": False,
+        "Your team is Atlas.": False,
+    }
+
+
 async def test_a_delete_blanks_the_decision_text_and_logs_the_delete(
     memory: ChatMemory, store: SessionStore, tmp_path: Path
 ) -> None:

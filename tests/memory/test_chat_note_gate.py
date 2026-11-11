@@ -558,6 +558,31 @@ async def test_the_text_of_a_file_block_in_a_stored_row_is_no_word_the_user_type
     assert await gate.notes() == []
 
 
+async def test_a_note_a_page_gives_never_replaces_a_note_the_user_typed(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn("My manager is Bob.")
+    typed = await gate.remember("Your manager is Bob.", "people")
+    assert typed == "Remembered: Your manager is Bob. The user sees it and can undo it."
+    await gate.finish(first)
+    turn = await gate.turn(
+        f"Read {URL} and tell me who runs the lab.", first.session_id
+    )
+    await gate.fetch(turn, URL, "Manager: Alice Wu. Lab: robotics.")
+    reply = await gate.remember("Your manager is Alice Wu.", "people")
+    assert reply.startswith(f"Remembered (source: pointed, from {HOST}): ")
+    chat = CHAT_TURN.get()
+    assert chat is not None and [w.replaced for w in chat.kept] == [None]
+    by_text = {n.text: n for n in await gate.notes()}
+    assert sorted(by_text) == ["Your manager is Alice Wu.", "Your manager is Bob."]
+    assert by_text["Your manager is Bob."].admitted_by == "user_statement"
+    assert by_text["Your manager is Alice Wu."].provenance["source"] == "pointed"
+    # Said again, the page's note is already there.
+    again = await gate.remember("Your manager is Alice Wu.", "people")
+    assert again == "Already remembered: Your manager is Alice Wu."
+
+
 @pytest.mark.parametrize("level", LEVELS)
 async def test_a_page_the_user_called_someone_else_s_supports_no_note_about_them(
     make: Any, level: str
