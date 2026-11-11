@@ -122,6 +122,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     is_cancellation,
 )
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.folders import WRITE_TOOLS
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
@@ -3820,7 +3821,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 recalled = self.hide_passwords(recalled)  # the notes follow suit
             if isinstance(user_words, str):
                 user_words = self.hide_passwords(user_words)
-        person_words = own if user_words is None else user_words
+        # A file's text is data, never the person's words (#626): they end where
+        # a file's block starts, here and in the step review.
+        person_words = words_before_files(own if user_words is None else user_words)
         if routine is not None:
             if not isinstance(routine, str):
                 raise TypeError("routine must be a str")

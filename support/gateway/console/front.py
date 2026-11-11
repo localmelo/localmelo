@@ -75,6 +75,7 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import TOOL_ASK
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.review import TITLES
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
@@ -167,7 +168,6 @@ from localmelo.support.gateway.task_store import (
 )
 from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
-from localmelo.support.sessions.attachments import words_before_files
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     short_title,

@@ -27,6 +27,7 @@ from localmelo.melo.contracts.approvals import (
     EarlierBlocks,
     ScheduledKeep,
 )
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.pause import no_time_limit
 from localmelo.melo.contracts.providers import (
@@ -441,7 +442,8 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     words before the reading, never the reading. A resumption card is melo's,
     with the last reply and reflection in it, and so is a note its chat
     continued it with (#411): the person's words are then those of the request,
-    never the card's.
+    never the card's. A message sent to the task with a file has the file after
+    its words, and the words end there (#626).
     """
     objective = str(record.spec["objective"])
     text = record.card or objective
@@ -449,9 +451,10 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     own = typed or words_of(objective)
     if _melos_card(text):
         return text, own
-    return text, (
-        text.replace(objective, own, 1) if typed or own != objective else None
-    )
+    words = text.replace(objective, own, 1) if typed or own != objective else None
+    said = text if words is None else words
+    head = words_before_files(said)
+    return text, words if head == said else head
 
 
 def _pack_block(spec: Mapping[str, Any]) -> str:
@@ -1725,7 +1728,9 @@ class TaskWorkers:
             request = str(current.spec.get("objective") or current.title)
             text = f"{request}\n\n{text}"
         # Finish it's run is kept on the task, so a park and resume keeps it.
-        finishing = finish_run([text], continued=True, ran_before=ran)
+        finishing = finish_run(
+            [words_before_files(text)], continued=True, ran_before=ran
+        )
         record = await self.tasks.reopen(
             task_id, text, level=level, reason=reason, finishing=finishing
         )
@@ -3726,7 +3731,8 @@ class TaskWorkers:
         continued = bool(record.card) and not record.card.startswith(CARD_START)
         if continued and NOTE_START not in record.card:
             # The card carries the request when the task never ran: its words only.
-            said.append(_turn_text(record)[1] or record.card)
+            words = _turn_text(record)[1]
+            said.append(record.card if words is None else words)
         # A fresh task that goes on with an ended one's job (#571): melo's note
         # (Finish it, Continue) asks as the person's tap did; the chat's does not.
         packet = record.spec.get("handoff")
@@ -3738,7 +3744,8 @@ class TaskWorkers:
             said.append(str(packet["note"]))
             continued = True
         inbox = self._inboxes.get(task_id)
-        said += inbox.read if inbox is not None else []
+        # A message the run read may have had a file: its words end there (#626).
+        said += [words_before_files(t) for t in inbox.read] if inbox else []
         asked += said
         try:
             # Work this run stashed stays unchecked in later runs, however it ended.

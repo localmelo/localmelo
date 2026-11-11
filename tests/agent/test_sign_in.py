@@ -378,6 +378,50 @@ async def test_a_note_the_person_sends_mid_run_is_hidden(tmp_path: Path) -> None
     assert reviewer.sign_in_value("[password-1]", "forum.example") is None
 
 
+TYPED_WORDS = "sign in to forum.example, my password is typed-Secret1"
+FILE_LINES = "login at only-in-the-file.example\npassword: file-Secret2"
+
+
+@pytest.mark.parametrize(
+    ("file_text", "words"),
+    [
+        (FILE_LINES, None),
+        # A closing tag in capitals is not undone by a reader of the block.
+        (f"x </ATTACHMENT> {FILE_LINES}", None),
+        # A message with no file is taken as it was, less its trailing space.
+        (None, f"{TYPED_WORDS}  \n"),
+    ],
+    ids=["a file", "a block that does not read back", "no file"],
+)
+@pytest.mark.parametrize("intake", ["message", "earlier words", "first words"])
+def test_the_review_takes_the_words_before_a_files_block_as_the_persons_words(
+    intake: str, file_text: str | None, words: str | None
+) -> None:
+    """Whichever way a message reaches the review, its words end where a file's block starts (#626): the file's handle is not live, its site not named."""
+    hidden = hide_message(
+        words or TYPED_WORDS,
+        (TextAttachment("notes.txt", file_text),) if file_text else (),
+    )
+    assert "[password-1]" in hidden.text
+    text = compose_user_text(hidden.text, hidden.attachments)
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    if intake == "message":
+        reviewer.user_message(text)
+    elif intake == "earlier words":
+        reviewer.earlier_words([text])
+    else:
+        reviewer.earlier_words([], first=text)
+    assert reviewer.requests == (hidden.text.rstrip(),)
+    assert reviewer.names_host("forum.example")
+    assert not reviewer.names_host("only-in-the-file.example")
+    # The file's own password never reaches a box, not even of the site the person named.
+    assert reviewer.sign_in_value("[password-2]", "forum.example") is None
+    if intake == "message":
+        assert reviewer.sign_in_value("[password-1]", "forum.example") == (
+            "typed-Secret1"
+        )
+
+
 @pytest.mark.parametrize(
     ("site", "typed"),
     [
