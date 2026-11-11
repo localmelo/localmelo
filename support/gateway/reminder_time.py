@@ -55,6 +55,9 @@ _WEAK = re.compile(
     r"\bdon['’]?t\s+(?:let\s+me\s+)?forget\b|记得|别忘了|不要忘了|别忘记|不要忘记", _I
 )
 _QUESTION = re.compile(r"[?？]\s*$|吗\s*[?？]?\s*$")
+# "remind me of/about <thing>" with no time asks about something said before, so it is
+# no reminder: the strong cue would otherwise ask "When should I remind you?".
+_OF_ABOUT = re.compile(r"remind\s+me\s+(?:of|about)\b", _I)
 # What may come before a weak cue (once the time words are taken out): "请记得", "你别忘了".
 _BEFORE_WEAK = re.compile(r"(?:请|麻烦你?|一定|务必|千万|你|please|pls)*", _I)
 
@@ -127,7 +130,7 @@ _CLOCK_ZH = re.compile(
     rf"(?P<h>{_N})\s*[点時时]钟?\s*(?:(?P<half>半)|(?P<m>{_N})\s*分?|整)?"
 )
 _LEAD = re.compile(
-    r"^(?:[\s,;:.，；：。、!！?？-]|please\b|to\b|that\b|about\b|and\b|then\b|的)+", _I
+    r"^(?:[\s,;:.，；：。、!！?？-]|please\b|to\b|that\b|about\b|of\b|and\b|then\b|的)+", _I
 )
 _TRAIL = re.compile(r"[\s,;:.，；：。、!！?？-]+$")
 
@@ -342,9 +345,10 @@ def _tidy(text: str) -> str:
 def parse_reminder(text: str, now: datetime) -> Reminder | None:
     """The reminder a message asks for, or ``None`` when it asks for none.
 
-    ``None`` too for a cue with no work left ("remind me tomorrow at 9") and for
-    a weak cue (``记得``, ``don't forget``) with no time or in a question. A strong
-    cue with no usable time gives a :class:`Reminder` whose ``problem`` says why.
+    ``None`` too for a cue with no work left ("remind me tomorrow at 9"), for
+    "remind me of/about …" with no time (a question), and for a weak cue (``记得``,
+    ``don't forget``) with no time or in a question. A strong cue with no usable
+    time gives a :class:`Reminder` whose ``problem`` says why.
     """
     text = unicodedata.normalize("NFKC", text).strip()
     if len(text) > MAX_CHARS:
@@ -355,6 +359,8 @@ def parse_reminder(text: str, now: datetime) -> Reminder | None:
     if cue is None:
         return None
     when, rest = _read(f"{text[: cue.start()]} {text[cue.end() :]}", now)
+    if not when.named and _OF_ABOUT.match(text, cue.start()):
+        return None
     work = _tidy(rest)
     if len(work) < 2:
         return None
