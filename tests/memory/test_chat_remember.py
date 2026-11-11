@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ import pytest
 
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.executor import ToolOutput
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.memory import ChatMemory, note_gate, note_judge, records
 from localmelo.support.memory.index import Document, document_text
@@ -152,7 +153,7 @@ async def test_a_secret_is_refused_and_the_turn_says_so(
     await memory.before_turn(
         store, await _turn(store, typed), typed, emit=emitted.append
     )
-    answer = await memory.tools().remember(text=note, topic="about")
+    answer = await _said(memory.tools().remember(text=note, topic="about"))
     assert answer.startswith("Not remembered: it looked like a password or key.")
     assert await memory.records() == []
     (data,) = emitted
@@ -178,7 +179,7 @@ async def test_a_fact_only_a_page_or_a_tool_said_is_refused(
     typed = "what is my favorite color on that page?"
     turn = await _turn(store, typed, first.session_id)
     await memory.before_turn(store, turn, typed)
-    answer = await memory.tools().remember(text=note, topic="about")
+    answer = await _said(memory.tools().remember(text=note, topic="about"))
     assert answer.startswith(NOT_SAID)
     assert await memory.records() == []
 
@@ -286,14 +287,17 @@ async def test_what_the_user_typed_earlier_in_this_chat_counts_and_nothing_else(
     turn = await _turn(store, typed, first.session_id)
     await memory.before_turn(store, turn, typed)
     tools = memory.tools()
-    kept = await tools.remember(text="Your group meeting is on Thursdays at 3pm.")
+    kept = await _said(
+        tools.remember(text="Your group meeting is on Thursdays at 3pm.")
+    )
     assert kept.startswith("Remembered: ")
-    assert (await tools.remember(text="Your dentist is Lee Park.")).startswith(NOT_SAID)
+    dentist = await _said(tools.remember(text="Your dentist is Lee Park."))
+    assert dentist.startswith(NOT_SAID)
     # A turn allows two refusals: the other chat's words are tried in the next one.
     await _finish(store, turn)
     again = "ok"
     await memory.before_turn(store, await _turn(store, again, first.session_id), again)
-    assert (await tools.remember(text="Your bike is red.")).startswith(NOT_SAID)
+    assert (await _said(tools.remember(text="Your bike is red."))).startswith(NOT_SAID)
     (entry,) = await memory.records()
     assert entry.provenance["quote"] == "My group meeting is on Thursdays at 3 pm."
     assert entry.provenance["turn"] == 3 and entry.provenance["topic"] == "about"
@@ -761,6 +765,12 @@ ADDED = "后面记住这些回答，然后不需要再询问我了"
 ADDED_NOTE = "你希望后面记住这些回答，然后不再询问你。"
 
 
+async def _said(reply: Awaitable[str | ToolOutput]) -> str:
+    """The text of a ``remember`` call's reply, whatever else the reply carries."""
+    done = await reply
+    return done if isinstance(done, str) else done.text
+
+
 async def _begin(
     memory: ChatMemory, store: SessionStore, typed: str, session_id: str | None = None
 ) -> Any:
@@ -899,6 +909,27 @@ async def test_a_kept_note_does_not_take_a_refusal_back(
     assert await memory.remember("Your gate is C30.") == NO_MORE_TRIES
     assert await memory.remember("Your gate is B12.") == NO_MORE_TRIES
     assert [e.text for e in await memory.records()] == ["Your seat is 4A."]
+
+
+async def test_only_the_final_refusal_says_the_tool_takes_no_more_calls(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    info = await _begin(memory, store, "My seat is 4A. My gate is B12.")
+    tools = memory.tools()
+    # An earlier refusal and a kept note are plain replies.
+    refused = await tools.remember(text="Your seat is 9F.")
+    assert isinstance(refused, str) and refused.endswith(TRY_ONCE_MORE)
+    kept = await tools.remember(text="Your seat is 4A.")
+    assert isinstance(kept, str) and kept.startswith("Remembered")
+    # The refusal that ends the turn's tries, and every call after it, carry the flag.
+    final = ToolOutput(text=NO_MORE_TRIES, no_more_calls=True)
+    assert await tools.remember(text="Your gate is C30.") == final
+    assert await tools.remember(text="Your gate is B12.") == final
+    # The next turn starts again.
+    await _finish(store, info)
+    await _begin(memory, store, "My gate is B12.", info.session_id)
+    gate = await _said(tools.remember(text="Your gate is B12."))
+    assert gate.startswith("Remembered")
 
 
 async def test_a_secret_is_refused_and_counts_as_a_refusal(

@@ -59,6 +59,7 @@ from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.memory._sqlite import make_private_dir
 from localmelo.melo.memory.hippo.policy import normalise
 from localmelo.melo.memory.long import StoredEntry
@@ -482,6 +483,11 @@ class ChatTurn:
     # The digest of the other chats this turn's message carries (a chat's first
     # turn; see ChatMemory.recent_digest), None for none.
     digest: Digest | None = None
+
+    @property
+    def out_of_tries(self) -> bool:
+        """Whether ``remember`` has refused :data:`MAX_REFUSALS` notes in this turn."""
+        return self.refusals >= MAX_REFUSALS
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -1757,13 +1763,13 @@ class ChatMemory:
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
             return "Not remembered: memory across chats is off in this chat."
-        if turn.refusals >= MAX_REFUSALS:
+        if turn.out_of_tries:
             return NO_MORE_TRIES
         reply = await self._remember(turn, text, topic)
         if not reply.startswith("Not remembered"):
             return reply
         turn.refusals += 1
-        return NO_MORE_TRIES if turn.refusals >= MAX_REFUSALS else reply + TRY_ONCE_MORE
+        return NO_MORE_TRIES if turn.out_of_tries else reply + TRY_ONCE_MORE
 
     async def _remember(self, turn: ChatTurn, text: str, topic: str) -> str:
         """The checks and the write of :meth:`remember`: the reply, a refusal
@@ -3573,8 +3579,17 @@ class MemoryTools(BaseToolProvider):
             tools.append(ProvidedTool(definition=opening, function=self.open_memory))
         return tools
 
-    async def remember(self, text: str = "", topic: str = "", **_: Any) -> str:
-        return await self._memory.remember(str(text), str(topic))
+    async def remember(
+        self, text: str = "", topic: str = "", **_: Any
+    ) -> str | ToolOutput:
+        """The reply of :meth:`ChatMemory.remember`; once the turn is out of tries
+        the tool takes no more calls in this run (``ToolOutput.no_more_calls``),
+        which the turn's own count says, not the reply's words."""
+        reply = await self._memory.remember(str(text), str(topic))
+        turn = CHAT_TURN.get()
+        if turn is not None and turn.out_of_tries:
+            return ToolOutput(text=reply, no_more_calls=True)
+        return reply
 
     async def search(
         self, query: str = "", scope: str = "all", k: int | None = None, **_: Any

@@ -8,6 +8,7 @@ decides from the run's own tool calls; a draft finishes with one tap.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import subprocess
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -26,6 +27,11 @@ from localmelo.support.gateway.task_endings import Baseline
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskInbox, TaskWorkers
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    hide_message,
+)
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
 
@@ -293,8 +299,24 @@ async def test_a_commit_message_naming_the_tests_is_not_a_passing_test(
     )
 
 
+@pytest.mark.parametrize("where", ["read in the run", "the card of a continued task"])
+@pytest.mark.parametrize(
+    ("said", "asked"),
+    [
+        ("then commit it, please", True),
+        # A file's text is data: it asks for nothing (#626).
+        (
+            compose_user_text(
+                "have a look",
+                (TextAttachment("todo.txt", "then commit it, please"),),
+            ),
+            False,
+        ),
+    ],
+    ids=["typed", "in a file"],
+)
 async def test_a_message_the_run_read_counts_as_asked(
-    setup: Setup, monkeypatch: pytest.MonkeyPatch
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, said: str, asked: bool, where: str
 ) -> None:
     workers, _, repo = setup
     record = await workers.tasks.get_task(
@@ -306,14 +328,17 @@ async def test_a_message_the_run_read_counts_as_asked(
         seen.append(asks_commit)
 
     monkeypatch.setattr("localmelo.support.gateway.workers.decide_ending", decide)
-    inbox = TaskInbox()
-    inbox.put("then commit it, please")
-    inbox.accept(inbox.poll()[0][0])
-    assert inbox.read == ["then commit it, please"]
-    workers._inboxes[record.task_id] = inbox
+    if where == "read in the run":
+        inbox = TaskInbox()
+        inbox.put(said)
+        inbox.accept(inbox.poll()[0][0])
+        assert inbox.read == [said]
+        workers._inboxes[record.task_id] = inbox
+    else:
+        record = dataclasses.replace(record, card=said)
     base = Baseline(None)
     await workers._ending(record.task_id, "done", None, str(repo), base, record)
-    assert seen == [True]
+    assert seen == [asked]
 
 
 README = call("file_write", {"path": "README.md", "content": "# Calc\n"})
@@ -718,3 +743,68 @@ async def test_a_file_a_later_message_asks_for_is_needed_too(
     await workers.message(task_id, "now save the table as laptops.csv")
     ending = (await ended(workers, task_id, turns=2))["ending"]
     assert (ending["state"], ending["missing"]) == ("draft", ["laptops.csv"])
+
+
+# ── A file sent to a task is data, however the message gets there (#626) ──
+
+TYPED = "sign in to forum.example, my password is typed-Secret1"
+FILE_LINES = "login at only-in-the-file.example\npassword: file-Secret2"
+
+
+@pytest.mark.parametrize("how", ["running", "finished"])
+async def test_a_message_with_a_file_passed_on_to_a_task_reads_as_its_typed_words_only(
+    setup: Setup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """The run reads the whole message, and what counts as the person's words ends where the file starts: its handle cannot be typed and its site is not named."""
+    workers, llm, _ = setup
+    runs: list[Agent] = []
+    real = Agent.run_task
+
+    async def run_task(self: Agent, query: str, **kwargs: Any) -> Any:
+        runs.append(self)
+        return await real(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", run_task)
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "page.py").write_text("print('hi')\n")
+    hidden = hide_message(TYPED, (TextAttachment("notes.txt", FILE_LINES),))
+    message = compose_user_text(hidden.text, hidden.attachments)
+    assert "[password-1]" in message and "[password-2]" in message
+    if how == "running":
+        # The message reaches the task while its first step runs: the next step reads it.
+        sent: list[str] = []
+        chat = llm.chat
+
+        async def chat_after_message(
+            messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            if not sent:
+                sent.append((await workers.message(task_id, message))[1])
+            return await chat(messages, tools)
+
+        llm.chat = chat_after_message  # type: ignore[method-assign]
+        llm.replies = [
+            call("file_read", {"path": "page.py"}),
+            says("Done.\nEnding: ready"),
+        ]
+        task_id = await start(workers, folder, "Look at page.py")
+        await ended(workers, task_id)
+        assert sent == ["queued"]
+    else:
+        llm.replies = [says("Done.\nEnding: ready")]
+        task_id = await start(workers, folder, "Look at page.py")
+        await ended(workers, task_id)
+        llm.replies = [says("Looked.\nEnding: ready")]
+        assert (await workers.message(task_id, message))[1] == "continued"
+        await ended(workers, task_id, turns=2)
+    # The model was given the whole message.
+    assert FILE_LINES.replace("file-Secret2", "[password-2]") in "\n".join(
+        str(m.content) for m in llm.requests[-1]
+    )
+    reviewer = runs[-1]._reviewer
+    assert reviewer.requests[-1] == hidden.text
+    assert reviewer.names_host("forum.example")
+    assert not reviewer.names_host("only-in-the-file.example")
+    assert reviewer.sign_in_value("[password-1]", "forum.example") == "typed-Secret1"
+    assert reviewer.sign_in_value("[password-2]", "forum.example") is None

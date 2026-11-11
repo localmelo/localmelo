@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 
 from localmelo.melo.agent._earlier import EARLIER_END, EARLIER_HEAD, earlier_block
+from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.support.gateway.front_rules import norm
 from localmelo.support.gateway.task_files import files_line
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS
@@ -54,7 +55,6 @@ from localmelo.support.memory.recall import (
     turn_said,
 )
 from localmelo.support.memory.service import ChatTurn, is_owner_question
-from localmelo.support.sessions.attachments import words_before_files
 from localmelo.support.sessions.runner import earlier_pair, earlier_turns
 from localmelo.support.sessions.store import SessionStore, TurnInfo
 

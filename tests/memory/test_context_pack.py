@@ -557,7 +557,7 @@ async def test_a_project_note_made_in_a_chat_remembers_its_folder(
     reply = await memory.tools().remember(
         text="Your project uses uv and pytest.", topic="projects"
     )
-    assert reply.startswith("Remembered")
+    assert isinstance(reply, str) and reply.startswith("Remembered")
     (entry,) = await memory.records()
     assert entry.provenance["workspace"] == os.path.realpath(real)
     objective = "check that the README and the tests folder are in order"
@@ -602,7 +602,7 @@ async def test_only_a_project_note_stores_a_workspace(
     reply = await memory.tools().remember(
         text="Your project uses uv and pytest.", topic=topic
     )
-    assert reply.startswith("Remembered"), reply
+    assert isinstance(reply, str) and reply.startswith("Remembered"), reply
     (entry,) = await memory.records()
     assert entry.provenance["topic"] == topic
     assert "workspace" not in entry.provenance

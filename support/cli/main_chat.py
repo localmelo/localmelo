@@ -42,7 +42,7 @@ from rich.text import Text
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.folders import Access, OutsideAccess
 from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS, MAX_NOTES
-from localmelo.melo.contracts.review import ActionReview
+from localmelo.melo.contracts.review import WORDS_CAN_ALLOW, ActionReview
 from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
@@ -461,8 +461,18 @@ class GatewayClient:
             "GET", _path(session_id, "turns"), params={"limit": limit}
         )
 
-    async def send(self, session_id: str, text: str, key: str) -> dict[str, Any]:
-        body = {"text": text, "client_request_id": key}
+    async def send(
+        self, session_id: str, text: str, key: str, seen: int | None = None
+    ) -> dict[str, Any]:
+        """A message to *session_id*; *seen* is the stored id of the newest card or line printed there.
+
+        The gateway reads it as the page's ``seen`` (API v2, ``POST /turns``):
+        a reply goes to the task that waits only when that task's request is
+        among what was printed. Without it, nothing counts as printed.
+        """
+        body: dict[str, Any] = {"text": text, "client_request_id": key}
+        if seen is not None:
+            body["seen"] = seen
         return await self.call("POST", _path(session_id, "turns"), json=body)
 
     async def create(
@@ -577,6 +587,46 @@ class GatewayClient:
 # ── Lines ──
 
 
+def _takes_a_reply(card: Mapping[str, Any]) -> bool:
+    """Whether the gateway takes the person's next typed message for this card's task (#617).
+
+    Only a task's end that needs the person: the run finished and its ending is
+    ``blocked`` (it asked a question, or stopped on a step Auto blocked). The
+    server reads the same facts (``task_stage``: a finished task that ended
+    ``blocked`` needs a ``review``); a ``waiting`` approval, an out-of-steps
+    stop, a failure, a finished task and a chat card take no reply.
+    """
+    ending = card.get("ending")
+    return (
+        card.get("source_kind") == "task"
+        and card.get("state") == "done"
+        and isinstance(ending, Mapping)
+        and ending.get("state") == "blocked"
+    )
+
+
+def _reply_hint(card: Mapping[str, Any]) -> str:
+    """What a reply to :func:`_takes_a_reply`'s card does, in a few words.
+
+    ``yes`` is named only when the card itself offers one blocked step a plain
+    yes may allow: the gateway's ``yes_step`` reads the same ``block`` (a
+    request id, and every kind of its review one the person's words may allow).
+    Any other card gets the general words. It is a hint: the server decides.
+    """
+    block = card.get("block")
+    review = block.get("review") if isinstance(block, Mapping) else None
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    if (
+        isinstance(block, Mapping)
+        and block.get("request_id")
+        and isinstance(kinds, list)
+        and kinds
+        and all(kind in WORDS_CAN_ALLOW for kind in kinds)
+    ):
+        return "yes allows once"
+    return "reply here"
+
+
 def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
     """A card as one coloured line: what came back, its title, how to open it."""
     symbol, style, word = _CARD_WORDS.get(
@@ -594,6 +644,8 @@ def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
         how = "/chats opens it"
     elif card.get("state") == "waiting":
         how = "answer it in the web console: melo console"
+    elif _takes_a_reply(card):
+        how = f"{_reply_hint(card)} {symbols.dot} melo task show {source}"
     else:
         how = f"melo task show {source}"
     head = f"{getattr(symbols, symbol)} {word}: {title}"
@@ -921,6 +973,10 @@ class MainChat:
         self._asks: dict[str, asyncio.Task[None]] = {}
         # The card and echo events already drawn, by id.
         self._seen: set[int] = set()
+        # The newest stored card or line the terminal printed in each chat (chat id -> event id): what a
+        # message of that chat says it had in front of the person. Only a line printed counts, never one
+        # that arrived and drew nothing, and only the id the gateway gave the event.
+        self._drawn: dict[str, int] = {}
         # The browser cards of each open chat that are in use, by chat and card key: what Done gives back.
         self._browsers: dict[str, dict[str, Mapping[str, Any]]] = {}
         self._lost = False
@@ -1069,12 +1125,16 @@ class MainChat:
             if isinstance(card.get("id"), int):
                 self._seen.add(card["id"])
             out.print(card_line(card, symbols, width))
+            self._drew(self.chat.id, card.get("id"))
         for echo in left:
             self._seen.add(int(echo["id"]))
             # A row, not the input: history is read again at every start.
             if echo.get("note_back") and echo.get("typed"):
                 self._not_sent(self.chat.title, str(echo["typed"]))
-            out.print(echo_line(echo, symbols, width))
+            line = echo_line(echo, symbols, width)
+            out.print(line)
+            if line.plain:
+                self._drew(self.chat.id, echo["id"])
         out.print(Text(""))
 
     # ── The stream ──
@@ -1141,6 +1201,7 @@ class MainChat:
                 return
             # A card stands apart from the turns around it.
             self.host.out.print(*([line, Text("")] if kind == CARD_EVENT else [line]))
+            self._drew(chat_id, event_id)
             return
         turn, number = self._turn, event.get("turn")
         if kind == "turn.started":
@@ -1256,6 +1317,23 @@ class MainChat:
 
     def _say(self, text: str, style: str) -> None:
         self.host.out.print(Text(text, style=style))
+
+    def _drew(self, chat_id: str | None, event_id: object) -> None:
+        """The terminal printed the stored card or line *event_id* of *chat_id*: the next message says so."""
+        if chat_id and type(event_id) is int:
+            self._drawn[chat_id] = max(self._drawn.get(chat_id, 0), event_id)
+
+    def _show_echo(self, chat_id: str | None, echo: Mapping[str, Any]) -> None:
+        """Print *echo*, the line a request of *chat_id* answered with, unless the stream drew it first."""
+        event_id = echo.get("id")
+        if isinstance(event_id, int):
+            if event_id in self._seen:
+                return
+            self._seen.add(event_id)
+        line = echo_line(echo, self.host.renderer.symbols, self.host.out.width)
+        self.host.out.print(line)
+        if line.plain:
+            self._drew(chat_id, event_id)
 
     # ── Approvals ──
 
@@ -1434,6 +1512,8 @@ class MainChat:
         loop = asyncio.get_running_loop()
         key = "" if retry else uuid.uuid4().hex
         turn = _Turn(key, loop.create_future(), retry=bool(retry), chat=self.chat)
+        # What was printed when the person pressed Enter, before anything is awaited.
+        seen = self._drawn.get(self.chat.id or "")
         turn.notes, self._early_notes = self._early_notes, []
         self._turn = turn
         try:
@@ -1462,15 +1542,10 @@ class MainChat:
                     with contextlib.suppress(GatewayError):
                         await self.client.rename(chat.id, chat.title)
             else:
-                body = await self.client.send(chat.id, text, turn.key)
+                body = await self.client.send(chat.id, text, turn.key, seen)
             echo = body.get("echo")
             if isinstance(echo, dict):
-                event_id = echo.get("id")
-                if not (isinstance(event_id, int) and event_id in self._seen):
-                    if isinstance(event_id, int):
-                        self._seen.add(event_id)
-                    symbols, width = self.host.renderer.symbols, self.host.out.width
-                    self.host.out.print(echo_line(echo, symbols, width))
+                self._show_echo(chat.id, echo)
                 return "echo"
             if isinstance(body.get("note"), dict):
                 # A turn of another window runs: the words joined it.
@@ -1530,15 +1605,10 @@ class MainChat:
         shown = _sleeps(page.get("echoes") or [])
         if not shown:
             raise ValueError(t_in("en", "slash.memoryUndoNone"))
-        echo = await self.client.tap(int(shown[-1]["id"]), "undo")
-        event_id = echo.get("id")
         # The stream may have drawn it already; a side chat's stream is not the main chat's.
-        if isinstance(event_id, int) and event_id in self._seen:
-            return
-        if isinstance(event_id, int):
-            self._seen.add(event_id)
-        symbols, width = self.host.renderer.symbols, self.host.out.width
-        self.host.out.print(echo_line(echo, symbols, width))
+        self._show_echo(
+            self.main_id, await self.client.tap(int(shown[-1]["id"]), "undo")
+        )
 
     @property
     def mode(self) -> ChatMode:

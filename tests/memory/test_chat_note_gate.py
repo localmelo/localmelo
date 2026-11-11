@@ -226,6 +226,7 @@ class Gate:
         if turn is not None:
             turn.refusals = 0
         reply = await self.memory.tools().remember(text=text, topic=topic)
+        assert isinstance(reply, str)  # The first refusal of a turn is plain text.
         return reply.removesuffix(TRY_ONCE_MORE)
 
     async def notes(self) -> list[Any]:
