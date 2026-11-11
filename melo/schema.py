@@ -1127,9 +1127,9 @@ class RunResult:
     Python reported refused, or ``{"writes": "not_confined", "reason":
     ...}``. :meth:`to_dict` leaves it out when it is ``None``.
 
-    ``answered_on_stop`` is true only for a run that ended ``gate_stopped``
-    or ``budget_exhausted`` with no answer, whose ``result`` then comes from
-    the extra request that ``AgentOptions.answer_on_stop`` makes.
+    ``answered_on_stop`` is true only for a run that ended ``gate_stopped``,
+    ``budget_exhausted`` or ``stuck`` with no answer, whose ``result`` then comes
+    from the extra request that ``AgentOptions.answer_on_stop`` makes.
     ``format_fixed`` is true only for a run whose ``result`` got the closing line
     that the task's text asks for, from one more request of the same option.
     :meth:`to_dict` leaves each out when it is false.

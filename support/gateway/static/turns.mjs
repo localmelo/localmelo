@@ -447,7 +447,7 @@ export function statusLine(status, error) {
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */
 export function canContinue(turn, newest) {
   return newest && !turn.origin && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
-    ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
+    ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "stuck", "provider_error", "timeout", "cancelled"].includes(turn.status);
 }
 
 /** A retry undoes the newest finished turn, never an earlier or undone one, nor a task's question. */
