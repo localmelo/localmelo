@@ -93,10 +93,6 @@ MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
 CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
-# Where a note the chat's model keeps may come from, in two cumulative levels, and
-# the bar a note's meaning must clear against its sources: see MemoryConfig.note_gate.
-MEMORY_NOTE_GATE = ("pointed", "meaning")
-MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -407,17 +403,10 @@ class MemoryConfig:
     1) is how many windows of a chat ``melo memory ingest`` has the chat model read
     at once (the items are the same, only the time changes), and ``compress_cache``
     the path of the file that keeps each window's reply (empty:
-    ``compress_cache.jsonl`` in the memory folder). Two more are about where a note
-    the chat's model keeps with ``remember`` may come from (#442). ``note_gate``,
-    ``pointed`` (the words the user typed in the chat, a page or file the user
-    pointed to in it and a finished task's result shown in it, the default) or
-    ``meaning`` (also a note that says the same in other words or another language:
-    its key tokens must be found and its meaning must be close to a source); the
-    second includes the first. The value ``typed`` reads as ``pointed``.
-    ``note_min_cosine`` (0.20-0.95) is the least similarity of meaning that counts
-    as support in the last level. ``project_instructions = "off"`` stops a task that
-    the person made from reading the instruction file of its folder (``AGENTS.md``,
-    ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
+    ``compress_cache.jsonl`` in the memory folder). ``project_instructions = "off"``
+    stops a task that the person made from reading the instruction file of its
+    folder (``AGENTS.md``, ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it
+    starts.
     """
 
     across_chats: bool = True
@@ -435,8 +424,6 @@ class MemoryConfig:
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
     )
-    note_gate: str = "pointed"  # pointed | meaning: note sources.
-    note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -820,7 +807,6 @@ class Config:
         for name, (floor, ceiling) in (
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
-            ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
             if not floor <= value <= ceiling:
@@ -830,7 +816,6 @@ class Config:
         for name, allowed in (
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
-            ("note_gate", MEMORY_NOTE_GATE),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
@@ -1590,18 +1575,6 @@ _SPELLINGS: dict[str, Callable[[Any], Any]] = {
 }
 
 
-# Values that every way of setting a field (the file, ``-X``) reads as another value:
-# key -> {value: the value it reads as}. ``typed`` reads as the level that includes it.
-_ALIASES: dict[str, dict[str, str]] = {"memory.note_gate": {"typed": "pointed"}}
-
-
-def read_alias(key: str, value: Any) -> Any:
-    """*value* of the setting *key* as the config reads it: an alias is the value it
-    stands for, anything else is as it is."""
-    names = _ALIASES.get(key)
-    return names.get(value, value) if names and isinstance(value, str) else value
-
-
 def _read(cfg: Config, data: Mapping[str, Any]) -> None:
     """Set each field that a table of *data* holds.
 
@@ -1615,7 +1588,7 @@ def _read(cfg: Config, data: Mapping[str, Any]) -> None:
                 key = f"{table}.{name}"
                 if key in fields:
                     spelled = _SPELLINGS.get(key, lambda v: v)(value)
-                    set_key(cfg, key, read_alias(key, spelled))
+                    set_key(cfg, key, spelled)
 
 
 def _load_file() -> Config:

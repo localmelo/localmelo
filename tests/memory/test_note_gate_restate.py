@@ -381,32 +381,11 @@ def test_the_wording_set_is_small_and_leaves_out_details() -> None:
 
 def test_the_evaluation_script_runs_without_a_model(script: ModuleType) -> None:
     for cases in (CASES, HELDOUT):
-        results = script.run(cases, None, 0.55)
+        results = script.run(cases)
         assert list(results) == ["T0", "T1", "T1b"]
         table = "\n".join(script.table(cases, results))
         assert "| restate | zh |" in table and "base admitted" in table
         assert script.mistakes(cases, results)
     incident = BY_ID["incident-zh-1"]["id"]
-    results = script.run(CASES, None, 0.55)
+    results = script.run(CASES)
     assert not results["T0"][incident].admitted and results["T1b"][incident].admitted
-
-
-def test_the_candidate_meaning_checks_in_the_script_read_numbers_titles_and_values(
-    script: ModuleType,
-) -> None:
-    # A number word is a key token, held by the word or its digits.
-    assert script.unheld_keys("You have seven cats.", ["I have six cats."]) == ["seven"]
-    assert script.unheld_keys("You have six cats.", ["I have 6 cats."]) == []
-    assert script.unheld_keys("You have 6 cats.", ["I have six cats."]) == []
-    # A name after a title is a key token.
-    typed = ["My doctor is Dr. Lindqvist."]
-    assert script.unheld_keys("Your doctor is Dr. Lindgren.", typed) == ["Lindgren"]
-    assert script.unheld_keys("Your doctor is Dr. Lindqvist.", typed) == []
-    # A Chinese value is found or the note is refused; another script has none to find.
-    said = ["我住在苏州，坐地铁通勤。"]
-    assert script.unheld_cjk_values("你住在杭州，坐地铁通勤。", said)[:2] == [
-        "杭",
-        "杭州",
-    ]
-    assert script.unheld_cjk_values("你住在苏州，会坐地铁通勤。", said) == []
-    assert script.unheld_cjk_values("你住在苏州。", ["I live in Suzhou."]) == []

@@ -173,8 +173,6 @@ it; the option shown still works. A comparison names the issue that decides it.
   memory.recall_source         turns        (#428)
   memory.compress_parallel     1
   memory.compress_cache        ""
-  memory.note_gate             pointed      (#442)
-  memory.note_min_cosine       0.55         (#442)
   memory.project_instructions  on
   memory.keep_decision_text    false       --keep-decision-text (#4)
   memory.dir                   built in    --memory-dir
