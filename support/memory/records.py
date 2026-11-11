@@ -53,7 +53,11 @@ from localmelo.melo.memory.hippo.policy import (
     normalise,
     overlap,
 )
-from localmelo.melo.memory.hippo.signals import classify_user_text, request_clause
+from localmelo.melo.memory.hippo.signals import (
+    classify_user_text,
+    request_clause,
+    request_note,
+)
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
@@ -719,8 +723,10 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     facts = [_release(f) for f in signals.facts]
     found = [_release(f) for f in signals.request_facts]
     # A request whose words after the marker did not read as a fact alone
-    # ("Remember, I'm allergic to peanuts.") keeps the whole sentence.
-    found += [f for f in facts if classify_user_text(f).remember]
+    # ("Remember, I'm allergic to peanuts.") keeps the sentence without its marker.
+    for fact in facts:
+        if classify_user_text(fact).remember and (note := request_note(fact)):
+            found.append(note)
     # A statement is not kept by rule, but one with a secret still says so.
     refused = any(sensitive(s) for s in facts)
     out: list[Candidate] = []

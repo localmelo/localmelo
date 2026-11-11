@@ -90,6 +90,16 @@ _CLAUSE_LEAD = re.compile(r"^[\s,:;，：；\-—–、]+", re.UNICODE)
 _CLAUSE_THAT = re.compile(r"^(?:the\s+fact\s+)?that\b[\s,:;，：；]*", re.IGNORECASE)
 # "Remember to buy milk." is a to-do, not a fact.
 _INFINITIVE_LEAD = re.compile(r"^(?:to\b|去)", re.IGNORECASE)
+# A note read later without its chat has to hold what it says. A clause that opens with
+# the word of an indirect question ("where I work now") or with a third-person pronoun
+# ("her email") points at something the chat held: what the person asked melo to
+# remember is that thing, and these words only name it.
+_POINTS_ELSEWHERE = re.compile(
+    r"^[\s\"'“‘(（\[]*(?:(?:where|what|when|who|whom|which|how|why|whether"
+    r"|he|him|his|she|her|hers|they|them|their|theirs|it|its)\b"
+    r"|哪|什么|谁|何时|怎么|多少|几|他|她|它)",
+    re.IGNORECASE,
+)
 
 # A meta sentence is not a stable fact about the user (review finding 6):
 # "my task is …" and "我的任务是…" describe the work, not the person.
@@ -160,6 +170,28 @@ def request_clause(sentence: str) -> str:
     return clause.strip()
 
 
+def stands_alone(note: str) -> bool:
+    """Whether *note*, the words a remember request leaves, reads on its own when it is
+    found later without its chat: it is no to-do ("remember to call …") and it does not
+    open with the word of an indirect question or a third-person pronoun
+    (:data:`_POINTS_ELSEWHERE`)."""
+    return not (_INFINITIVE_LEAD.match(note) or _POINTS_ELSEWHERE.match(note))
+
+
+def request_note(sentence: str) -> str:
+    """The note a statement leaves that asks to remember a fact and states it, when the
+    words after the marker alone did not read as one (:func:`classify_user_text`): those
+    words when they state the fact ("Remember that I'm allergic to peanuts." leaves "I'm
+    allergic to peanuts."), else the whole *sentence* ("I live in Leeds, remember
+    that."). ``""`` when that note does not stand alone (:func:`stands_alone`)."""
+    clause = request_clause(sentence)
+    stated = bool(clause) and (
+        _states_a_statement_marker(clause) or _states_a_fact(clause)
+    )
+    note = clause if stated else sentence
+    return note if stands_alone(note) else ""
+
+
 def _is_meta_statement(text: str) -> bool:
     """Whether a ``my … is`` sentence names the work, not the person."""
     for match in _MY_IS.finditer(text):
@@ -215,9 +247,9 @@ def classify_user_text(text: str) -> UserSignals:
     store to remember and never states a fact (review finding 6). ``my … is``
     and ``我的…是`` also refuse a meta noun, because a task, question or
     plan is not a stable fact. A remember request's clause after the marker
-    is a ``request_facts`` entry, written with ``user_request`` beside the
-    run's digest; a direct statement stays a ``facts`` entry, written at
-    once with ``user_statement``.
+    is a ``request_facts`` entry when it stands alone (:func:`stands_alone`),
+    written with ``user_request`` beside the run's digest; a direct statement
+    stays a ``facts`` entry, written at once with ``user_statement``.
     """
     remember = False
     facts: list[str] = []
@@ -233,7 +265,7 @@ def classify_user_text(text: str) -> UserSignals:
         if sentence_remember:
             clause = request_clause(stripped)
             if clause and _states_a_declarative_fact(clause):
-                if clause not in request_facts:
+                if clause not in request_facts and stands_alone(clause):
                     request_facts.append(clause)
                 continue
         stated = _states_a_statement_marker(stripped)

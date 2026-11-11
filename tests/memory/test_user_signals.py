@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from localmelo.melo.memory.hippo import classify_kind, classify_user_text
-from localmelo.melo.memory.hippo.signals import request_candidates, user_candidates
+from localmelo.melo.memory.hippo.signals import (
+    request_candidates,
+    request_note,
+    stands_alone,
+    user_candidates,
+)
 
 
 def test_a_question_never_asks_to_remember_or_states_a_fact() -> None:
@@ -78,6 +85,65 @@ def test_a_remember_request_to_do_carries_no_fact() -> None:
     assert signals.remember is True
     assert signals.facts == ()
     assert signals.request_facts == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Please remember where I work now and the years of my degree, then write it.",
+        "Don't forget her email and where she works, I'll need both before the meeting.",
+        "Remember that she prefers email.",
+        "记住她的邮箱和她在哪里工作。",
+    ],
+)
+def test_a_remember_request_that_points_elsewhere_carries_no_fact(text: str) -> None:
+    signals = classify_user_text(text)
+    assert signals.remember is True
+    assert signals.facts == ()
+    assert signals.request_facts == ()
+
+
+@pytest.mark.parametrize(
+    ("note", "alone"),
+    [
+        ("the launch code is NECTAR-42.", True),
+        ("my sister Ana lives in Leeds and her birthday is May 3.", True),
+        ("I'm allergic to peanuts.", True),
+        ("Items are kept in the blue box.", True),
+        ("我对花生过敏。", True),
+        ("我姐姐住在利兹。", True),
+        ("where I work now", False),
+        ("What the room number is", False),
+        ("whether she moved", False),
+        ('"Who" is Ana', False),
+        ("her email and where she works", False),
+        ("he lives in Leeds.", False),
+        ("They moved to Leeds.", False),
+        ("its start time", False),
+        ("to buy milk", False),
+        ("哪里是我的车位", False),
+        ("什么时候开会", False),
+        ("她的邮箱", False),
+        ("他们住在利兹。", False),
+        ("它的地址", False),
+        ("几点开始", False),
+    ],
+)
+def test_a_note_stands_alone_unless_it_opens_by_pointing_elsewhere(
+    note: str, alone: bool
+) -> None:
+    assert stands_alone(note) is alone
+
+
+def test_a_request_note_cuts_the_marker_and_keeps_the_rest() -> None:
+    assert request_note("Remember that I'm allergic to peanuts.") == (
+        "I'm allergic to peanuts."
+    )
+    assert request_note("I live in Leeds, remember that.") == (
+        "I live in Leeds, remember that."
+    )
+    assert request_note("She lives in Leeds, remember that.") == ""
+    assert request_note("Remember to say that I live in Leeds.") == ""
 
 
 def test_a_third_party_statement_is_not_a_user_fact() -> None:

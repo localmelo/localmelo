@@ -41,7 +41,7 @@ In the web console and the app, melo remembers across chats.
 
 | How | When | Examples |
 |---|---|---|
-| You ask | A message that asks melo to remember a fact is kept at once, whatever the model does. | "remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…", "帮我记一下…" |
+| You ask | A message that asks melo to remember a fact is kept at once, whatever the model does. A request that points at something elsewhere ("remember her email and where she works") leaves no note from this rule: the note would only repeat the ask, so melo keeps the fact itself when it has it. | "remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…", "帮我记一下…" |
 | melo judges it worth keeping | You tell melo something lasting about yourself or your work, or a finished task's result in the chat is worth keeping: the model keeps a note with its `remember` tool. It is told to keep a plain, lasting fact about you (where you live, your name, a person, your schedule, a preference) in that turn. | "I prefer short answers", "call me Ray", "I live in Utrecht", "my advisor is Dr. Okafor", "我的导师是周教授", "we decided to use Qwen3-Embedding-0.6B" |
 
 - A note is one sentence addressed to you, with its topic (About you, Preferences, People, Projects or Decisions), your words and the chat it came from.

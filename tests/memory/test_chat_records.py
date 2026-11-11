@@ -86,6 +86,30 @@ STATEMENTS = [
             ["Your piano teacher is Mr. Bellamy."],
             ["about"],
         ),
+        # The note is the fact, not the ask: it does not open with the marker.
+        (
+            "Remember that I'm allergic to peanuts.",
+            ["You are allergic to peanuts."],
+            ["about"],
+        ),
+        (
+            "Please remember that I'm allergic to peanuts.",
+            ["You are allergic to peanuts."],
+            ["about"],
+        ),
+        (
+            "Remember, my sister Ana lives in Leeds and her birthday is May 3.",
+            ["Your sister Ana lives in Leeds and her birthday is May 3."],
+            ["about"],
+        ),
+        (
+            "Please remember that the launch code is NECTAR-42.",
+            ["The launch code is NECTAR-42."],
+            ["about"],
+        ),
+        ("Don't forget that I work at Acme now.", ["You work at Acme now."], ["about"]),
+        ("记住我对花生过敏。", ["你对花生过敏。"], ["about"]),
+        ("别忘了我姐姐住在利兹。", ["你姐姐住在利兹。"], ["about"]),
     ],
 )
 def test_a_request_to_remember_becomes_a_second_person_record_in_english_and_chinese(
@@ -163,6 +187,21 @@ def test_a_plain_statement_is_not_kept_by_rule(
     ],
 )
 def test_questions_to_dos_meta_and_long_pastes_are_not_records(typed: str) -> None:
+    assert records.candidates(typed) == ([], False)
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "Please remember where I work now and the years of my degree, then write it.",
+        "Don't forget her email and where she works, I'll need both before the meeting.",
+        "Remember that she prefers email.",
+        "Remember where I parked: level 3, row B.",
+        "From now on, answer in Chinese.",
+        "记住她的邮箱和她在哪里工作。",
+    ],
+)
+def test_a_request_that_points_elsewhere_leaves_no_record(typed: str) -> None:
     assert records.candidates(typed) == ([], False)
 
 
