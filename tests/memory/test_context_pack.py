@@ -282,6 +282,13 @@ async def test_a_newer_note_from_a_page_does_not_push_out_the_persons_own_note(
     # A budget for one line keeps the person's own note, not the newer page note.
     budget = len(PACK_HEADER) + len(typed) + 1
     assert lines(await memory.context_pack("x", "c", budget)) == [typed]
+    # Nor the page note once the person reworded it.
+    assert await memory.edit_record(page.id, "Your manager is Alice Wu-Reyes.")
+    typed, other = lines(await memory.context_pack("x", "c"))
+    assert "Bob" in typed and "Alice Wu-Reyes" in other
+    assert "older" not in typed and "older" not in other
+    budget = len(PACK_HEADER) + len(typed) + 1
+    assert lines(await memory.context_pack("x", "c", budget)) == [typed]
 
 
 async def test_a_note_the_task_has_already_is_left_out(

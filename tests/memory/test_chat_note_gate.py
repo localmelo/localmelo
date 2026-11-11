@@ -724,6 +724,26 @@ async def test_recall_lists_a_page_note_the_person_edited_first_and_unmarked(
     assert HOST in mine and HOST in newer  # each still says where it came from
 
 
+async def test_recall_keeps_the_typed_note_first_beside_a_page_note_the_person_edited(
+    make: Any,
+) -> None:
+    gate = make("pointed")
+    first = await gate.turn("My manager is Bob.")
+    await gate.remember("Your manager is Bob.", "people")
+    await gate.finish(first)
+    second = await gate.turn(f"Read {URL} and tell me who runs the lab.")
+    await gate.fetch(second, URL, "Manager: Alice Wu. Lab: robotics.")
+    await gate.remember("Your manager is Alice Wu.", "people")
+    page = next(n for n in await gate.notes() if "Alice" in n.text)
+    edited = await gate.memory.edit_record(page.id, "Your manager is Alice Wu-Reyes.")
+    assert edited is not None and records.standing(edited) == records.REWORDED
+    # The reworded page note is newer; the person's own words stay the current ones.
+    typed, reworded = await recalled(gate, "Who is my manager?")
+    assert typed.startswith("- the user said “My manager is Bob.” (")
+    assert "Alice Wu-Reyes" in reworded and HOST in reworded
+    assert "older" not in typed and "older" not in reworded
+
+
 async def test_the_notes_in_every_prompt_are_the_persons_own_words_not_an_edited_page_note(
     make: Any,
 ) -> None:
@@ -1410,6 +1430,33 @@ async def put_note(gate: Gate, text: str, quote: str, **provenance: object) -> i
         embed_model="",
     )
     return written.id
+
+
+@pytest.mark.parametrize("signal", ["import", "sleep"])
+async def test_a_note_their_own_words_did_not_make_gives_no_place_for_my_website(
+    make: Any, signal: str
+) -> None:
+    """An imported note and one sleep wrote carry a quote too; only a note the
+    person's message made says which address is theirs."""
+    gate = make("pointed")
+    await records.write(
+        gate.memory.stores()[0],
+        [
+            records.Candidate(
+                f"Your website is {HOST}.", f"My website is {HOST}.", "about", signal
+            )
+        ],
+        [None],
+        source={"session_id": "s0", "turn": 1, "chat": "Main chat"},
+        embed_model="",
+    )
+    (stored,) = await gate.notes()
+    assert stored.admitted_by == signal and not records.by_person(stored)
+    assert note_gate.given_places(str(stored.provenance["quote"]))
+    turn = await gate.turn("Read my website and tell me which jobs fit.")
+    await gate.fetch(turn, URL, "You work at Acme in Leeds.")
+    chat = CHAT_TURN.get()
+    assert chat is not None and await gate.memory._pointed(chat) == []
 
 
 @pytest.mark.parametrize("quote", ["", "I run a site at jane.example.com."])

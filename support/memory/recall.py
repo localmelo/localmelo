@@ -273,11 +273,12 @@ class Item:
     # finished task's result, Oct 30``) or ``inferred`` (the model's own
     # conclusion). ``""`` for the rest.
     how: str = ""
-    # A note from a page, a file or a result does not replace it
-    # (:func:`records.kept_from_replacement`): the person's own words, an import, a
-    # note sleep wrote, or a note they reworded. Recall lists such a note first among
-    # the notes of its subject and never marks it older because of one from a source.
-    kept: bool = False
+    # How far a note is the person's own (:func:`records.standing`): 2 for their
+    # words, an import or a note sleep wrote, 1 for a note from a page, a file or a
+    # result that they reworded, 0 for one as melo took it. Among the notes of a
+    # subject recall lists the highest first and marks a note older only because of
+    # one that stands at least as high.
+    standing: int = 0
     shown: str = field(default="", compare=False)
 
     @property

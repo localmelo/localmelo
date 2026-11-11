@@ -40,7 +40,14 @@ def at(year: int, month: int, mday: int, hour: int = 12, minute: int = 0) -> flo
 def note(key: int, text: str, when: float, chat: str = "chat A") -> Item:
     """A note the person's own words made: nothing from a page replaces it."""
     return Item(
-        f"r:{key}", text, f"{chat}, {day(when)}", "s", key, when, quote=text, kept=True
+        f"r:{key}",
+        text,
+        f"{chat}, {day(when)}",
+        "s",
+        key,
+        when,
+        quote=text,
+        standing=records.OWN,
     )
 
 
@@ -200,7 +207,7 @@ def source_note(key: int, text: str, when: float, how: str = "pointed") -> Item:
     return dataclasses.replace(
         note(key, text, when),
         how=how,
-        kept=False,
+        standing=records.TAKEN,
         quote="",
         where=f"from jane.example.com, {day(when)}",
     )
@@ -260,19 +267,42 @@ def test_notes_of_one_kind_are_ordered_and_marked_as_before() -> None:
     assert [(i.key, i.older) for i in ordered] == [("r:4", ""), ("r:3", OLDER)]
 
 
-def test_a_note_kept_from_replacement_is_listed_first_whatever_its_source_label() -> (
-    None
-):
+def reworded_note(key: int, text: str, when: float) -> Item:
+    """A note from a page that the person edited by hand."""
+    return dataclasses.replace(source_note(key, text, when), standing=records.REWORDED)
+
+
+def test_a_reworded_note_is_listed_first_whatever_its_source_label() -> None:
     """A note from a page that the person reworded is kept beside a newer page note:
-    ``kept``, not ``how``, tells recall."""
-    edited = dataclasses.replace(source_note(1, BOB, at(2026, 10, 27)), kept=True)
+    ``standing``, not ``how``, tells recall."""
+    edited = reworded_note(1, BOB, at(2026, 10, 27))
     newer = source_note(2, ALICE, at(2026, 10, 28))
     for items in ([edited, newer], [newer, edited]):
         ordered = records.newer_values_first(items)
         assert [(i.key, i.older) for i in ordered] == [("r:1", ""), ("r:2", "")]
-    # A note with no source label that nothing keeps is replaced like a page's.
-    plain = dataclasses.replace(note(3, BOB, at(2026, 10, 27)), kept=False)
+    # A note with no source label that stands no higher is replaced like a page's.
+    plain = dataclasses.replace(note(3, BOB, at(2026, 10, 27)), standing=records.TAKEN)
     ordered = records.newer_values_first([plain, newer])
+    assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:3", OLDER)]
+
+
+def test_a_reworded_note_never_marks_the_persons_own_older() -> None:
+    mine = note(1, BOB, at(2026, 10, 27))
+    edited = reworded_note(2, ALICE, at(2026, 10, 28))
+    for items in ([mine, edited], [edited, mine]):
+        ordered = records.newer_values_first(items)
+        assert [(i.key, i.older) for i in ordered] == [("r:1", ""), ("r:2", "")]
+    # The person's own newer note marks it, and an older page note under it.
+    page = source_note(3, CAROL, at(2026, 10, 26))
+    later = note(4, "Your manager is Dev Rao.", at(2026, 10, 29))
+    ordered = records.newer_values_first([page, edited, later])
+    assert [(i.key, i.older) for i in ordered] == [
+        ("r:4", ""),
+        ("r:2", OLDER),
+        ("r:3", OLDER),
+    ]
+    # With no note of the person's own, the reworded one marks the older page note.
+    ordered = records.newer_values_first([page, edited])
     assert [(i.key, i.older) for i in ordered] == [("r:2", ""), ("r:3", OLDER)]
 
 

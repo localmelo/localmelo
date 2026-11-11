@@ -639,7 +639,7 @@ def _record_item(entry: StoredEntry) -> Item:
         text=entry.text,
         where=f"{place}, {day(entry.created_at)}",
         how=how,
-        kept=records.kept_from_replacement(entry),
+        standing=records.standing(entry),
         session_id=entry.session_id,
         turn=int(provenance.get("turn") or 0),
         created_at=entry.created_at,

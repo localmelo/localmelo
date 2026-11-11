@@ -700,9 +700,12 @@ async def test_a_note_is_kept_from_replacement_unless_it_is_from_material(
     await _put(memory, ALICE, signal, **provenance)
     (entry,) = await memory.records()
     assert records.kept_from_replacement(entry) is kept
-    # An edited note is kept, whatever it came from.
+    assert records.standing(entry) == (records.OWN if kept else records.TAKEN)
+    # An edited note is kept, whatever it came from; one from material stands
+    # below the person's own all the same.
     edited = await memory.edit_record(entry.id, BOB)
     assert edited is not None and records.kept_from_replacement(edited)
+    assert records.standing(edited) == (records.OWN if kept else records.REWORDED)
 
 
 async def test_a_note_the_person_edited_is_kept_from_a_page_s_replacement_but_is_not_their_own_words(

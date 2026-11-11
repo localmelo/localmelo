@@ -505,6 +505,8 @@ def test_the_places_the_user_typed(words: str, places: list[tuple[str, str]]) ->
     [
         ("My website is jane.example.com.", [("jane.example.com", "")]),
         ("my site: https://www.jane.example.com/me", [("jane.example.com", "/me")]),
+        # The dot that ends a host does not hide the path: the page, not the site.
+        ("My profile is https://github.com./jane", [("github.com", "/jane")]),
         ("我的网站是 jane.example.com。", [("jane.example.com", "")]),
         # An e-mail address names a mail domain, not a page, in any sentence.
         ("Your work email is jane@bigcorp.example.", []),

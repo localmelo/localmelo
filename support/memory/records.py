@@ -1312,17 +1312,35 @@ def by_person(entry: StoredEntry) -> bool:
     return entry.admitted_by in OWN_WORDS and not entry.provenance.get("source")
 
 
-def kept_from_replacement(entry: StoredEntry) -> bool:
-    """Whether a note from a page, a file or a result must not replace *entry*: the
-    person reworded it by hand, or it is not from material itself (its signal is not
-    ``outcome`` and its source is none of :data:`FROM_MATERIAL`): a note they typed
-    or asked for, one sleep wrote, an imported one. An older note from a page, a
-    file or a result, also one kept before sources were written, is replaced."""
+# How far a note is the person's own (:func:`standing`).
+OWN: Final = 2
+REWORDED: Final = 1
+TAKEN: Final = 0
+
+
+def standing(entry: StoredEntry) -> int:
+    """How far *entry* is the person's own, for what may replace it and for which
+    note of a subject recall shows as the current one.
+
+    :data:`TAKEN`: a note from a page, a file or a result as melo took it (its signal
+    is ``outcome`` or its source is one of :data:`FROM_MATERIAL`; also one kept
+    before sources were written). :data:`REWORDED`: such a note that the person
+    edited by hand. :data:`OWN`: any other note: one they typed or asked for, one
+    sleep wrote, an imported one, edited or not."""
     from_material = (
         entry.admitted_by == "outcome"
         or entry.provenance.get("source") in FROM_MATERIAL
     )
-    return not from_material or bool(entry.provenance.get("edited"))
+    if not from_material:
+        return OWN
+    return REWORDED if entry.provenance.get("edited") else TAKEN
+
+
+def kept_from_replacement(entry: StoredEntry) -> bool:
+    """Whether a note from a page, a file or a result must not replace *entry*: it
+    stands above :data:`TAKEN` (:func:`standing`). An older note from a page, a file
+    or a result that nobody edited is replaced."""
+    return standing(entry) > TAKEN
 
 
 def may_replace(admitted_by: str, old: StoredEntry) -> bool:
@@ -1468,11 +1486,12 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
     as older already (:func:`~localmelo.support.memory.recall.newer_first`) is
     left as it is. Other items stay where they were.
 
-    A record from a page, a file or a result replaces only an older one of that kind
-    (:func:`write`), so it is never the value that marks a kept one (``kept``:
-    :func:`kept_from_replacement`) older: the kept records come first, the newest of
-    them current, and the others follow, each showing its source. A kept record does
-    replace an older one from a page, so that one is marked as ever.
+    A record is marked older only by a newer one that stands at least as high
+    (``standing``: :func:`standing`), and the records come highest first. So a
+    record from a page, a file or a result never marks the person's own older, nor
+    one from a page that they reworded; a reworded one never marks their own; and
+    the person's own newest marks every older record of the subject, as ever. Each
+    record shows its source.
     """
     groups: dict[str, list[int]] = {}
     for at, item in enumerate(items):
@@ -1486,20 +1505,25 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
             continue
         ranked = sorted(
             found,
-            key=lambda item: (item.kept, item.created_at, _record_number(item.key)),
+            key=lambda item: (item.standing, *_newness(item)),
             reverse=True,
         )
-        # What replaces a record: for a kept one, the newest kept; for the others,
-        # the newest of all.
-        mine = normalise(ranked[0].text)
-        latest = normalise(
-            max(found, key=lambda i: (i.created_at, _record_number(i.key))).text
-        )
+        # What replaces a record: the newest of those that stand at least as high.
+        current = {
+            level: normalise(
+                max((i for i in found if i.standing >= level), key=_newness).text
+            )
+            for level in {item.standing for item in found}
+        }
         for at, item in zip(slots, ranked, strict=True):
-            current = mine if item.kept else latest
-            same = normalise(item.text) == current
+            same = normalise(item.text) == current[item.standing]
             out[at] = item if same else dataclasses.replace(item, older=OLDER)
     return out
+
+
+def _newness(item: Item) -> tuple[float, int]:
+    """What orders two records of a subject by age: the time, then the number."""
+    return item.created_at, _record_number(item.key)
 
 
 def _record_number(key: str) -> int:

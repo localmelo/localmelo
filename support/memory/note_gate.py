@@ -256,15 +256,16 @@ def typed_places(text: str) -> list[Place]:
     """The places *text* (what the user typed) names: a host alone is every page of
     it (the path ``""``), an address with a path is that page and what is below it.
 
-    The scheme, ``www.``, a trailing slash, a fragment and the punctuation after
-    the address are not part of it: ``see https://www.github.com/jane/.`` names
-    ``github.com`` at ``/jane``.
+    The scheme, ``www.``, the dot that may end a host, a trailing slash, a fragment
+    and the punctuation after the address are not part of it: ``see
+    https://www.github.com/jane/.`` names ``github.com`` at ``/jane``, and so does
+    ``github.com./jane``.
     """
     places: list[Place] = []
     for host in sorted(named_sites(text)):
         names = "|".join(re.escape(name) for name in sorted(_spellings(host)))
         pattern = re.compile(
-            r"(?<![\w.@-])(?:https?://)?(?:www\.)?(?:" + names + r")(?::\d+)?"
+            r"(?<![\w.@-])(?:https?://)?(?:www\.)?(?:" + names + r")\.?(?::\d+)?"
             rf"(?P<path>/[^{_ADDRESS_END}]*)?",
             re.IGNORECASE,
         )
