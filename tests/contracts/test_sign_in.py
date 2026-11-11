@@ -68,6 +68,11 @@ GIVEN = [
     # A run that is no value by its shape (a plain word) holds the words of a value
     # that is read the same way: the run is one value with it.
     ('Pwd 我\'pw是"abcd" x', 'Pwd [password-1]" x'),
+    # A word inside a run that is no value reads on after it (the run's own marks
+    # and the word's: neither cuts short what a quote of the word's value holds).
+    ("pw ’pw是 Password 'abcd1234", "pw ’pw是 Password '[password-1]"),
+    ('Pwd 「 is 口令 **为pwd"」"', 'Pwd [password-1]」"'),
+    ("DB_PASSWORD=ab,PASSWORD='cd\"xy\"'", "DB_PASSWORD=[password-1]'"),
 ]
 NOT_GIVEN = [
     "I forgot my password",
@@ -322,6 +327,9 @@ def test_what_is_next_to_a_shell_line_is_still_a_password_given(text: str) -> No
         # Likewise a longer name or a wrapped word.
         ("DB_PASSWORD=abcd,pw: efgh1234", ["abcd,pw:", "efgh1234"]),
         ('"password":abcd,pw: efgh1234', ["abcd,pw:", "efgh1234"]),
+        # A word inside a value that is cut out reads nothing past it: its run is no run
+        # to merge a later quoted value with (that gave two values that overlapped).
+        ("pw 「pw:pw:」' is abcd「「'", ["pw:pw:", " is abcd「「"]),
     ],
 )
 def test_a_password_word_inside_a_longer_run_still_gives_its_own_value(
@@ -366,6 +374,8 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         ('pw:ab"' * 50_000, 1),  # one run, a quote and a word in every part of it
         # Values that merge, again and again: no value is copied for each merge.
         ("pw:a" + '"pw:"bcde f' * 55_000, 1),
+        # One run that is no value, with a password word in every part of it.
+        ('Pwd "' + "口令是" * 10_000, 0),
     ],
     ids=[
         "openers",
@@ -376,6 +386,7 @@ def test_a_file_blocks_tag_is_never_a_value(text: str) -> None:
         "quotes",
         "run",
         "merges",
+        "words",
     ],
 )
 def test_a_long_line_is_read_in_time_in_proportion_to_it(line: str, spans: int) -> None:

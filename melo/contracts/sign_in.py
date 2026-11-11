@@ -276,7 +276,11 @@ def _values(text: str) -> list[tuple[int, int]]:
         first = start - quoted  # a quoted value is read from its quote
         inside = first < covered  # it starts in the last run
         if quoted:
-            if closing - start < MIN_CHARS or (hidden and inside and closing < covered):
+            if closing - start < MIN_CHARS:
+                continue
+            if hidden and inside and closing < covered:
+                if found and found[-1][0] >= run:  # cut out with the value it is in
+                    found[-1] = (found[-1][0], max(found[-1][1], closing))
                 continue
             end, stop, after = closing, closing + 1, start
             if inside:
@@ -302,14 +306,16 @@ def _values(text: str) -> list[tuple[int, int]]:
             if end - start < MIN_CHARS or (
                 match.group("strong") is None and _plain(text, start, end)
             ):
-                # A word inside a value cut out reads nothing past it: it is gone
-                # once the value has its handle.
-                if not (hidden and match.start("cue") < covered):
-                    run, covered, hidden, pos = start, stop, False, after
+                # A word inside the last run reads nothing past it, and none of a
+                # value cut out is read again once the value has its handle.
+                within = match.start("cue") < covered
+                if not (hidden and within):
+                    run, covered, hidden = start, stop, False
+                    pos = pos if within else after
                 continue
         if inside:
             if found and found[-1][0] >= run:
-                found.pop()
+                end = max(end, found.pop()[1])
             start = run
         else:
             run = first
