@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import secrets
 import time
 
 import pytest
@@ -11,6 +13,7 @@ from localmelo.melo.contracts.sign_in import (
     MAX_KEPT,
     SPENT,
     VAULT,
+    Vault,
     handles_in,
     hide_passwords,
     password_spans,
@@ -99,6 +102,25 @@ def test_the_same_value_has_one_handle_and_the_vault_is_bounded_and_shows_nothin
     assert HANDLE.fullmatch(newest[10:]) and not HANDLE.fullmatch("[password-0]")
     VAULT.forget()
     assert VAULT.value(f"[password-{MAX_KEPT + 3}]") is None
+
+
+def test_a_vault_numbers_from_a_random_six_digit_base_so_another_vaults_handle_stands_for_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handles outlive the process in stored and queued messages: two vaults never share one (#626)."""
+    # A fresh vault does not start at 1: its first handle has six digits.
+    assert re.fullmatch(
+        r"password: \[password-\d{6}\]", Vault().hide("password: a1b2c3d4")
+    )
+    # Two processes, with the draws they happened to make.
+    draws = iter([0, 7])
+    monkeypatch.setattr(secrets, "randbelow", lambda _: next(draws))
+    first, second = Vault(), Vault()
+    stale = first.hide("password: old-Secret1")[10:]
+    live = second.hide("password: new-Secret9")[10:]
+    assert (stale, live) == ("[password-100000]", "[password-100007]")
+    assert second.value(stale) is None and first.value(live) is None
+    assert second.value(live) == "new-Secret9"
 
 
 def _run(size: int) -> str:

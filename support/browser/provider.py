@@ -208,8 +208,9 @@ _PAGE_NOTE = (
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
     "browser_type and browser_select act on the page you read, by ref. Sign in "
     "with the details the user gave: a password they wrote in their message "
-    "reads [password-1] there (melo keeps the real one out of your sight): "
-    "browser_type that text into the password box (the list says melo never "
+    "reads like [password-…] there (melo keeps the real one out of your sight): "
+    "browser_type that text, copied from their message, into the password box "
+    "(the list says melo never "
     "types there: that holds for any other password) and melo types the real "
     "one on a site they named. Never type any other password, a card number or "
     "a one-time code: {sign_in} An act's first line says whether the page "
@@ -1773,7 +1774,7 @@ class BrowserToolProvider(BaseToolProvider):
         if kind == "password" and self._signs_in(_box_origin(snap, item)):
             refusal += (
                 " The user gave a sign-in password in their message: type its "
-                "handle ([password-1]) here, not a value."
+                "handle ([password-…], copied from their message) here, not a value."
             )
             raise BrowserError(refusal)
         return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")

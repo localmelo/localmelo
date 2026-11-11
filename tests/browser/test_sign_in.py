@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.support.browser.driver import Element
 from localmelo.tests.browser.fakes import button, page
 from localmelo.tests.browser.test_acting import (
@@ -105,6 +106,19 @@ async def test_nothing_else_is_typed_into_a_secret_box(case: str) -> None:
         out = await run(tools, "browser_type", ref="e1", text=text)
     assert out.is_error and VALUE not in out.text
     assert not driver.acts, case
+
+
+async def test_the_refusal_of_a_password_box_names_the_handle_by_its_shape_not_by_a_number() -> (
+    None
+):
+    driver = world(password_box(), button("Check in"))
+    tools = await tools_of(driver)
+    with asking(Gave()):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_type", ref="e1", text=VALUE)
+    assert out.is_error and "([password-…], copied from their message)" in out.text
+    assert not HANDLE.search(out.text), "a number there would be copied (#626)"
+    assert not driver.acts
 
 
 async def test_a_handle_goes_only_into_a_password_box_and_only_on_https() -> None:
