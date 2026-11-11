@@ -271,7 +271,7 @@ _SECRET_WORDS = re.compile(
 )
 # What a cut-out password's mark is read as: a value by its shape.
 _STOOD_FOR: Final = "0000"
-# In a sentence that names a password or a code, what may be its value
+# In a title that names a password or a code, what may be its value
 # (:func:`named_secret_spans`): a run of plain characters with a digit in it, and
 # what follows the word and a link. A hyphen links only after a space
 # (``password-protected`` names no value).
@@ -293,8 +293,8 @@ _ID_NUMBER = re.compile(
 _CARD = re.compile(r"(?<!\d)(?<!\d\.)(?:\d[ -]?){12,18}\d(?!\d)")
 # Read as it is written: between two digits at most one separator, a space, hyphen,
 # dot or dash, one Unicode space or invisible character (no-break, thin, ideographic,
-# zero-width, a soft hyphen ...), or a line break with a few spaces around it (a
-# wrapped line). A tab or a run of spaces is not one: they set out a table. A dot or a dash (not the
+# zero-width ...), or a line break with a few spaces around it (a wrapped line). A
+# tab or a run of spaces is not one: they set out a table. A dot or a dash (not the
 # plain hyphen) stands between a card's digits only in the one form
 # ``4111.1111.1111.1111`` (:func:`_card_like`): floats, prices, versions, addresses
 # and year ranges are written with them too. A match may hold more than one line
@@ -302,10 +302,10 @@ _CARD = re.compile(r"(?<!\d)(?<!\d\.)(?:\d[ -]?){12,18}\d(?!\d)")
 # spaces around a break), so no repetition is nested unbounded and a match takes
 # time in proportion to the text.
 _SPACES: Final = 8
-_FILL = r"\u00a0\u00ad\u1680\u2000-\u200d\u202f\u205f\u2060\u3000\ufeff"
+_FILL = r"\u00a0\u1680\u2000-\u200d\u202f\u205f\u2060\u3000\ufeff"
 # The Unicode hyphens and dashes (hyphen, non-breaking hyphen, figure dash, en dash,
-# em dash, horizontal bar, the small and the full-width forms) and the minus sign.
-_DASHES = r"\u2010-\u2015\u2212\ufe58\ufe63\uff0d"
+# em dash) and the minus sign.
+_DASHES = r"\u2010-\u2014\u2212"
 _GAP = rf"(?:[-.{_DASHES}{_FILL}]| )"
 _BREAK = rf"[ {_FILL}]{{0,{_SPACES}}}(?:\r\n|[\r\n])[ {_FILL}]{{0,{_SPACES}}}"
 _CARD_WRITTEN = re.compile(
@@ -524,7 +524,8 @@ def number_spans(text: str) -> list[tuple[int, int]]:
     hyphen followed by a line break; a card with one group per line; ``4111. 1111.``;
     a card right after a digit and a dot (``3.4111111111111111``); a card written
     with dots or dashes in groups other than four (``3782.822463.10005``,
-    ``41111111.11111111``); and, of the ID numbers, ``123 45 6789``, nine bare digits
+    ``41111111.11111111``); a card whose groups a horizontal bar, a small or
+    full-width hyphen or a soft hyphen separates; and, of the ID numbers, ``123 45 6789``, nine bare digits
     and the 15-digit form.
     """
     places = [match.span(1) for match in _ID_NUMBER.finditer(text)]
@@ -567,28 +568,34 @@ def holds_secret_value(text: str) -> bool:
 
 
 def named_secret_spans(text: str) -> list[tuple[int, int]]:
-    """Where a sentence of *text* that names a password or a code
-    (:data:`_SECRET_WORDS`) may give it: the ``(start, end)`` of each place, sorted.
+    """Where a short *text* that names a password or a code (:data:`_SECRET_WORDS`), a
+    title, may give it: the ``(start, end)`` of each place, sorted.
 
-    A place is a run of plain characters with a digit in it, anywhere in the
-    sentence (``PIN 4821 for the bank``, ``4821 is my PIN``), or everything after the
-    word and a link (``is``, ``was``, ``to``, ``:``, ``=``, a dash) up to the
-    sentence's closing punctuation (``my password is correct horse``). It is for a
-    reader that keeps the sentence's other words, a title: a note and a turn's text
-    lose the whole sentence (:func:`sensitive`).
+    A place is every run of plain characters with a digit in it, anywhere in the
+    text (``PIN 4821 for the bank``, ``4821 is my PIN``, a value on the next line),
+    and, in a sentence that names one, everything after the word and a link (``is``,
+    ``was``, ``to``, ``:``, ``=``, a dash) up to the sentence's closing punctuation
+    (``my password is correct horse``). No digit of such a text is kept, so no part
+    of a number that only a later cut would make readable is. It is for a reader
+    that keeps the other words: a note and a turn's text lose the whole sentence
+    (:func:`sensitive`).
 
     Not found: a password of letters only that no link comes before (``sunflower is
-    my password``, ``password sunflower``).
+    my password``, ``password sunflower``, a value on the line after the link).
     """
-    places: list[tuple[int, int]] = []
-    for start, sentence in split_sentences(text):
-        words = list(_SECRET_WORDS.finditer(sentence))
-        if not words:
-            continue
-        for run in _PLAIN_RUN.finditer(sentence):
-            if _DIGIT.search(run.group()):
-                value = run.group().rstrip(_RUN_TAIL)
-                places.append((start + run.start(), start + run.start() + len(value)))
+    named = [
+        (start, sentence, words)
+        for start, sentence in split_sentences(text)
+        if (words := list(_SECRET_WORDS.finditer(sentence)))
+    ]
+    if not named:
+        return []
+    places = [
+        (run.start(), run.start() + len(run.group().rstrip(_RUN_TAIL)))
+        for run in _PLAIN_RUN.finditer(text)
+        if _DIGIT.search(run.group())
+    ]
+    for start, sentence, words in named:
         for word in words:
             link = _LINK.match(sentence, word.end())
             if link is None:

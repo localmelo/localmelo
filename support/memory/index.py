@@ -375,15 +375,11 @@ def _stable(step: Callable[[str], str], text: str) -> str:
     return text
 
 
-def _title_once(title: str) -> str:
-    """One pass of :func:`cleaned_title`."""
-    places = _merged(
-        [
-            place
-            for place in (*_places(title), *named_secret_spans(title))
-            if place[0] < place[1]
-        ]
-    )
+def _title_once(title: str, named: bool) -> str:
+    """One pass of :func:`cleaned_title`: the places of the title's secrets, and with
+    *named* what a title that names a password or a code may give of it, are cut."""
+    found = [*_places(title), *(named_secret_spans(title) if named else ())]
+    places = _merged([place for place in found if place[0] < place[1]])
     # The reader of passwords takes a mark for a value and gives part of it
     # ("[left"): a place that reaches into a mark holds the whole mark, so the
     # mark stays one.
@@ -398,19 +394,24 @@ def _title_once(title: str) -> str:
 
 
 def cleaned_title(title: str) -> str:
-    """A chat's or task's *title* without the places of its secrets: a password's
-    value, a key, a token or code, a card or ID number (:func:`_places`) and what a
-    sentence that names a password or a code may give of it
-    (:func:`~.records.named_secret_spans`), each replaced by ``[left out]``, then
-    redacted as a text is.
+    """A chat's or task's *title* without its secrets, its other words kept.
+
+    First the places of its secrets are cut, each replaced by ``[left out]``, and the
+    rest redacted as a text is: a password's value, a key, a token or code, a card or
+    ID number (:func:`_places`), repeated until nothing changes (:func:`_stable`), so
+    a number under a line that is itself cut is found. Then, in what is left, what a
+    title that names a password or a code may give of it is cut the same way
+    (:func:`~.records.named_secret_spans`: every run with a digit, and what follows
+    the word and a link). The second step only takes more out of the first's result:
+    a word that marks a secret is never cut before the secret it marks is found.
 
     A title is a short label, so no sentence is dropped for its words: ``Reset
     password flow`` stays, ``Pay with card 4111 …`` loses the number only, ``PIN 4821
-    for the bank`` the digits and ``My password is …`` what follows ``is``. The cut
-    is repeated until it changes nothing (:func:`_stable`), so cleaning a cleaned
-    title gives it back. The one place a title is cleaned: the task line of a
-    document's text, the stored title, a note's source and the label recall shows."""
-    return _stable(_title_once, title.strip())
+    for the bank`` the digits and ``My password is …`` what follows ``is``. Cleaning
+    a cleaned title gives it back. The one place a title is cleaned: the task line of
+    a document's text, the stored title, a note's source and the label recall shows."""
+    by_place = _stable(lambda text: _title_once(text, False), title.strip())
+    return _stable(lambda text: _title_once(text, True), by_place)
 
 
 def holds_secret(title: str, text: str) -> bool:
@@ -635,16 +636,27 @@ _TITLES_CLEANED: Final = "titles_cleaned"
 _USER_LINE: Final = "\nUser: "
 
 
-def _retitled(text: str, new: str) -> str:
+def _retitled(text: str, old: str, new: str) -> str:
     """The *text* of a task's document stored before titles were cleaned, with its
-    title line, ``Task: <old title>``, replaced by ``Task: <new title>``. The line
-    runs from the start of the text to the user's words (``User: `` at the start of
-    a line), however the older version wrote it. A text that does not start with a
-    title line, and the rest of one that does, stay as they are."""
-    head, label, rest = text.partition(_USER_LINE)
-    if not label or not head.startswith("Task: "):
+    title line, ``Task: <old title>``, replaced by ``Task: <new title>``.
+
+    The line is the old title as given or redacted, when the text starts with one
+    of the two. Written another way, it runs from the start of the text to the
+    user's words: ``User: `` at the start of a line, after as many such lines as
+    the old title holds itself. A text that does not start with a title line, and
+    the rest of one that does, stay as they are."""
+    line = f"Task: {old.strip()}\n"
+    for lead in (line, redact_secrets(line)[0]):
+        if old.strip() and text.startswith(lead):
+            return f"Task: {new}\n{text[len(lead):]}"
+    if not text.startswith("Task: "):
         return text
-    return f"Task: {new}{label}{rest}"
+    at = -1
+    for _ in range(old.count(_USER_LINE) + 1):
+        at = text.find(_USER_LINE, at + 1)
+        if at < 0:
+            return text
+    return f"Task: {new}{text[at:]}"
 
 
 async def _clean_titles(conn: aiosqlite.Connection) -> None:
@@ -681,7 +693,9 @@ async def _clean_titles(conn: aiosqlite.Connection) -> None:
                 ) as cur:
                     row = await cur.fetchone()
                 text = str(row[0]) if row else ""
-                rewrites.append((clean[title], _retitled(text, clean[title]), row_id))
+                rewrites.append(
+                    (clean[title], _retitled(text, title, clean[title]), row_id)
+                )
             await conn.executemany(
                 "UPDATE documents SET title = ?, text = ? WHERE id = ?", rewrites
             )

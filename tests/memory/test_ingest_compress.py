@@ -31,7 +31,7 @@ from localmelo.support.memory import (
     note_judge,
     service,
 )
-from localmelo.support.memory.index import cleaned, cleaned_title
+from localmelo.support.memory.index import cleaned
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
@@ -365,9 +365,8 @@ async def test_a_password_and_a_card_number_reach_the_encoder_as_the_index_keeps
         (prompt,) = stub.prompts
         typed, answer = (message["text"] for message in SECRET["turns"])
         assert cleaned(typed) in prompt and cleaned(answer) in prompt
-        # The chat's title is cleaned as a title is: it keeps its words.
-        assert cleaned_title(SECRET["title"]) == "Card [left out]"
-        assert prompt.startswith("Chat title: Card [left out]\n\n")
+        # The chat's title is cleaned the same way.
+        assert prompt.startswith(f"Chat title: {cleaned(SECRET['title'])}\n\n")
         assert "hunter2" not in prompt and "4242" not in prompt
         # The same text the chat's turn is indexed with.
         index = memory.stores()[1]

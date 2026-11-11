@@ -67,16 +67,19 @@ DASHES = [
     "\N{FIGURE DASH}",
     EN_DASH,
     "\N{EM DASH}",
-    "\N{HORIZONTAL BAR}",
     "\N{MINUS SIGN}",
+]
+# Characters that neither separate a card's groups nor join a digit to a number.
+NO_SEPARATORS = [
+    "\N{HORIZONTAL BAR}",
     "\N{SMALL EM DASH}",
     "\N{SMALL HYPHEN-MINUS}",
     "\N{FULLWIDTH HYPHEN-MINUS}",
+    "\N{SOFT HYPHEN}",
 ]
 # The Unicode spaces and invisible characters that may stand between two digits.
 UNICODE_GAPS = [
     "\u00a0",
-    "\u00ad",
     "\u1680",
     "\u202f",
     "\u205f",
@@ -129,6 +132,18 @@ def test_the_ways_a_card_number_is_written_are_secrets(number: str) -> None:
         assert records.holds_secret_value(text)
         assert not re.search(r"\d{4}", cleaned(text))
     assert records.number_spans(f"pay {number} now") == [(4, 4 + len(number))]
+
+
+@pytest.mark.parametrize("mark", NO_SEPARATORS)
+def test_a_character_that_is_no_separator_joins_no_digit_to_a_wrapped_card(
+    mark: str,
+) -> None:
+    # A second card, wrapped, right after the first: the character between them is
+    # no part of a number, so the wrapped one is the whole run and is found whole.
+    text = f"Card {CARD}{mark}4111 1111\n1111 1111"
+    assert not re.search(r"\d", cleaned(text))
+    number = mark.join(["4111", "1111", "1111", "1111"])
+    assert records.number_spans(f"pay {number} now") == []
 
 
 def test_each_unicode_space_or_invisible_character_may_stand_between_groups() -> None:
@@ -516,6 +531,25 @@ TITLES = {
     ),
     "修复密码页面的3个问题": "修复密码页面的[left out]个问题",
     "密码是correct horse": "密码是[left out]",
+    # A value of letters only, after each link.
+    "password to sunflower": "password to [left out]",
+    "The passwords were alpha": "The passwords were [left out]",
+    "The PINs are alpha and beta": "The PINs are [left out]",
+    "OTP = abcd": "OTP = [left out]",
+    "security code: abcd": "security code: [left out]",
+    f"password {EN_DASH} sunflower": f"password {EN_DASH} [left out]",
+    "password - sunflower": "password - [left out]",
+    "密码为sunflower": "密码为[left out]",
+    # The places are cut first, to the end: a card under a number that is itself
+    # cut is found whole, and a word that marks a password is not cut before it.
+    "123-45-6789 4111 1111\n1111 1111 PIN": "[left out] [left out] PIN",
+    "PIN 123-45-6789 4111 1111\n1111 1111": "PIN [left out] [left out]",
+    "4111111111111111pw: sunflower and PIN": "[left out]pw: [left out] and PIN",
+    # Then no digit of a title that names one is kept, on any line of it.
+    "PIN\n4821": "PIN\n[left out]",
+    "PIN 12 4111 1111\n1111 1111": (
+        "PIN [left out] [left out] [left out]\n[left out] [left out]"
+    ),
     **{title: title for title in WORD_TITLES},
 }
 
@@ -527,7 +561,7 @@ def test_a_title_loses_the_places_of_its_secrets_and_keeps_its_words(
     assert cleaned_title(title) == label
     assert cleaned_title(label) == label
     assert not re.search(
-        r"\d{3}|hunter2|a1B2|horse|sunflower|alpha", cleaned_title(title)
+        r"\d|hunter2|a1B2|horse|sunflower|alpha|abcd", cleaned_title(title)
     )
 
 
@@ -538,11 +572,13 @@ def test_a_password_of_letters_that_no_link_comes_before_stays_in_a_title() -> N
         assert cleaned_title(title) == title
 
 
-def test_a_sentence_that_names_no_password_or_code_gives_no_such_place() -> None:
+def test_a_text_that_names_no_password_or_code_gives_no_such_place() -> None:
     assert records.named_secret_spans("Room 4821 is booked. Call 555 0100.") == []
+    # One that names one keeps no digit, in any sentence of it.
     assert records.named_secret_spans("PIN 4821, then room 12. Call 555.") == [
         (4, 8),
         (20, 22),
+        (29, 32),
     ]
 
 
@@ -748,29 +784,49 @@ def _old_text(kind: str, title: str) -> str:
     return f"{lead}User: hi\nmelo: hello"
 
 
-async def test_a_title_line_an_older_version_wrote_as_given_is_replaced(
-    tmp_path: Path,
+USER_TITLE = f"Setup\nUser: card {CARD}"
+
+
+@pytest.mark.parametrize(
+    ("title", "line", "label"),
+    [
+        # As given, where today's redaction would have changed the line.
+        (
+            f"Use key {KEY} for the build",
+            f"Use key {KEY} for the build",
+            "Use key [left out] for the build",
+        ),
+        # Written another way: found by where the user's words start.
+        (
+            f"Use key {KEY} for the build",
+            "Use key (hidden) for the build",
+            "Use key [left out] for the build",
+        ),
+        # A title that holds a line of the user's itself, as given and another way.
+        (USER_TITLE, USER_TITLE, "Setup\nUser: card [left out]"),
+        (USER_TITLE, "Setup\nUser: card (hidden)", "Setup\nUser: card [left out]"),
+    ],
+)
+async def test_a_title_line_an_older_version_wrote_is_replaced_whole(
+    tmp_path: Path, title: str, line: str, label: str
 ) -> None:
-    # The line is found by where the user's words start, not by how it was redacted.
     path = str(tmp_path / "index.db")
-    _old_insert(path, [("t1", "task", f"Use key {KEY} for the build")])
+    _old_insert(path, [("t1", "task", title)])
     raw = sqlite3.connect(path)
     raw.execute(
-        "UPDATE documents SET text = ?",
-        (f"Task: Use key {KEY} for the build\nUser: hi\nmelo: hello",),
+        "UPDATE documents SET text = ?", (f"Task: {line}\nUser: hi\nmelo: hello",)
     )
     raw.commit()
     raw.close()
     index = ConversationIndex(path)
     try:
         (doc,) = await index.fetch(await index.ids())
-        assert (
-            doc.text == "Task: Use key [left out] for the build\nUser: hi\nmelo: hello"
-        )
+        assert doc.title == label
+        assert doc.text == f"Task: {label}\nUser: hi\nmelo: hello"
     finally:
         await index.aclose()
     kept = b"".join(p.read_bytes() for p in tmp_path.glob("index.db*"))
-    assert b"a1B2" not in kept
+    assert not re.search(rb"a1B2|4111|1111 1111", kept)
 
 
 def _old_insert(path: str, rows: list[tuple[str, str, str]]) -> None:
