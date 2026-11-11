@@ -106,6 +106,7 @@ async def said(
     *,
     origin: str = "",
     finish: bool = True,
+    composed: bool = False,
 ) -> TurnInfo:
     """A turn of *typed* in *chat* (a new chat when None), finished unless not *finish*."""
     info = await store.begin_turn(
@@ -115,6 +116,7 @@ async def said(
         typed_text=typed,
         new_session=None if chat else NewSession(kind="front"),
         origin=origin,
+        composed=composed,
     )
     if finish:
         await store.finish_turn(
@@ -365,6 +367,29 @@ async def test_the_newest_turns_of_the_person_come_oldest_first(
     lines, shown = turn_lines(handover)
     assert lines.splitlines()[0] == "- the user: He has eight years of backend work."
     assert "Where is Alex now?" not in lines
+    assert shown == {(chat, turn) for _, turn, _, _ in handover.turns}
+
+
+async def test_a_turn_a_press_began_hands_its_answer_alone(
+    store: SessionStore,
+) -> None:
+    sentence = "Go ahead with the step melo blocked: install software."
+    first = await said(store, None, "Install the chart library", "Blocked.")
+    chat = first.session_id
+    await said(store, chat, "[task t1] may I go on?", origin=ASK_OWNER)
+    await said(store, chat, sentence, "Installed.", composed=True)
+    now = await said(store, chat, "make the chart", finish=False)
+    handover = await handover_of(store, chat, now, None)
+    assert [(words, answer) for _, _, words, answer in handover.turns] == [
+        ("Install the chart library", "Blocked."),
+        ("", "Installed."),
+    ]
+    lines, shown = turn_lines(handover)
+    assert lines.splitlines() == [
+        "- the user: Install the chart library",
+        "  melo: Blocked.",
+        "- melo: Installed.",
+    ]
     assert shown == {(chat, turn) for _, turn, _, _ in handover.turns}
 
 

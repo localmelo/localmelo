@@ -95,6 +95,17 @@ class Inbox:
         return (self.held or {}).get(offset, [])
 
 
+class MeloInbox(Inbox):
+    """An inbox whose notes in *melo* were worded by melo itself (Allow once's go-ahead)."""
+
+    def __init__(self, llm: ScriptedLLM, notes: dict[int, str], melo: set[int]) -> None:
+        super().__init__(llm, notes)
+        self.melo = melo
+
+    def melos(self, offset: int) -> bool:
+        return offset in self.melo
+
+
 class PlainInbox(Inbox):
     """An inbox written before notes could carry pictures: no ``pictures`` method."""
 
@@ -229,3 +240,19 @@ async def test_a_picture_the_checker_would_refuse_is_left_out_not_sent() -> None
     result = await agent_for(llm).run_task("start", inbox=inbox)
     assert result.status == "completed"
     assert [i.data for i in carried(llm.requests[1])] == [good.data]
+
+
+async def test_a_note_melo_worded_reaches_the_model_but_the_review_reads_none_of_it() -> (
+    None
+):
+    llm = ScriptedLLM(step("c1"), done())
+    inbox = MeloInbox(llm, {5: "use the blue one", 6: "Go ahead."}, {6})
+    agent = agent_for(llm)
+    seen = Seen()
+    await agent.run_task("start", inbox=inbox, on_event=seen)
+    last = [m for m in llm.requests[1] if m.role == "user"][-1]
+    assert "use the blue one" in last.content and "Go ahead." in last.content
+    # The step review keeps the person's words only; the event says who worded each.
+    assert list(agent._reviewer._words) == ["start", "use the blue one"]
+    accepted = [e.data for e in seen.events if e.type == "inbox.accepted"]
+    assert [(d["offset"], d.get("by")) for d in accepted] == [(5, None), (6, "melo")]

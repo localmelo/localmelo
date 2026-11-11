@@ -2240,10 +2240,9 @@ class SessionStore:
         async with self._lock:
             conn = await self._ready()
             rows = await _rows(conn, sql + " ORDER BY id", args)
-        notes = [
-            (int(row[0]), json.loads(row[1]).get("data", {}).get("text"))
-            for row in rows
-        ]
+        data = [(int(row[0]), json.loads(row[1]).get("data", {})) for row in rows]
+        # A note melo worded (Allow once's go-ahead) is no words the person added.
+        notes = [(n, d.get("text")) for n, d in data if d.get("by") != "melo"]
         return [
             (n, text) for n, text in notes if isinstance(text, str) and text.strip()
         ]

@@ -54,7 +54,7 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-melo remembers across chats by words only; melo setup adds search by meaning.
+melo remembers across chats by words; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project

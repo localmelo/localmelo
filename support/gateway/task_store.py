@@ -78,7 +78,7 @@ _SCHEMA: Final = (
   card TEXT NOT NULL DEFAULT '',
   created_at REAL NOT NULL, started_at REAL, finished_at REAL,
   updated_at REAL NOT NULL, expires_at REAL, ending TEXT, work_base TEXT,
-  finishing TEXT,
+  finishing TEXT, card_by TEXT,
   UNIQUE (origin, request_key))""",
     """CREATE TABLE IF NOT EXISTS task_deps (
   task_id TEXT NOT NULL, waits_on TEXT NOT NULL,
@@ -187,6 +187,7 @@ _TASK_COLUMNS: Final = (
     "expires_at",
     "ending",
     "finishing",
+    "card_by",
 )
 _SELECT_TASK: Final = "SELECT " + ", ".join(_TASK_COLUMNS) + " FROM tasks"
 
@@ -251,6 +252,8 @@ class TaskRecord:
     ending: Mapping[str, Any] | None = None
     # Its next run is Finish it's (``task_endings.finish_run``), until it ends.
     finishing: bool = False
+    # Who worded the card its next run starts with: ``"melo"`` (Allow once's go-ahead) or ``""``.
+    card_by: str = ""
 
     @classmethod
     def from_row(cls, row: Sequence[Any]) -> TaskRecord:
@@ -269,6 +272,7 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
         "level_pinned": bool(values["level_pinned"]),
         "ending": json.loads(values["ending"]) if values["ending"] else None,
         "finishing": bool(values["finishing"]),
+        "card_by": values["card_by"] or "",
     }
 
 
@@ -490,7 +494,7 @@ class TaskStore:
         """Keep each task's ending, owed baseline and Finish it mark beside it
         (idempotent; older rows read None)."""
         columns = {row[1] for row in await _rows(conn, "PRAGMA table_info(tasks)")}
-        for name in ("ending", "work_base", "finishing"):
+        for name in ("ending", "work_base", "finishing", "card_by"):
             if name not in columns:
                 await conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT")
 
@@ -1562,7 +1566,7 @@ class TaskStore:
                     # A ready ending owes nothing: the next run starts a new baseline.
                     # Any ending closes a Finish it run.
                     await conn.execute(
-                        "UPDATE tasks SET ending = ?, finishing = NULL, work_base = CASE "
+                        "UPDATE tasks SET ending = ?, finishing = NULL, card_by = NULL, work_base = CASE "
                         "WHEN ? THEN NULL ELSE work_base END WHERE task_id = ?",
                         (
                             json.dumps({**ending, "at": now}),
@@ -2107,11 +2111,12 @@ class TaskStore:
         reason: str = "",
         actor: str = "user",
         finishing: bool = False,
+        by: str = "",
     ) -> TaskRecord:
         """Queue a done, failed or stopped task again, *instruction* as its next turn.
 
         *finishing*: the instruction is Finish it's, kept on the task until its
-        next ending, through a park and resume.
+        next ending, through a park and resume. *by* ``"melo"``: melo worded it.
 
         The task keeps its id, session and conversation: its card holds the
         instruction, which the worker's next turn runs after loading the
@@ -2186,9 +2191,9 @@ class TaskStore:
                 )
             await conn.execute(
                 "UPDATE tasks SET state = 'queued', card = ?, wait_reason = '', "
-                "hold_site = '', finished_at = NULL, finishing = ?, updated_at = ? "
-                "WHERE task_id = ?",
-                (text, "1" if finishing else None, now, task_id),
+                "hold_site = '', finished_at = NULL, finishing = ?, card_by = ?, "
+                "updated_at = ? WHERE task_id = ?",
+                (text, "1" if finishing else None, by or None, now, task_id),
             )
             request = _resume_request(
                 int(before[0]) if before else None,
