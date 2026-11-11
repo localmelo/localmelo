@@ -1,8 +1,10 @@
 """The conversation index: the documents of every finished turn of every session.
 
 A turn's text is the user's typed words and the answer without its thinking,
-passed through ``redact_secrets``; a task's carries its title too. A turn that
-fits in :data:`DOC_CHARS` is one document. A longer one becomes up to
+cleaned of secrets (:func:`cleaned`: a sentence a note would refuse is left out, the
+rest redacted); a task's carries its title too, and the stored title is cleaned of
+the places of secrets (:func:`cleaned_title`; its words stay). A turn that fits in
+:data:`DOC_CHARS` is one document. A longer one becomes up to
 :data:`MAX_CHUNKS` documents of the same session and turn (:func:`document_chunks`):
 chunk 0 is its head, each later chunk repeats a short head of what the user
 typed and then the next window of the text, overlapping the one before; what is
@@ -30,7 +32,7 @@ import dataclasses
 import json
 import re
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 
@@ -46,7 +48,11 @@ from localmelo.melo.memory._sqlite import (
     secure_deletes,
 )
 from localmelo.melo.memory.notes import split_sentences
-from localmelo.support.memory.records import sensitive
+from localmelo.support.memory.records import (
+    named_secret_spans,
+    number_spans,
+    sensitive,
+)
 
 DOC_CHARS: Final = 2_000
 # A turn's text over DOC_CHARS becomes at most this many chunks, each at most
@@ -260,16 +266,17 @@ def _kept(text: str) -> str:
     password, a card number), each sentence a secret's place reaches into, and the
     place itself.
 
-    A secret's place is a password's value or what the redaction replaces. It can
-    lie outside the sentence that makes it one, or cross a sentence's end: a quoted
-    value with a full stop in it, a value or a token on the line after its word, a
-    code in the sentence before its keyword. Neither sentence then reads as a
-    secret by itself. So everything is found in the text as given and taken out in
-    one pass at the end. A cut made first hides what is left of a secret from every
+    A secret's place is a password's value, what the redaction replaces, or a card
+    or ID number. It can lie outside the sentence that makes it one, or cross a
+    sentence's end: a quoted value with a full stop in it, a value or a token on the
+    line after its word, a code in the sentence before its keyword, a card number
+    wrapped over two lines or alone on one. Neither sentence then reads as a secret
+    by itself. So everything is found in the text as given and taken out in one
+    pass at the end. A cut made first hides what is left of a secret from every
     later test: the rest of a key after a password word, a code once its keyword's
     sentence is gone, a long sentence once a shorter one inside it was replaced.
     """
-    places = _merged([*password_spans(text), *secret_spans(text)])
+    places = _places(text)
     # By its place too: a piece the splitter gives no sentence for. An empty place
     # (a key block with no body) holds nothing to cut.
     out = [place for place in places if place[0] < place[1]]
@@ -290,10 +297,28 @@ def _kept(text: str) -> str:
         while found >= 0:
             out.append((found, found + len(sentence)))
             found = text.find(sentence, found + 1)
+    return _left_out(text, out)
+
+
+# What stands where a secret's place was cut out.
+_LEFT_OUT: Final = "[left out]"
+# How many times a cleaning is applied at most (:func:`_stable`).
+_PASSES: Final = 8
+
+
+def _places(text: str) -> list[tuple[int, int]]:
+    """The place of every secret in *text* as given, in order: a password's value, what
+    the redaction replaces, a card or ID number. Overlapping places are one."""
+    return _merged([*password_spans(text), *secret_spans(text), *number_spans(text)])
+
+
+def _left_out(text: str, spans: list[tuple[int, int]]) -> str:
+    """*text* with each of *spans* (merged where they overlap) replaced by the mark
+    :data:`_LEFT_OUT`."""
     parts: list[str] = []
     kept_from = 0
-    for start, end in _merged(out):
-        parts += [text[kept_from:start], "[left out]"]
+    for start, end in _merged(spans):
+        parts += [text[kept_from:start], _LEFT_OUT]
         kept_from = end
     parts.append(text[kept_from:])
     return "".join(parts)
@@ -310,8 +335,8 @@ def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return merged
 
 
-def _clean(text: str) -> str:
-    """*text* without its secrets: a sentence that holds one is left out
+def _clean_once(text: str) -> str:
+    """One pass of :func:`_clean`: a sentence that holds a secret is left out
     (:func:`_kept`), the rest redacted. A private key block is redacted whole
     first: left out line by line, its header would go and its body stay."""
     text = text.strip()
@@ -320,10 +345,73 @@ def _clean(text: str) -> str:
     return redact_secrets(_kept(text))[0]
 
 
+def _clean(text: str) -> str:
+    """*text* without its secrets, cleaned until another pass changes nothing, at most
+    :data:`_PASSES` passes (:func:`_stable`).
+
+    A cut can make a secret readable that was not: a card wrapped over two lines is
+    no number while a digit of the line above is joined to it, and is the whole run
+    once that line is cut. A pass changes the text only where the one before made a
+    place readable, so a text with no such layer takes one pass and a check. A text
+    that the last pass still changes holds more layers than passes: the result of
+    that pass is used, and what another would take out stays."""
+    return _stable(_clean_once, text.strip())
+
+
 def cleaned(text: str) -> str:
     """*text* without its secrets, as a turn's document is (a sentence a note would
     refuse is left out, the rest redacted), for text that leaves the index."""
     return _clean(text)
+
+
+def _stable(step: Callable[[str], str], text: str) -> str:
+    """*text* through *step* until the result no longer changes, at most
+    :data:`_PASSES` times; the result of the last pass when it still changed."""
+    for _ in range(_PASSES):
+        after = step(text)
+        if after == text:
+            break
+        text = after
+    return text
+
+
+def _title_once(title: str, named: bool) -> str:
+    """One pass of :func:`cleaned_title`: the places of the title's secrets, and with
+    *named* what a title that names a password or a code may give of it, are cut."""
+    found = [*_places(title), *(named_secret_spans(title) if named else ())]
+    places = _merged([place for place in found if place[0] < place[1]])
+    # The reader of passwords takes a mark for a value and gives part of it
+    # ("[left"): a place that reaches into a mark holds the whole mark, so the
+    # mark stays one.
+    reached: list[tuple[int, int]] = []
+    at = 0
+    for mark in re.finditer(re.escape(_LEFT_OUT), title):
+        while at < len(places) and places[at][1] <= mark.start():
+            at += 1
+        if at < len(places) and places[at][0] < mark.end():
+            reached.append(mark.span())
+    return redact_secrets(_left_out(title, [*places, *reached]))[0]
+
+
+def cleaned_title(title: str) -> str:
+    """A chat's or task's *title* without its secrets, its other words kept.
+
+    First the places of its secrets are cut, each replaced by ``[left out]``, and the
+    rest redacted as a text is: a password's value, a key, a token or code, a card or
+    ID number (:func:`_places`), repeated until nothing changes (:func:`_stable`), so
+    a number under a line that is itself cut is found. Then, in what is left, what a
+    title that names a password or a code may give of it is cut the same way
+    (:func:`~.records.named_secret_spans`: every run with a digit, and what follows
+    the word and a link). The second step only takes more out of the first's result:
+    a word that marks a secret is never cut before the secret it marks is found.
+
+    A title is a short label, so no sentence is dropped for its words: ``Reset
+    password flow`` stays, ``Pay with card 4111 …`` loses the number only, ``PIN 4821
+    for the bank`` the digits and ``My password is …`` what follows ``is``. Cleaning
+    a cleaned title gives it back. The one place a title is cleaned: the task line of
+    a document's text, the stored title, a note's source and the label recall shows."""
+    by_place = _stable(lambda text: _title_once(text, False), title.strip())
+    return _stable(lambda text: _title_once(text, True), by_place)
 
 
 def holds_secret(title: str, text: str) -> bool:
@@ -334,11 +422,11 @@ def holds_secret(title: str, text: str) -> bool:
 
 
 def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
-    """A turn's task line (``""`` for a chat), typed text and answer, each cleaned
-    (:func:`_clean`). Each is cleaned whole, before any cut, so no half of a key
-    or key block is left at a chunk's edge."""
-    lead = f"Task: {title.strip()}\n" if title.strip() else ""
-    return redact_secrets(lead)[0], _clean(typed), _clean(answer)
+    """A turn's task line (``""`` for a chat; the title through :func:`cleaned_title`),
+    typed text and answer (:func:`_clean`). Each is cleaned whole, before any cut, so
+    no half of a key or key block is left at a chunk's edge."""
+    task = cleaned_title(title)
+    return (f"Task: {task}\n" if task else ""), _clean(typed), _clean(answer)
 
 
 def _fences(text: str) -> list[tuple[int, int]]:
@@ -542,6 +630,87 @@ async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
+# The ``meta`` key that says every stored title has been through :func:`cleaned_title`.
+_TITLES_CLEANED: Final = "titles_cleaned"
+# Where the user's words start in a task's text, after its title line.
+_USER_LINE: Final = "\nUser: "
+
+
+def _retitled(text: str, old: str, new: str) -> str:
+    """The *text* of a task's document stored before titles were cleaned, with its
+    title line, ``Task: <old title>``, replaced by ``Task: <new title>``.
+
+    The line is the old title as given or redacted, when the text starts with one
+    of the two. Written another way, it runs from the start of the text to the
+    user's words: ``User: `` at the start of a line, after as many such lines as
+    the old title holds itself. A text that does not start with a title line, and
+    the rest of one that does, stay as they are."""
+    line = f"Task: {old.strip()}\n"
+    for lead in (line, redact_secrets(line)[0]):
+        if old.strip() and text.startswith(lead):
+            return f"Task: {new}\n{text[len(lead):]}"
+    if not text.startswith("Task: "):
+        return text
+    at = -1
+    for _ in range(old.count(_USER_LINE) + 1):
+        at = text.find(_USER_LINE, at + 1)
+        if at < 0:
+            return text
+    return f"Task: {new}{text[at:]}"
+
+
+async def _clean_titles(conn: aiosqlite.Connection) -> None:
+    """Rewrite the titles an older index.db kept as given through :func:`cleaned_title`,
+    once, and with each the title line a task's text starts with.
+
+    A document's title and the title line of its text are cleaned when it is stored;
+    this is for the rows stored before that. Only the title, and the first line of a
+    text that starts with it (chunk 0 of a task: no later chunk carries it), change.
+    The old bytes are overwritten in the file and the log, as a forget does it.
+    Running it again changes nothing."""
+    async with conn.execute(
+        "SELECT 1 FROM meta WHERE key = ?", (_TITLES_CLEANED,)
+    ) as cur:
+        if await cur.fetchone() is not None:
+            return
+    async with secure_deletes(conn):
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            clean: dict[str, str] = {}
+            changed: list[tuple[int, str]] = []
+            async with conn.execute(
+                "SELECT id, title FROM documents WHERE title != ''"
+            ) as cur:
+                for row_id, title in await cur.fetchall():
+                    if title not in clean:
+                        clean[title] = cleaned_title(title)
+                    if clean[title] != title:
+                        changed.append((row_id, title))
+            rewrites: list[tuple[str, str, int]] = []
+            for row_id, title in changed:
+                async with conn.execute(
+                    "SELECT text FROM documents WHERE id = ?", (row_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                text = str(row[0]) if row else ""
+                rewrites.append(
+                    (clean[title], _retitled(text, title, clean[title]), row_id)
+                )
+            await conn.executemany(
+                "UPDATE documents SET title = ?, text = ? WHERE id = ?", rewrites
+            )
+            await conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, 1)",
+                (_TITLES_CLEANED,),
+            )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+    if changed:
+        await checkpoint_wal(conn)
+
+
 def _document(row: Sequence[Any]) -> Document:
     blob = row[8]
     return Document(
@@ -578,6 +747,7 @@ class ConversationIndex:
                     await prepare_connection(conn, _SCHEMA)
                     await _add_chunks(conn)
                     await _empty_removed_table(conn)
+                    await _clean_titles(conn)
                 except BaseException:
                     with contextlib.suppress(Exception):
                         await conn.close()
@@ -599,6 +769,8 @@ class ConversationIndex:
                     "DELETE FROM documents WHERE session_id = ? AND turn = ?",
                     (session_id, turn),
                 )
+            # A title is cleaned as a text is, wherever the document came from.
+            titles = {doc.title: cleaned_title(doc.title) for doc in docs}
             for doc in docs:
                 vector = (
                     None if doc.vector is None else np.asarray(doc.vector, np.float32)
@@ -612,7 +784,7 @@ class ConversationIndex:
                         doc.turn,
                         doc.surface,
                         doc.kind,
-                        doc.title,
+                        titles[doc.title],
                         doc.text,
                         doc.created_at or time.time(),
                         None if vector is None else vector.tobytes(),
