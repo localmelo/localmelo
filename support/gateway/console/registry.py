@@ -241,10 +241,17 @@ def _with_chat_model(settings: Config, model: str) -> Config:
 
 @dataclass(frozen=True)
 class TurnExtras:
-    """What a message carries besides its words: files read as text, and pictures."""
+    """What a message carries besides its words: files read as text, and pictures.
+
+    ``file_handles`` are the handles the door made from values in the files as the
+    message arrived (``hide_message``): data beside the message, never read from a
+    text. A queued message keeps them in memory only; a retry, a stored row read back
+    and a task have none (#626).
+    """
 
     attachments: tuple[TextAttachment, ...] = ()
     images: tuple[ImagePart, ...] = ()
+    file_handles: frozenset[str] = frozenset()
 
 
 @dataclass(eq=False)
@@ -1226,6 +1233,7 @@ class ConsoleSessions:
                     client_request_id=client_request_id,
                     attachments=extras.attachments,
                     images=extras.images,
+                    file_handles=extras.file_handles,
                 )
             except BaseException:
                 # The row exists already, and a first turn that failed or
@@ -1325,6 +1333,7 @@ class ConsoleSessions:
                 attachments=extras.attachments,
                 words=words,
                 images=extras.images,
+                file_handles=extras.file_handles,
             )
             entry.last_used = self._clock()
             return turn, resumed

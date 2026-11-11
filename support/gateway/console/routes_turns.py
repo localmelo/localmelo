@@ -193,14 +193,15 @@ def _files(items: Sequence[_Attachment | TextAttachment]) -> list[TextAttachment
 
 def _hidden(
     text: str, attached: list[TextAttachment]
-) -> tuple[str, list[TextAttachment]]:
-    """*text* and its files with each password cut out, the files checked again.
+) -> tuple[str, list[TextAttachment], frozenset[str]]:
+    """*text* and its files with each password cut out, the files checked again, and
+    the handles this pass made from values in the files (the set a turn carries on).
 
     A handle is longer than a short value, so a file or a name that was within
     its limit can pass it: that is the same 400 as one that was too large (#626).
     """
     hidden = hide_message(text, attached)
-    return hidden.text, _files(hidden.attachments)
+    return hidden.text, _files(hidden.attachments), hidden.file_handles
 
 
 def _compose(request: CancelRequest) -> str:
@@ -214,7 +215,7 @@ def _compose(request: CancelRequest) -> str:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
         )
-    words, attached = _hidden(request.text, attached)
+    words, attached, _ = _hidden(request.text, attached)
     words = words.strip()
     if not words:
         if not request.images and not attached:
@@ -299,7 +300,7 @@ async def _sent(
     # The one place a message's password is cut out, in its words and in its
     # files: before it is checked, routed, queued, titled, keyed or stored, so
     # no copy of it exists below (#547, #626).
-    typed, attached = _hidden(request.text, attached)
+    typed, attached, file_handles = _hidden(request.text, attached)
     words = typed.strip()
     if not words:
         if not staged and not attached:
@@ -315,7 +316,7 @@ async def _sent(
         typed,
         words,
         whole,
-        TurnExtras(tuple(attached), tuple(images_of(staged))),
+        TurnExtras(tuple(attached), tuple(images_of(staged)), file_handles),
         staged,
     )
 
@@ -386,7 +387,12 @@ async def _while_running(
         # A queued message keeps words; these pictures wait in the composer.
         raise ApiError(409, "chat_answering", t("errors.picturesWhileAnswering"))
     echo = await console.asks.queue(
-        session_id, sent.typed, sent.words, key, sent.extras.attachments
+        session_id,
+        sent.typed,
+        sent.words,
+        key,
+        sent.extras.attachments,
+        sent.extras.file_handles,
     )
     return JSONResponse(status_code=200, content={"echo": echo})
 
@@ -637,7 +643,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
                 echo = await console.asks.queue(
-                    session_id, sent.typed, sent.words, key, sent.extras.attachments
+                    session_id,
+                    sent.typed,
+                    sent.words,
+                    key,
+                    sent.extras.attachments,
+                    sent.extras.file_handles,
                 )
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
