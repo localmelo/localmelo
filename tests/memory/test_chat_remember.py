@@ -30,6 +30,7 @@ from localmelo.support.memory.service import (
     MAX_REFUSALS,
     NO_MORE_TRIES,
     REMEMBER,
+    SAVED_THIS_TURN,
     SEARCH_MEMORY,
     TRY_ONCE_MORE,
     WRITE_IN_YOU,
@@ -932,6 +933,36 @@ async def test_only_the_final_refusal_says_the_tool_takes_no_more_calls(
     assert gate.startswith("Remembered")
 
 
+async def test_a_note_sent_again_in_its_turn_ends_the_tools_calls(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    info = await _begin(memory, store, "My seat is 4A. My gate is B12.")
+    tools = memory.tools()
+    kept = await tools.remember(text="Your seat is 4A.")
+    assert isinstance(kept, str) and kept.startswith("Remembered")
+    # Another note is taken as before.
+    other = await tools.remember(text="Your gate is B12.")
+    assert isinstance(other, str) and other.startswith("Remembered")
+    # The first note again: the model is repeating itself, and the tool closes.
+    again = ToolOutput(
+        text=f"Already remembered: Your seat is 4A.{SAVED_THIS_TURN}",
+        no_more_calls=True,
+    )
+    assert await tools.remember(text="Your seat is 4A.") == again
+    assert sorted(e.text for e in await memory.records()) == [
+        "Your gate is B12.",
+        "Your seat is 4A.",
+    ]
+    # The next turn starts again. A note kept before it is answered plainly once
+    # (the person may have asked for it again), and closes the tool the second time.
+    await _finish(store, info)
+    await _begin(memory, store, "My seat is 4A.", info.session_id)
+    plain = "Already remembered: Your seat is 4A."
+    assert await tools.remember(text="Your seat is 4A.") == plain
+    assert await tools.remember(text="Your seat is 4A.") == again
+    assert len(await memory.records()) == 2
+
+
 async def test_a_secret_is_refused_and_counts_as_a_refusal(
     memory: ChatMemory, store: SessionStore
 ) -> None:
@@ -1106,7 +1137,7 @@ async def test_a_yes_does_not_skip_the_owner_or_the_duplicate_check(
     await _begin(memory, store, SAID_ZH, info.session_id)
     assert (await memory.remember(WORDED_ZH, "about")).startswith("Remembered")
     again = await memory.remember(WORDED_ZH, "about")
-    assert again == f"Already remembered: {WORDED_ZH}"
+    assert again == f"Already remembered: {WORDED_ZH}{SAVED_THIS_TURN}"
     assert len(await memory.records()) == 1 and len(judge.calls) == 3
 
 
