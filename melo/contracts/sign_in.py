@@ -15,6 +15,15 @@ gives one back only to code that has checked who may use it
 person's own words name, in a turn the person began. The model types the
 handle; the browser tool types the value.
 
+A password in a text file the person attached may be typed too, when the file
+holds exactly one and the message's words say to sign in (#626,
+:func:`says_sign_in`). Which handles a message's files gave is said by the door
+that hid them, as data (:meth:`Vault.hide_with`, ``hide_message``) and carried
+beside the message down to the run; it is never found by reading a text, so a
+file that merely holds handle-shaped text gives nothing, and where no set is
+carried (a turn tried again, a message read back from a store, a task, a note, a
+turn melo began) no file's password can be typed.
+
 What counts as given is decided here, by code, from the person's text: a
 password word (:data:`CUES`) followed by a value, never by the model and never
 by a page (a page's text never reaches :func:`hide`). When the text is not
@@ -60,6 +69,18 @@ HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 SPENT: Final = "[…]"
 
 _CUE = "(?:" + "|".join(CUES) + ")"
+# A message is about signing in when its words hold a password word or one of
+# these (not inside a longer word; "sign up" is none); the one reading of a text
+# for it. The Chinese ones need no boundary: a space is not written there.
+_SIGN_IN = re.compile(
+    rf"(?<![A-Za-z0-9_])(?:{_CUE}|(?:sign|log)(?: me)?[ -]?in(?:to)?|log[ -]?on)"
+    r"(?![A-Za-z0-9_])|登[录陆入]",
+    re.IGNORECASE,
+)
+# "the log in the folder" says where a log is: "log in" between two determiners is
+# no sign-in word.
+_DET = "the|a|an|this|that|my|your|our|its|their"
+_PLACE = re.compile(rf"\b(?:{_DET})\s+log\s+in\s+(?:{_DET}|these|those)\b", re.I)
 # A quoted value runs to the first closing quote on its line, a bare one to the
 # next space, quote or backtick (or the end of the text): neither is ever cut short.
 _QUOTES = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("「", "」"))
@@ -252,15 +273,27 @@ class Vault:
         time. A value over :data:`MAX_CHARS` is cut out whole and kept nowhere:
         :data:`SPENT` stands in its place, for no handle could be typed from it.
         """
+        return self.hide_with(text)[0]
+
+    def hide_with(self, text: str) -> tuple[str, frozenset[str]]:
+        """:meth:`hide`, and what this call put in place of values in *text*.
+
+        The set is what a door says of the text it read: a handle for each value
+        it replaced, and :data:`SPENT` when one was too long to keep. A
+        handle-shaped text *text* already held is no value (it is left as it is),
+        so it is never in the set, and a text hidden a second time has an empty
+        one.
+        """
         spans = _values(text)
         if not spans:
-            return text
+            return text, frozenset()
         with self._lock:
             handles = [
                 self._handle(value) if len(value) <= MAX_CHARS else SPENT
                 for _, _, value in spans
             ]
-        return _splice(text, [(start, end) for start, end, _ in spans], handles)
+        hidden = _splice(text, [(start, end) for start, end, _ in spans], handles)
+        return hidden, frozenset(handles)
 
     def _handle(self, value: str) -> str:
         for handle, kept in self._values.items():
@@ -324,6 +357,12 @@ def without_passwords(text: str) -> str:
 def spent(text: str) -> str:
     """*text* with its handles gone: it reads the same, and nothing in it can be typed."""
     return HANDLE.sub(SPENT, text)
+
+
+def says_sign_in(words: str) -> bool:
+    """Whether the person's *words* are about signing in: a password word
+    (:data:`CUES`) or a sign-in word (``sign in``, ``log me in``, ``login``, ``登录``)."""
+    return _SIGN_IN.search(_PLACE.sub(" ", words)) is not None
 
 
 def handles_in(text: str) -> frozenset[str]:

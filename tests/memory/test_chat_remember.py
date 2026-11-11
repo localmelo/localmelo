@@ -820,10 +820,13 @@ async def test_a_note_in_its_own_voice_is_still_refused_beside_a_copied_line(
     assert await memory.records() == []
 
 
-def _added(words: str) -> dict[str, Any]:
-    """The event of a run reading *words* the person added, as a console chat words it."""
+def _added(words: str, by: str = "") -> dict[str, Any]:
+    """The event of a run reading *words* the person added, as a console chat words
+    it; *by* ``"melo"``: a message melo worded itself (the go-ahead of Allow once),
+    which the run reads the same way and marks."""
     lead = "[The user added this while you were working]"
-    return core_event("inbox.accepted", text=f"{lead}\n{words}")
+    marked: dict[str, Any] = {"by": by} if by else {}
+    return core_event("inbox.accepted", text=f"{lead}\n{words}", **marked)
 
 
 @pytest.mark.parametrize(
@@ -837,17 +840,19 @@ def _added(words: str) -> dict[str, Any]:
         ("nowhere", False),
         ("queued in another chat", False),
         ("read in an undone turn", False),
+        # The run read them, but melo worded them: no words of the person's.
+        ("read in this turn, worded by melo", False),
+        ("read in an earlier turn, worded by melo", False),
     ],
 )
 async def test_words_added_while_melo_worked_are_what_the_user_typed(
     memory: ChatMemory, store: SessionStore, where: str, kept: bool
 ) -> None:
     queue = [{"typed": ADDED, "composed": ADDED, "key": "queued-1"}]
+    read = _added(ADDED, by="melo" if where.endswith("by melo") else "")
     first = await _turn(store, "Fill in the sample form.")
     if "earlier" in where or "undone" in where:
-        await store.append_events(
-            first.session_id, first.turn, [_added(ADDED)], holder=HOLDER
-        )
+        await store.append_events(first.session_id, first.turn, [read], holder=HOLDER)
         await _finish(store, first)
         if "undone" in where:
             assert await store.undo_last_turn(first.session_id) is not None
@@ -860,10 +865,8 @@ async def test_words_added_while_melo_worked_are_what_the_user_typed(
     if where == "queued in another chat":
         other = await _turn(store, "Plan a trip.")
         await store.update_session(other.session_id, meta_update={"queued": queue})
-    if where == "read in this turn":
-        await store.append_events(
-            info.session_id, info.turn, [_added(ADDED)], holder=HOLDER
-        )
+    if where.startswith("read in this turn"):
+        await store.append_events(info.session_id, info.turn, [read], holder=HOLDER)
     answer = await memory.remember(ADDED_NOTE, "preferences")
     if kept:
         assert answer.startswith("Remembered: ")
