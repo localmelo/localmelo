@@ -78,8 +78,6 @@ from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_PARALLEL,
     MEMORY_RECALL_LIST_MAX,
-    MEMORY_RECALL_MIN_COSINE,
-    MEMORY_RECALL_MIN_COVERAGE,
     MEMORY_RECALL_OPEN_CHARS,
 )
 from localmelo.support.memory import (
@@ -132,7 +130,6 @@ from localmelo.support.memory.recall import (
     LIST_GUIDE,
     LIST_MAX,
     MIN_COSINE,
-    MIN_COVERAGE,
     OPEN_CHARS,
     PER_SESSION,
     PREMISE_GUIDE,
@@ -322,9 +319,6 @@ def _resolve(mode: str, failure: str, chat: bool) -> tuple[str, str]:
 class RecallSettings(NamedTuple):
     """The ``[memory]`` settings that shape a chat message's recall block.
 
-    *min_cosine* and *min_coverage* are the bars an item must pass to be
-    recalled (the block and the search tool alike). *match* says each part of a
-    turn shows the sentences that match the question instead of its start.
     *listing* says recall lists the chat turns for the model to open instead of
     showing excerpts of them, *list_max* is the most turns it lists and
     *open_chars* the room one opened turn takes. *items* says recall draws on
@@ -337,9 +331,6 @@ class RecallSettings(NamedTuple):
     for the rest.
     """
 
-    min_cosine: float = MIN_COSINE
-    min_coverage: float = MIN_COVERAGE
-    match: bool = False
     listing: bool = False
     list_max: int = LIST_MAX
     open_chars: int = OPEN_CHARS
@@ -353,17 +344,9 @@ class RecallSettings(NamedTuple):
         ``open_memory``, and not memory items)."""
         return not self.listing and not self.items
 
-    def shown(self, question: str) -> Shown:
-        """How a recalled turn is shown for *question* under these settings."""
-        return Shown.of(
-            ITEM_CHARS, question if self.match else None, self.opens_excerpts
-        )
-
-    @property
-    def wide_floor(self) -> float:
-        """The vector bar of a list-form search for a question that counts, totals
-        or compares: the lower of the recall bar and :data:`GATHER_COSINE`."""
-        return min(self.min_cosine, GATHER_COSINE)
+    def shown(self) -> Shown:
+        """How a recalled turn is shown under these settings."""
+        return Shown.of(ITEM_CHARS, None, self.opens_excerpts)
 
 
 def _guide(gathers: bool, lines: Iterable[Item]) -> str:
@@ -1040,20 +1023,12 @@ class ChatMemory:
             fits = isinstance(value, int) and not isinstance(value, bool)
             return value if fits and bounds[0] <= value <= bounds[1] else default
 
-        def bar(name: str, default: float, bounds: tuple[float, float]) -> float:
-            value = getattr(memory, name, default)
-            fits = isinstance(value, int | float) and not isinstance(value, bool)
-            return float(value) if fits and bounds[0] <= value <= bounds[1] else default
-
         source = getattr(memory, "recall_source", "turns")
         auto = source == "auto"
         reading = reading if reading is not None else RECALL_READING.get()
         # In the items state, auto reads what ``items`` with the list form reads.
         items = source == "items" or (auto and reading is not None and reading.items)
         return RecallSettings(
-            bar("recall_min_cosine", MIN_COSINE, MEMORY_RECALL_MIN_COSINE),
-            bar("recall_min_coverage", MIN_COVERAGE, MEMORY_RECALL_MIN_COVERAGE),
-            getattr(memory, "recall_excerpt", "head") == "match",
             getattr(memory, "recall_form", "excerpt") == "list" or (auto and items),
             bounded("recall_list_max", LIST_MAX, MEMORY_RECALL_LIST_MAX),
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
@@ -1288,14 +1263,13 @@ class ChatMemory:
         without one) are left out: the chat shows them. *recall*, when given,
         is filled in with how the search went. With *listing* (the list form)
         a chat's turns are not capped and each carries its similarity. With
-        *min_cosine* the vector bar is that, not ``recall_min_cosine``.
+        *min_cosine* the vector bar is that, not :data:`MIN_COSINE`.
         """
         query = query[:_QUERY_CHARS]
         recall = recall if recall is not None else Recall()
         started = time.perf_counter()
         embedded = await self._embed([query], EMBED_TIMEOUT_S, query=True)
         recall.embed_ms = elapsed_ms(started)
-        bars = self.recall_settings()
         return await self._find(
             query,
             embedded,
@@ -1304,8 +1278,7 @@ class ChatMemory:
             docs_k=docs_k,
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
-            min_cosine=bars.min_cosine if min_cosine is None else min_cosine,
-            min_coverage=bars.min_coverage,
+            min_cosine=MIN_COSINE if min_cosine is None else min_cosine,
             listing=listing,
         )
 
@@ -1320,14 +1293,14 @@ class ChatMemory:
         exclude_session: str,
         keep_from_turn: int | None = None,
         min_cosine: float = MIN_COSINE,
-        min_coverage: float = MIN_COVERAGE,
         listing: bool = False,
     ) -> list[Item]:
         """Rank for *query* as the retriever says; the numbers go to *recall*.
 
-        *min_cosine* and *min_coverage* are the bars of the ranking; the loose
-        candidates of the ``llm`` retriever (named, or what ``auto`` becomes with no
-        embedding model and a chat model set up) take no coverage bar and no vectors.
+        *min_cosine* is the vector bar of the ranking (the words bar is
+        :data:`.recall.MIN_COVERAGE`); the loose candidates of the ``llm`` retriever (named,
+        or what ``auto`` becomes with no embedding model and a chat model set up)
+        take no coverage bar and no vectors.
         With *listing* (the list form) no cap on a chat's turns applies, and a turn
         matched by meaning carries its cosine (:attr:`Item.similarity`).
         """
@@ -1346,7 +1319,6 @@ class ChatMemory:
                 now=now,
                 exclude_session=exclude_session,
                 keep_from_turn=keep_from_turn,
-                coverage=min_coverage,
                 min_cosine=min_cosine,
             )
             loose = (
@@ -1647,7 +1619,7 @@ class ChatMemory:
         found, refused = ([], False) if asked else records.candidates(typed)
         query = (info.user_text if asked else typed)[:_QUERY_CHARS]
         budget = self.recall_settings()
-        recall = Recall(floor=budget.min_cosine)
+        recall = Recall(floor=MIN_COSINE)
         if (reading := RECALL_READING.get()) is not None and budget.auto:
             recall.source = "items" if reading.items else "turns"
             recall.encoded_share = reading.share
@@ -1684,7 +1656,7 @@ class ChatMemory:
         # which sit further from it than one answer to a single fact does: the list
         # form looks wider for it. Nothing else changes.
         gathers = asks_to_gather(query)
-        floor = budget.wide_floor if gathers and budget.listing else budget.min_cosine
+        floor = GATHER_COSINE if gathers and budget.listing else MIN_COSINE
         recall.gather, recall.floor = gathers, floor
         used = await self._find(
             query,
@@ -1695,7 +1667,6 @@ class ChatMemory:
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
             min_cosine=floor,
-            min_coverage=budget.min_coverage,
             listing=budget.listing,
         )
         # The block gives the current value only: a turn a newer note replaced
@@ -1706,7 +1677,7 @@ class ChatMemory:
             candidates,
             kept_lines([cand.quote for cand in found], refused=refused),
             BLOCK_CHARS,
-            budget.shown(query),
+            budget.shown(),
             listing=budget.listing,
             guide=_guide(gathers, candidates),
             query=query,
@@ -3569,7 +3540,7 @@ class MemoryTools(BaseToolProvider):
         )
         if not items:
             return "Nothing in melo's memory matches that."
-        how = settings.shown(str(query))
+        how = settings.shown()
         found: list[Item] = []
         opens = False  # a line starts with its turn's id
         for item in items[:k]:
@@ -3611,7 +3582,7 @@ class MemoryTools(BaseToolProvider):
             exclude_session=own.info.session_id if own else "",
             keep_from_turn=own.keep_from_turn if own else None,
             listing=True,
-            min_cosine=settings.wide_floor if gathers else None,
+            min_cosine=GATHER_COSINE if gathers else None,
         )
         notes = [item for item in items if item.is_record][:notes_k]
         turns = [item for item in items if not item.is_record][:turns_k]

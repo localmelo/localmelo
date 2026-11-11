@@ -72,8 +72,6 @@ RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
 # How notes are tidied while melo is idle: see MemoryConfig.sleep.
 MEMORY_SLEEP = ("off", "rules")
-# Which part of a recalled chat turn is shown: see MemoryConfig.recall_excerpt.
-MEMORY_RECALL_EXCERPT = ("head", "match")
 # How recall shows earlier chat turns: as excerpts, or as a list of titles the model
 # opens, and the list form's two sizes: see MemoryConfig.recall_form.
 MEMORY_RECALL_FORM = ("excerpt", "list")
@@ -86,10 +84,6 @@ MEMORY_RECALL_SOURCE = ("turns", "items", "auto")
 # How many windows of one ingest the encoder is asked for at once: see
 # MemoryConfig.compress_parallel.
 MEMORY_COMPRESS_PARALLEL = (1, 8)
-# The bars an item must pass to be recalled, and their bounds (inclusive): see
-# MemoryConfig.recall_min_cosine and recall_min_coverage.
-MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
-MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
 CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
@@ -373,23 +367,15 @@ class MemoryConfig:
     and the chat model chooses among them, with no embedding calls). ``sleep``, a
     developer setting, tidies the notes while melo is idle: ``off`` (the default) or
     ``rules`` (code rules, no chat-model call). ``sleep_lock`` is an optional
-    path whose presence stops a run before an embedding request. Two developer
-    settings set the bars an item must pass to be recalled at all, in the block and
-    in the memory search tool: ``recall_min_cosine`` (0.20-0.95), the least
-    similarity of meaning, and ``recall_min_coverage`` (0.10-1.00), the least share
-    of the question's content words that a note or turn must hold. ``recall_excerpt``
-    sets which part of a recalled chat turn is shown, in the block and in the search
-    tool: ``head`` (the start of each part, the default) or ``match`` (the sentences
-    of each part that hold most of the question's content words). Three more set how
-    recalled chat turns are shown at all: ``recall_form``, ``excerpt`` (an excerpt of
-    each turn, the default) or ``list`` (one line per turn, with its id, date, chat,
+    path whose presence stops a run before an embedding request. Three developer
+    settings set how recalled chat turns are shown at all: ``recall_form``,
+    ``excerpt`` (an excerpt of each turn, the default) or ``list`` (one line per turn, with its id, date, chat,
     a title and its similarity, and a tool, ``open_memory``, with which the model
     opens the turns it needs in full). Notes are shown as before in both forms. The
     list form lists every turn that passes the bars, ``recall_list_max`` (1-50) at
     most, in the block and in the search tool alike, and ``recall_open_chars``
     (500-16000) is the room one opened turn takes; the block's size bound and a
-    turn's room do not bound the list, and ``recall_excerpt`` applies to the excerpt
-    form only. In the
+    turn's room do not bound the list. In the
     excerpt form a line that shows less than the whole turn (an excerpt that was
     cut, or a piece of a long turn) starts with the turn's id, such as ``[t123]``, a
     line under the items says so, and the model has ``open_memory`` to open the turn
@@ -413,9 +399,6 @@ class MemoryConfig:
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     sleep: str = "off"  # off | rules
     sleep_lock: str = ""  # Optional lock path: no embedding requests while it exists.
-    recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
-    recall_min_coverage: float = 0.6  # Least share of the question's words held.
-    recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
@@ -804,17 +787,7 @@ class Config:
                 errors.append(
                     f"[memory] {name} must be from {low} to {high}, got {value}"
                 )
-        for name, (floor, ceiling) in (
-            ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
-            ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
-        ):
-            value = getattr(self.memory, name)
-            if not floor <= value <= ceiling:
-                errors.append(
-                    f"[memory] {name} must be from {floor} to {ceiling}, got {value}"
-                )
         for name, allowed in (
-            ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),

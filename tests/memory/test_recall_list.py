@@ -626,12 +626,13 @@ async def test_the_bars_still_drop_what_they_dropped(
     try:
         await add_turn(memory, store, "Which tomato garden bed gets sun?", "Bed one.")
         await add_turn(memory, store, "Tell me about the tomato market.", "Closed.")
-        # Half of the question's four content words: under the 0.6 bar, nothing.
+        # Half of the question's four content words reach the 0.4 bar: the first
+        # turn, which holds two of them, is listed and the market turn, with one, is
+        # not. A quarter of them reach nothing.
         half = "tomato garden zebra yodel"
-        assert (await ask(memory, store, half)).block == ""
-        cfg.memory.recall_min_coverage = 0.5  # lowering it lets the first through
         assert len(lines_of((await ask(memory, store, half)).block)) == 1
-        cfg.memory.recall_min_coverage = 0.6
+        quarter = "tomato zebra yodel quartz"
+        assert (await ask(memory, store, quarter)).block == ""
         assert (await ask(memory, store, "write a poem about autumn")).block == ""
     finally:
         await memory.aclose()
@@ -762,7 +763,7 @@ async def test_a_turn_found_by_meaning_shows_its_cosine_and_one_found_by_words_s
         # The question has "zebra": its vector is [1, 0, 0]; no word of it is in a turn.
         await add_turn(memory, store, "Alpha plan?", "Meaning.", cosine=0.8)
         await add_turn(memory, store, "Beta plan?", "Meaning.", cosine=0.571)
-        await add_turn(memory, store, "Gamma plan?", "Too far.", cosine=0.3)
+        await add_turn(memory, store, "Gamma plan?", "Too far.", cosine=0.43)
         found = await ask(memory, store, "zebra yodel")
         assert [line.rsplit(" · ", 1)[1] for line in lines_of(found.block)] == [
             "0.80",
@@ -772,10 +773,6 @@ async def test_a_turn_found_by_meaning_shows_its_cosine_and_one_found_by_words_s
             "“Alpha plan?”",
             "“Beta plan?”",
         ]
-        # A lower bar lets the third in, by meaning too.
-        cfg.memory.recall_min_cosine = 0.25
-        low = await ask(memory, store, "zebra yodel")
-        assert lines_of(low.block)[-1].endswith(" · 0.30")
         # Matched by words and by meaning: the cosine; by words only: "words".
         await add_turn(memory, store, "Zebra yodel class?", "Sundays.", cosine=0.9)
         await add_turn(memory, store, "Zebra yodel choir?", "Fridays.")

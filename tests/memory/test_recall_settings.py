@@ -1,8 +1,7 @@
 """The recall block's shipped size and the settings that still shape it.
 
 The notes and turns a block holds (3 and 2), its size (4000 characters) and the room
-of a turn in it (900) are constants (#349); ``recall_min_cosine``, ``recall_min_coverage``
-and the form settings are read each turn. Synthetic notes and turns, words only, no
+of a turn in it (900) are constants (#349); the form settings are read each turn. Synthetic notes and turns, words only, no
 model.
 """
 
@@ -119,19 +118,14 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
     assert ChatMemory(lambda: None).recall_settings() == RecallSettings()
     assert ChatMemory(lambda: Config()).recall_settings() == RecallSettings()
     assert RecallSettings() == (
-        MIN_COSINE,
-        MIN_COVERAGE,
-        False,  # match: the head of a turn
         False,  # listing: recall_form is excerpt
         LIST_MAX,
         OPEN_CHARS,
         False,  # items: recall_source is turns
         False,  # auto: recall_source is turns
     )
-    assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
-    assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
-    assert RecallSettings().shown("tomato").chars == ITEM_CHARS
-    assert cfg.recall_excerpt == "head"
+    assert (MIN_COSINE, MIN_COVERAGE) == (0.45, 0.4)
+    assert RecallSettings().shown().chars == ITEM_CHARS
     assert (cfg.recall_form, cfg.recall_list_max, cfg.recall_open_chars) == (
         "excerpt",
         20,

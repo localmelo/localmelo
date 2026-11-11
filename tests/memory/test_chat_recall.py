@@ -64,13 +64,15 @@ QUESTIONS = {
     "when do I see the dentist?": "dentist",
     "do I have a cat?": "cat",
 }
-# What BM25 alone can find: the questions that share their words.
+# What BM25 alone can find: the questions that share at least 40% of their content
+# words with the item (the dentist question holds one of two).
 BY_WORDS = {
     "when is my group meeting?",
     "where do I live?",
     "who has the robotics lab keys?",
     "how did we fix the failing CI test?",
     "do you remember the dentist appointment?",
+    "when do I see the dentist?",
 }
 NOTHING = ("hi", "write a poem about autumn", "thanks!", "今天天气怎么样？")
 
@@ -206,7 +208,11 @@ async def test_a_slow_or_failing_embedding_falls_back_to_words_and_logs_once(
         for _ in range(2):
             turn = await _turn(store, "Ask")
             found = await memory.before_turn(store, turn, "when is my group meeting?")
-            assert [item.key for item in found.used] == [keys["meeting"]]
+            # The slides turn holds one of the question's two content words.
+            assert [item.key for item in found.used] == [
+                keys["meeting"],
+                keys["slides"],
+            ]
         assert time.monotonic() - started < 1.5
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1 and "words only" in warnings[0].getMessage()
@@ -221,7 +227,7 @@ async def test_the_block_names_each_source_and_stays_in_bounds(
     memory, _ = await build(tmp_path, store, None)
     try:
         turn = await _turn(store, "Ask")
-        found = await memory.before_turn(store, turn, "when is my group meeting?")
+        found = await memory.before_turn(store, turn, "when is the meeting?")
         block = found.block
         today = time.localtime()
         day = f"{time.strftime('%b', today)} {today.tm_mday}"
@@ -401,11 +407,17 @@ async def test_a_question_finds_a_turn_that_says_it_in_other_word_forms(
                 created_at=time.time(),
             )
         )
+        group = ["chat “Reading group”"]
         # "meet" is "meets", and "day" shares nothing with "Tuesdays": 3 of 4.
         found = await memory.search("which day does my reading group meet?")
-        assert [item.where.split(",")[0] for item in found] == ["chat “Reading group”"]
-        assert await memory.search("which day does my reading group sleep?") == []
-        assert await memory.search("what is my reading list?") == []
+        assert [item.where.split(",")[0] for item in found] == group
+        # Half of the content words are enough; a quarter are not.
+        found = await memory.search("which day does my reading group sleep?")
+        assert [item.where.split(",")[0] for item in found] == group
+        found = await memory.search("what is my reading list?")
+        assert [item.where.split(",")[0] for item in found] == group
+        assert await memory.search("which day does my reading choir sleep?") == []
+        assert await memory.search("what is my reading list for the week?") == []
     finally:
         await memory.aclose()
 

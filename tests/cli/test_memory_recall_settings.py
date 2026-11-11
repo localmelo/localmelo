@@ -1,27 +1,20 @@
 """``[memory]`` recall settings: developer settings with their shipped defaults.
 
-``recall_min_cosine``, ``recall_min_coverage``, ``recall_excerpt``, ``recall_form``,
-``recall_list_max``, ``recall_open_chars``, ``recall_source``, ``compress_parallel``
-and ``compress_cache`` are checked against their bounds and values, set for one run
+``recall_form``, ``recall_list_max``, ``recall_open_chars``, ``recall_source``,
+``compress_parallel`` and ``compress_cache`` are checked against their bounds and values, set for one run
 with ``-X``, and listed by the developer help only, each with the issue that decides
 it.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest import mock
-
 import pytest
 
 import localmelo.__main__ as cli
 from localmelo.support import config, config_cli
-from localmelo.support.config import Config, MemoryConfig, save
+from localmelo.support.config import Config, MemoryConfig
 
 CHANGED = {
-    "recall_min_cosine": 0.45,
-    "recall_min_coverage": 0.4,
-    "recall_excerpt": "match",
     "recall_form": "list",
     "recall_list_max": 35,
     "recall_open_chars": 9000,
@@ -32,12 +25,7 @@ CHANGED = {
 # The issue that decides each setting that is still a comparison, as the developer
 # help names it; ``compress_parallel`` and ``compress_cache`` are ordinary advanced
 # settings and carry none.
-ISSUE = {name: "#349" for name in CHANGED if not name.startswith("compress_")} | {
-    "recall_form": "#428",
-    "recall_list_max": "#428",
-    "recall_open_chars": "#428",
-    "recall_source": "#428",
-}
+ISSUE = {name: "#428" for name in CHANGED if not name.startswith("compress_")}
 
 
 def errors(**memory: object) -> list[str]:
@@ -49,14 +37,6 @@ def errors(**memory: object) -> list[str]:
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        ("recall_min_cosine", 0.2),
-        ("recall_min_cosine", 0.95),
-        ("recall_min_cosine", 0.55),
-        ("recall_min_coverage", 0.1),
-        ("recall_min_coverage", 1.0),
-        ("recall_min_coverage", 1),  # a whole number is a number
-        ("recall_excerpt", "head"),
-        ("recall_excerpt", "match"),
         ("recall_form", "excerpt"),
         ("recall_form", "list"),
         ("recall_list_max", 1),
@@ -82,37 +62,6 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
 @pytest.mark.parametrize(
     ("name", "value", "message"),
     [
-        (
-            "recall_min_cosine",
-            0.19,
-            "[memory] recall_min_cosine must be from 0.2 to 0.95, got 0.19",
-        ),
-        (
-            "recall_min_cosine",
-            0.96,
-            "[memory] recall_min_cosine must be from 0.2 to 0.95, got 0.96",
-        ),
-        (
-            "recall_min_coverage",
-            0.09,
-            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 0.09",
-        ),
-        (
-            "recall_min_coverage",
-            1.01,
-            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 1.01",
-        ),
-        (
-            "recall_min_coverage",
-            2,
-            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 2",
-        ),
-        (
-            "recall_excerpt",
-            "tail",
-            "[memory] recall_excerpt 'tail' is not recognised. "
-            "Must be one of ('head', 'match').",
-        ),
         (
             "recall_form",
             "table",
@@ -165,11 +114,6 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "a\x00b",
             "[memory] compress_cache must be a path string without NUL",
         ),
-        (
-            "recall_min_coverage",
-            float("nan"),
-            "[memory] recall_min_coverage must be from 0.1 to 1.0, got nan",
-        ),
     ],
 )
 def test_a_value_out_of_range_is_a_config_error_that_says_why(
@@ -187,8 +131,8 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
     cli._parse([*argv, "--base-url", "http://127.0.0.1:1/v1", "q"])
     assert config.overrides() == {f"memory.{k}": v for k, v in CHANGED.items()}
     assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
-    assert config_cli.main(["keys", "recall_min_cosine", "-X", argv[1]]) == 0
-    assert "memory.recall_min_cosine" in capsys.readouterr().out
+    assert config_cli.main(["keys", "recall_form", "-X", argv[1]]) == 0
+    assert "memory.recall_form" in capsys.readouterr().out
     developer = cli._build_parser(developer=True).format_help().splitlines()
     plain = cli._build_parser(developer=False).format_help()
     for name in CHANGED:
@@ -207,11 +151,6 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
 @pytest.mark.parametrize(
     "setting",
     [
-        "memory.recall_min_cosine=0.1",
-        "memory.recall_min_cosine=high",
-        "memory.recall_min_cosine=true",
-        "memory.recall_min_coverage=1.5",
-        "memory.recall_excerpt=tail",
         "memory.recall_form=table",
         "memory.recall_list_max=0",
         "memory.recall_list_max=51",
@@ -232,31 +171,3 @@ def test_x_refuses_a_bad_value_with_a_clear_message(
         cli._parse(["-X", setting, "--base-url", "http://127.0.0.1:1/v1", "q"])
     assert exit_.value.code == 2
     assert setting.partition("=")[0] in capsys.readouterr().err
-
-
-def test_a_whole_number_bar_is_saved_and_read_back_and_x_reads_it_as_a_number(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "config.toml"
-    cfg = Config(chat_backend="vllm", embedding_backend="none")
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        path.write_text("[memory]\nrecall_min_coverage = 1\n")
-        assert config.load().memory.recall_min_coverage == 1
-        assert not errors(recall_min_coverage=config.load().memory.recall_min_coverage)
-        cfg.memory = MemoryConfig(recall_min_coverage=1)
-        save(cfg)
-        assert "recall_min_coverage = 1\n" in path.read_text()
-        cli._parse(
-            [
-                "-X",
-                "memory.recall_min_coverage=1",
-                "--base-url",
-                "http://127.0.0.1:1/v1",
-                "q",
-            ]
-        )
-        assert config.overrides() == {"memory.recall_min_coverage": 1.0}
-        assert isinstance(config.overrides()["memory.recall_min_coverage"], float)
