@@ -1771,18 +1771,24 @@ class BrowserToolProvider(BaseToolProvider):
         kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
         refusal = (
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
-            "payment cards or one-time codes, nor a password the user did not give."
+            "payment cards or one-time codes, nor a password it does not hold from the "
+            "user"
         )
         origin = _box_origin(snap, item)
         if kind == "password" and self._signs_in(origin):
             handle = self._sign_in_handle(origin)
-            refusal += (
-                " The user gave a sign-in password in their message or a file: "
+            raise BrowserError(
+                f"{refusal}. The user gave a sign-in password in their message or a file: "
                 f"type its handle ({handle or '[password-…], copied from their message'}) "
                 "here, not a value."
             )
-            raise BrowserError(refusal)
-        return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
+        return await self._persons_step(
+            tab,
+            snap.origin,
+            kind,
+            f"{refusal} (none was given for this site, or it was too long to keep).",
+            "fill it in",
+        )
 
     def _given_password(
         self, snap: render.Snapshot, item: Element, text: str
@@ -2177,7 +2183,7 @@ class BrowserToolProvider(BaseToolProvider):
         typed: str | None = None,
         on: str = "",
         origin: str | None = None,
-        search: bool = False,
+        field: str = "",
         check: str = "",
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
@@ -2192,8 +2198,8 @@ class BrowserToolProvider(BaseToolProvider):
         listed is not acted in. Typing is asked about for *origin*, the site
         of the box itself (:func:`_box_origin`), not the page it sits in:
         the page's being named by the person says nothing of a box from
-        another site. *search*: the box is a search box (see
-        :func:`~localmelo.support.browser.fields.searches`).
+        another site. *field*: the kind of box typed into, ``search`` or
+        ``password`` (see :func:`~localmelo.support.browser.sites.require_type`).
         """
         await self._recheck(
             tab_id
@@ -2204,7 +2210,7 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_act(snap.origin, what, on)
         else:
             await sites.require_type(
-                snap.origin if origin is None else origin, typed, on, search
+                snap.origin if origin is None else origin, typed, on, field
             )
         before = await self._tabs_now()
         if before is None:
@@ -3309,15 +3315,18 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind != "textbox":
             raise BrowserError(f"{ref} is a {item.kind}, not a text box.")
         shown = typed = str(text)
+        field = "search" if fields.searches(item, snap.elements.values()) else ""
         secret = bool(item.sensitive or fields.sensitive_kind(item.attrs))
         if secret:
             # Melo types a password only when it is one the person gave in their
             # message, on a site their words name: the model writes its handle
-            # and never sees the value. Any other secret is the person's.
+            # and never sees the value. Any other secret is the person's. The
+            # question says its text stands for that password (``field``) from
+            # this line only: the cards word themselves by it, nothing decides.
             given = self._given_password(snap, item, typed)
             if given is None:
                 return await self._secret_field(tab_id, snap, item)
-            typed = given
+            typed, field = given, "password"
         elif HANDLE.search(typed):
             raise BrowserError(
                 "That text stands for a password the user gave: it goes only into "
@@ -3342,7 +3351,7 @@ class BrowserToolProvider(BaseToolProvider):
             shown,
             _control_words(item),
             origin=_box_origin(snap, item),
-            search=fields.searches(item, snap.elements.values()),
+            field=field,
         )
         assert before is not None
         done: set[str] = set()

@@ -54,7 +54,7 @@ from localmelo.melo.contracts.review import (
 )
 from localmelo.support.browser.sites import TAKEOVER_NEEDS
 from localmelo.support.cli import edits
-from localmelo.support.cli.text import escape_arguments, wrap_cells
+from localmelo.support.cli.text import escape_arguments, wrap_cells, wrap_words
 from localmelo.support.config import SavedFolders
 from localmelo.support.sessions.approvals import (
     AskFunction,
@@ -163,7 +163,13 @@ def _numbered(lines: list[str], width: int) -> list[str]:
 
 
 def _wrapped(lines: list[str], width: int) -> list[str]:
+    """*lines* by cells, every character kept: for what will be typed, run, written or sent."""
     return [row for line in lines for row in wrap_cells(line, width)]
+
+
+def _prose(lines: list[str], width: int) -> list[str]:
+    """*lines* broken at a space (dropped there), for the panel's own sentences: no word is cut in two."""
+    return [row.strip(" ") for line in lines for row in wrap_words(line, width)]
 
 
 def _diff_body(
@@ -203,6 +209,8 @@ def _site_title(arguments: Mapping[str, Any], site: str, *, typing: bool) -> str
     ``Click “Sign in” on example.org?`` or ``Type into “Comment” on example.org?``; the generic
     question when the request names no control the engine described.
     """
+    if typing and arguments.get("field") == "password":
+        return f"Type the password you gave on {site}?"
     found = _CONTROL.match(str(arguments.get("on") or "").strip())
     if found is None:
         return "Type on a website?" if typing else "Click on a website?"
@@ -348,10 +356,10 @@ def _tool_panel(
             f"melo wants to read {site} as text: one request, no sign-ins, no cookies."
         )
         note = "The address it asks for is sent to that site."
-        body = [("", row) for row in _wrapped([said], width)]
+        body = [("", row) for row in _prose([said], width)]
         if url := arguments.get("url"):
             body += [("", row) for row in _wrapped([shown(str(url))], width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Read a website?",
             f"{site}{mark} · web_fetch · read only",
@@ -379,8 +387,8 @@ def _tool_panel(
             "Kept for the chat, the answer covers human checks on every site. "
             "Sign-ins, payments and a check's pictures keep their own rules."
         )
-        body = [("", row) for row in _wrapped([said], width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body = [("", row) for row in _prose([said], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Press a human check?",
             f"{site}{mark} · a human check on a web page",
@@ -410,14 +418,20 @@ def _tool_panel(
         elif typing:
             said = f"melo wants to type this text on {site} {window}:"
             note = (
-                "It never types passwords, card numbers or one-time codes. Once the "
-                "text is in the page, the page may send it on its own; melo asks "
-                "before it presses send, but cannot stop every send the page makes."
+                (
+                    "The text above stands for that password. melo never types card "
+                    "numbers or one-time codes."
+                    if arguments.get("field") == "password"
+                    else "It never types passwords, card numbers or one-time codes."
+                )
+                + " Once the text is in the page, the page may send it on its own; "
+                "melo asks before it presses send, but cannot stop every send the "
+                "page makes."
             )
         else:
             said = f"melo does this on {site} {window}, as you would."
             note = "Typing is decided separately, each time."
-        body = [("", row) for row in _wrapped([said], width)]
+        body = [("", row) for row in _prose([said], width)]
         if sending and goes:
             body += [("", row) for row in _wrapped([shown(goes)], width)]
         if sending and (rows := arguments.get("fields")):
@@ -430,7 +444,7 @@ def _tool_panel(
         if typing:
             typed = shown(str(arguments.get("text") or ""))
             body += [("", row) for row in _wrapped(typed.split("\n"), width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         if sending:
             title = "Send a form?"
         elif pointing:
@@ -470,8 +484,9 @@ def _tool_panel(
             "The page gets the file, and may upload it as soon as it is attached. "
             "Asked every time."
         )
+        # The sentence holds a file's name and folder: it breaks by cells like a path.
         body = [("", row) for row in _wrapped([said], width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Attach a file to a website?",
             f"{site}{mark} · a file from this computer",
@@ -491,7 +506,7 @@ def _tool_panel(
             "The window appeared after melo's own step in the browser. melo never "
             "types into other apps, and asks every time it presses."
         )
-        body = [("", row) for row in _wrapped([said], width)]
+        body = [("", row) for row in _prose([said], width)]
         if arguments.get("delivery") == "foreground_retry":
             # A click at a point is asked once for both tries: the second one moves the
             # pointer and brings the app to the front.
@@ -500,8 +515,8 @@ def _tool_panel(
                 f"more in the foreground: the pointer moves there and {app} comes to "
                 "the front for a moment."
             )
-            body += [("", row) for row in _wrapped([front], width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+            body += [("", row) for row in _prose([front], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Press a button in another app?",
             f"{app}{mark} · another app's window",
@@ -519,12 +534,12 @@ def _tool_panel(
                 # The kept answer below says where it holds (this chat, every chat).
                 f"{app} comes to the front. A kept answer lets pages open such addresses again."
             )
-            body = [("", row) for row in _wrapped([said], width)]
+            body = [("", row) for row in _prose([said], width)]
             body += [
                 ("", row)
                 for row in _wrapped([shown(str(arguments.get("url") or ""))], width)
             ]
-            body += [("muted", row) for row in _wrapped([note], width)]
+            body += [("muted", row) for row in _prose([note], width)]
             return PanelText(
                 f"Open {app}?",
                 f"{site}{mark} · a page asks for an app",
@@ -533,12 +548,12 @@ def _tool_panel(
             )
         said = f"The page on {site} asks this question. Answer OK?"
         note = "Cancel is melo's answer when you say no. Asked every time."
-        body = [("", row) for row in _wrapped([said], width)]
+        body = [("", row) for row in _prose([said], width)]
         body += [
             ("", row)
             for row in _wrapped([shown(str(arguments.get("text") or ""))], width)
         ]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Answer OK on a website?",
             f"{site}{mark} · the page asks",
@@ -552,14 +567,14 @@ def _tool_panel(
         app = shown(str(arguments.get("app") or tool[len("window-read:") :]))
         window = shown(str(arguments.get("window") or ""))
         said = f"{app} opened a window right after melo's click: let melo see it?"
-        body = [("", row) for row in _wrapped([said], width)]
+        body = [("", row) for row in _prose([said], width)]
         if window:
             body += [("", row) for row in _wrapped([f"The window: “{window}”."], width)]
         note = (
             "Only you see its name. If you allow it, melo reads the window's text and "
             "buttons and can press one only with your say. melo never types into other apps."
         )
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Let melo see another app's window?",
             f"{app}{mark} · another app's window",
@@ -577,8 +592,8 @@ def _tool_panel(
         else:
             said = f"melo wants to open {site} in Safari and read it."
             note = "Safari opens it in its own automation window; your sign-ins are not used."
-        body = [("", row) for row in _wrapped([said], width)]
-        body += [("muted", row) for row in _wrapped([note], width)]
+        body = [("", row) for row in _prose([said], width)]
+        body += [("muted", row) for row in _prose([note], width)]
         return PanelText(
             "Open a website?", f"{site}{mark} · read only", body, escaped_any
         )
@@ -619,9 +634,9 @@ def _takeover_panel(
             "when you're done."
         )
     note = "melo never keeps what you type in a password or private field. Asked every time."
-    body = [("", row) for row in _wrapped([said], width)]
-    body += [("", row) for row in _wrapped([where], width)]
-    body += [("muted", row) for row in _wrapped([note], width)]
+    body = [("", row) for row in _prose([said], width)]
+    body += [("", row) for row in _prose([where], width)]
+    body += [("muted", row) for row in _prose([note], width)]
     return PanelText(
         f"Take over {site}?", f"{site}{mark} · melo needs you", body, escaped or changed
     )
@@ -667,10 +682,10 @@ def _outside_panel(
         title = f"Let melo read in {folder}?"
         said = f"melo wants to read {path}."
     header = f"{tool}{mark} · outside {workspace} · read only"
-    body = [("", row) for row in _wrapped([said], width)]
+    body = [("", row) for row in _wrapped([said], width)]  # it holds a path
     if not outside.grantable:
         rule = "melo never keeps your whole home folder open: this asks every time."
-        body += [("muted", row) for row in _wrapped([rule], width)]
+        body += [("muted", row) for row in _prose([rule], width)]
     return PanelText(title, header, body, escaped)
 
 

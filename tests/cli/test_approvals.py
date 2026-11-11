@@ -371,7 +371,7 @@ def test_a_press_at_a_point_says_it_may_go_to_the_foreground_and_the_app_comes_f
         width=80,
     )
     assert pressing.title == "Press a button in another app?"
-    words = "".join(line for _, line in pressing.body)  # rows wrap inside words
+    words = " ".join(line for _, line in pressing.body)  # sentences break at a space
     assert "press a point (700, 850) of its picture in Chat's window" in words
     assert (
         "If a click in the background does not reach it, melo clicks once more in "
@@ -538,6 +538,64 @@ def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> No
     assert "".join(text.split()) in "".join(words.split()), "none of the text is cut"
     assert "never types passwords" in words
     assert "the page may send it on its own" in words
+    # A text that stands for a password the person gave says what is typed; the
+    # rest of the note stays.
+    password = _request(
+        "browser-type:https://example.com",
+        site="example.com",
+        access="type",
+        how="type",
+        text="[password-1]",
+        field="password",
+    )
+    plain = panel_text(
+        _request(
+            "browser-type:https://example.com",
+            site="example.com",
+            access="type",
+            how="type",
+            text="hi",
+        ),
+        width=300,
+    )
+    assert plain.body[-1] == (
+        "muted",
+        "It never types passwords, card numbers or one-time codes. Once the text is "
+        "in the page, the page may send it on its own; melo asks before it presses "
+        "send, but cannot stop every send the page makes.",
+    )
+    shown = panel_text(password, width=300)
+    assert shown.title == "Type the password you gave on example.com?"
+    given = " ".join(line for _, line in shown.body)
+    assert "The text above stands for that password." in given
+    assert "melo never types card numbers or one-time codes" in given
+    assert "never types passwords" not in given
+    assert "the page may send it on its own" in given
+
+
+def test_the_panel_breaks_sentences_at_a_space_and_typed_text_by_cells() -> None:
+    typed = "x" * 61  # no space in it: every character stays, cut by cells
+    request = _request(
+        "browser-type:https://example.com",
+        site="example.com",
+        access="type",
+        how="type",
+        text=typed,
+        browser="chrome",
+    )
+    body = panel_text(request, width=60).body
+    said = [line for style, line in body if style == ""]
+    note = [line for style, line in body if style == "muted"]
+    assert said[-2:] == [typed[:60], typed[60:]]
+    said = said[:-2]
+    sentence = (
+        "melo wants to type this text on example.com in melo's browser, which "
+        "runs in the background:"
+    )
+    assert len(said) > 1 and len(note) > 1
+    # Joined by the spaces the breaks stand for, the rows are the sentence: no word was cut.
+    assert " ".join(said) == sentence
+    assert all(len(row) <= 60 and row == row.strip() for row in said + note)
 
 
 def test_the_chat_wide_answer_names_what_it_allows() -> None:

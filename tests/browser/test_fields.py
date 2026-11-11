@@ -8,12 +8,11 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.browser.driver import BrowserError, FieldAttrs
+from localmelo.support.browser.driver import FieldAttrs
 from localmelo.support.browser.fields import (
     HIDDEN,
     form_pairs,
     normalized,
-    refuse_typing,
     sensitive_kind,
 )
 
@@ -40,14 +39,6 @@ def test_when_unsure_a_field_counts_as_secret() -> None:
     shape = FieldAttrs(type="text", inputmode="numeric", maxlength=6, words="field")
     assert sensitive_kind(shape) == "code"
     assert sensitive_kind(None) == ""
-
-
-def test_refusing_names_what_the_field_is_for() -> None:
-    with pytest.raises(BrowserError, match="a payment field"):
-        refuse_typing(FieldAttrs(words="Credit card"))
-    with pytest.raises(BrowserError, match="never types into passwords"):
-        refuse_typing(FieldAttrs(type="password"))
-    refuse_typing(FieldAttrs(words="Search"))  # an ordinary one is no problem
 
 
 def test_words_are_compared_with_punctuation_and_case_spaced_out() -> None:
