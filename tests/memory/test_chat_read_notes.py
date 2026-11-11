@@ -40,6 +40,8 @@ HOLDER = "test-host:1:notes"
 TYPED = "Plan my trip to Denver."
 ANSWER = "Your trip is planned."
 LEAD = f"{_NOTE_LEAD}\n"  # what a console chat's note reads like to the run
+# What Allow once sends in melo's name when a blocked step may go ahead.
+GO_AHEAD = "Go ahead with the step melo blocked: paying for the order."
 
 
 @pytest.fixture()
@@ -75,9 +77,12 @@ async def _turn(
     typed_text: str | None = None,
     answer: str = ANSWER,
     composed: bool = False,
+    worded: tuple[str, ...] = (),
 ) -> TurnInfo:
     """A finished turn: *read* notes have an ``inbox.accepted`` event (one per step
-    from step 2), *unread* ones only the ``turn.note`` event the page stores."""
+    from step 2), *unread* ones only the ``turn.note`` event the page stores. The
+    messages melo *worded* itself (the go-ahead of Allow once) are read after the
+    person's notes, each with the mark ``by: "melo"`` the run gives its event."""
     info = await store.begin_turn(
         session_id,
         text,
@@ -99,6 +104,18 @@ async def _turn(
             attempt=1,
         )
         for number, note in enumerate(read, 1)
+    ]
+    events += [
+        core_event(
+            "inbox.accepted",
+            seq=number,
+            offset=number,
+            text=message,
+            step=number + 1,
+            attempt=1,
+            by="melo",
+        )
+        for number, message in enumerate(worded, len(read) + 1)
     ]
     events += [
         {
@@ -371,6 +388,34 @@ async def test_a_tasks_turn_holds_its_notes_as_a_chat_does_and_a_workers_does_no
     assert await memory.reindex(store) == (0, 1)
     assert [sid for sid, *_ in await _documents(memory)] == [task.session_id]
     assert worker.session_id != task.session_id
+
+
+async def test_a_message_melo_worded_is_none_of_the_turns_words(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    # Allow once sends a running task melo's own sentence; the run reads it as it
+    # reads a note, and its event says who worded it.
+    task = await _turn(
+        store,
+        "Order the blue kettle.",
+        read=("the large one",),
+        worded=(GO_AHEAD,),
+        kind="task",
+        title="Order a kettle",
+    )
+    assert await store.read_notes(task.session_id, task.turn) == ["the large one"]
+    live = await _index(memory, store, task, "Order the blue kettle.")
+    assert live == [
+        "Task: Order a kettle\nUser: Order the blue kettle.\n\n"
+        f"{ADDED_MARK}\nthe large one\nmelo: {ANSWER}"
+    ]
+    # A rebuild reads the same notes.
+    assert await memory.reindex(store) == (0, 1)
+    assert [text for *_, text in await _documents(memory)] == live
+    # The same sentence with no mark is a note the person added.
+    typed = await _turn(store, "Order the blue kettle.", read=(GO_AHEAD,))
+    (text,) = await _index(memory, store, typed, "Order the blue kettle.")
+    assert f"{ADDED_MARK}\n{GO_AHEAD}" in text
 
 
 async def test_the_lead_memory_drops_is_the_one_the_console_puts_before_a_note() -> (
