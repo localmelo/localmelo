@@ -60,9 +60,8 @@ out, for chats loaded from a file. Neither keeps a value or makes a handle.
 A reader that cuts by place joins places with :func:`merged_spans` (spans that overlap
 or touch become one).
 
-This module imports only the standard library and :mod:`.attachments`, and the
-redaction's reader when :func:`_cut_secrets` first runs (the checker's package
-reaches the agent, which imports this module).
+This module imports only the standard library, :mod:`.attachments` and the
+redaction's reader, :mod:`.redaction`, which imports only the standard library.
 """
 
 from __future__ import annotations
@@ -75,6 +74,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from localmelo.melo.contracts.attachments import is_file_tag
+from localmelo.melo.contracts.redaction import REDACTED, secret_spans
 
 # The words that say a value is a password.
 CUES: Final = ("password", "passwd", "pwd", "pw", "密码", "口令")
@@ -380,9 +380,6 @@ def _cut_secrets(
     the handles of the passwords in it, or the redaction's mark when it holds none. A
     password word straight after a secret would become a cue once the secret is cut:
     it takes its line with it, so nothing that might be its value stays."""
-    # Imported here: the checker's package reaches the agent, which imports this module.
-    from localmelo.melo.checker.redaction import REDACTED, secret_spans
-
     found = {place for place in secret_spans(text) if place[0] < place[1]}
     if not found or not (
         Counter(text[start:end] for start, end in found)

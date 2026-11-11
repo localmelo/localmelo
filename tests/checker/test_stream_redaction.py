@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.checker import redaction
 from localmelo.melo.checker._stream_redaction import LineRedactor
+from localmelo.melo.contracts import redaction
 from localmelo.tests.checker.test_pem_redaction import block, stream
 from localmelo.tests.checker.test_redaction import EXAMPLES
 

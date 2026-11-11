@@ -9,8 +9,8 @@ import time
 import pytest
 
 from localmelo.melo.agent._step_review import holds_secret
-from localmelo.melo.checker import redaction
 from localmelo.melo.checker.redaction import REDACTED, redact_secrets, secret_spans
+from localmelo.melo.contracts import sign_in
 from localmelo.melo.contracts.sign_in import (
     HANDLE,
     MAX_KEPT,
@@ -522,13 +522,13 @@ def test_a_password_beside_another_secret_hides_both_unless_the_redaction_still_
     text: str, hidden: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reads: list[str] = []
-    real = redaction.secret_spans
+    real = sign_in.secret_spans
 
     def spy(text: str) -> list[tuple[int, int]]:
         reads.append(text)
         return real(text)
 
-    monkeypatch.setattr(redaction, "secret_spans", spy)
+    monkeypatch.setattr(sign_in, "secret_spans", spy)
     out = hide_passwords(text)
     assert out == hidden
     assert bool(reads) == bool(password_spans(text)), "read only with a password"
