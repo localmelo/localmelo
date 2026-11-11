@@ -125,7 +125,6 @@
     "other": "{n} terminal chats"
   },
   "app.quit.unknown": "Could not check what is running. {generic}",
-  "app.start.label": "Starting localmelo",
   "app.start.opening": "Opening your workspace",
   "app.start.server": "Starting the local server",
   "app.start.signingIn": "Signing in",

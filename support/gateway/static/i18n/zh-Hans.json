@@ -113,7 +113,6 @@
   "app.quit.tasksContinue": "{what}会在 localmelo 再次打开时继续；在 melo 无法自己检查的某一步中途被停下的任务会等你处理。",
   "app.quit.terminal": "{n} 个终端对话",
   "app.quit.unknown": "无法检查正在运行什么。{generic}",
-  "app.start.label": "正在启动 localmelo",
   "app.start.opening": "正在打开你的工作区",
   "app.start.server": "正在启动本地服务器",
   "app.start.signingIn": "正在登录",
