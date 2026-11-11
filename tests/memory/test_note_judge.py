@@ -451,7 +451,7 @@ async def test_arm_j_keeps_the_baseline_except_selected_refusals(
     script: ModuleType, admit: bool
 ) -> None:
     rows = cases()
-    results = script.run(rows, None, 0.8)
+    results = script.run(rows)
     assert "J" not in results and "M" not in results
     baseline = dict(results["T1b"])
     asked: list[str] = []
@@ -499,7 +499,7 @@ async def test_the_library_path_is_arm_j_for_the_same_answers(
             return await super().chat(messages, tools)
 
     arm_provider, library_provider = Answering(None), Answering(None)
-    baseline = script.run(rows, None, 0.55)["T1b"]
+    baseline = script.run(rows)["T1b"]
 
     async def judge(note: str, said: Sequence[str]) -> bool:
         return await note_judge.judge(arm_provider, note, said)

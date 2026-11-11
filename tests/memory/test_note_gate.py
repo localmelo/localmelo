@@ -1,7 +1,7 @@
-"""The note gate's pure parts: key tokens, instructions, windows and pointed material.
+"""The note gate's pure parts: key tokens, instructions and pointed material.
 
-``support/memory/note_gate.py`` holds what the levels of ``[memory] note_gate`` share
-(#442). Nothing here calls a model or reads a store: texts and events are synthetic.
+``support/memory/note_gate.py`` holds the note gate's rule. Nothing here calls a model
+or reads a store: texts and events are synthetic.
 """
 
 from __future__ import annotations
@@ -14,6 +14,10 @@ from localmelo.support.memory import note_gate as gate
 from localmelo.tests.linear import assert_linear
 
 # ── Key tokens ──
+
+
+def key_tokens(note: str) -> list[str]:
+    return [key.text for key in gate.keys_of(note)]
 
 
 @pytest.mark.parametrize(
@@ -46,16 +50,16 @@ from localmelo.tests.linear import assert_linear
     ],
 )
 def test_key_tokens(note: str, keys: list[str]) -> None:
-    assert gate.key_tokens(note) == keys
+    assert key_tokens(note) == keys
 
 
 def test_a_month_may_is_a_date_only_when_it_is_written_as_one() -> None:
-    assert gate.key_tokens("You may like tea.") == []
-    assert gate.key_tokens("Your trip is in May.") == ["May"]
+    assert key_tokens("You may like tea.") == []
+    assert key_tokens("Your trip is in May.") == ["May"]
 
 
 def test_each_key_token_counts_once() -> None:
-    assert gate.key_tokens("You met Ana in 2025 and Ana again in 2025.") == [
+    assert key_tokens("You met Ana in 2025 and Ana again in 2025.") == [
         "Ana",
         "2025",
     ]
@@ -134,58 +138,6 @@ def test_a_note_is_about_the_user_when_it_addresses_or_names_them() -> None:
     assert gate.about_user("The user lives in Lisbon.")
     assert gate.about_user("你住在里斯本。")
     assert not gate.about_user("Bob lives in Lisbon.")
-
-
-# ── Windows and cosines ──
-
-
-def test_windows_hold_whole_sentences_within_their_size() -> None:
-    text = "First sentence here. Second sentence here. Third one follows now."
-    assert gate.windows(text, 45) == [
-        "First sentence here. Second sentence here.",
-        "Third one follows now.",
-    ]
-    assert gate.windows(text, 300) == [text]
-    # A sentence longer than a window is cut; a scrap is dropped.
-    assert gate.windows("x" * 700, 300) == ["x" * 300, "x" * 300, "x" * 100]
-    assert gate.windows("Hi.", 300) == []
-    assert gate.windows("一句话。第二句话也在这里。", 300) == [
-        "一句话。 第二句话也在这里。"
-    ]
-
-
-def test_the_newest_windows_are_taken_in_order() -> None:
-    texts = [f"Sentence number {n} of the typed text." for n in range(5)]
-    assert gate.recent_windows(texts, 2) == texts[-2:]
-
-
-def test_the_windows_that_hold_most_key_tokens_are_kept_first() -> None:
-    filler = " and some more words to fill a window" * 5
-    text = "\n".join(
-        [
-            f"Nothing useful in this first window{filler}.",
-            f"MSc 2025 at Carnegie Mellon here{filler}.",
-            f"A third window with no numbers at all{filler}.",
-        ]
-    )
-    material = [gate.Material("page", "https://example.com/", text, False)]
-    keys = gate.keys_of("You study at Carnegie Mellon in 2025.")
-    assert len(gate.windows(text)) == 3
-    kept = gate.keyed_windows(material, keys, 2)
-    assert [ref for ref, _ in kept] == ["https://example.com/"] * 2
-    # The window with the keys is kept, and the chosen ones stay in order.
-    assert [("2025" in window) for _, window in kept] == [False, True]
-    assert gate.keyed_windows(material, keys, 10) == [
-        ("https://example.com/", window) for window in gate.windows(text)
-    ]
-
-
-def test_cosine_and_the_best_of_a_group() -> None:
-    assert gate.cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
-    assert gate.cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
-    assert gate.cosine([0.0, 0.0], [1.0, 0.0]) == 0.0
-    assert gate.best_cosine([1.0, 0.0], [[0.0, 1.0], [3.0, 4.0]]) == pytest.approx(0.6)
-    assert gate.best_cosine([1.0, 0.0], []) == 0.0
 
 
 # ── Pointed material ──

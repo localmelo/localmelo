@@ -1,5 +1,5 @@
-import {cleanOutput, formatDuration} from './turns.mjs';
-import {refusedStep, stepWords} from './step-words.mjs';
+import {cleanOutput, formatDuration, stepSaid, toolState} from './turns.mjs';
+import {stepWords} from './step-words.mjs';
 import {maker} from './dom.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
@@ -448,15 +448,14 @@ export function setupPanel({
     state.busy = '';
     await refresh();
   }
+  // How a step ended is the chat's step card's own reading: its mark and state, and its words in that tense.
   function stepNode(step) {
-    const running = step.status === 'running';
-    const failed = ['error', 'timeout', 'crashed'].includes(step.status);
-    const refused = !running && !failed && refusedStep(step.output);
+    const ended = toolState(step);
     const item = node('li', 'activity-step');
-    item.dataset.state = running ? 'running' : failed ? 'failed' : refused ? 'declined' : 'done';
-    item.append(node('span', 'activity-mark', running ? '●' : failed ? '✗' : refused ? '⊘' : '✓'),
-      node('span', 'activity-step-label', step.label ?? stepWords(step.name, step.arguments, !running, step.output)),
-      node('span', 'activity-step-time', running ? t('panel.stepNow') : step.durationS == null ? '' : formatDuration(step.durationS)));
+    item.dataset.state = ended.state;
+    item.append(node('span', 'activity-mark', ended.mark),
+      node('span', 'activity-step-label', step.label ?? stepSaid(step, ended)),
+      node('span', 'activity-step-time', ended.state === 'running' ? t('panel.stepNow') : step.durationS == null ? '' : formatDuration(step.durationS)));
     item.firstChild.setAttribute('aria-hidden', 'true');
     return item;
   }
@@ -471,7 +470,7 @@ export function setupPanel({
       list.append(...steps.slice(-STEPS).map(stepNode));
       // Between calls a running turn is thinking or waiting: its row's words close the list.
       if (LIVE.has(row.state) && row.activity && !steps.some((step) => step.status === 'running')) {
-        list.append(stepNode({status: 'running', label: row.activity}));
+        list.append(stepNode({status: 'running', durationS: null, label: row.activity}));
       }
       box.append(list);
       const output = cleanOutput(String([...steps].reverse().find((step) => step.output)?.output ?? '')).trimEnd();

@@ -22,6 +22,7 @@ import pytest
 
 from localmelo.melo import clock
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent._earlier import earlier_block
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
@@ -206,7 +207,7 @@ class TestEarlierTurns:
                 ("Install the chart library", "Blocked."),
                 ("", "Installed."),
             ]
-            block = chat.agent._earlier_block
+            block = earlier_block(chat.kwargs[-1]["earlier_turns"])
             assert "- melo: Installed." in block and sentence not in block
             reviewer = chat.agent._reviewer
             assert reviewer.requests == ("Install the chart library", "and now?")

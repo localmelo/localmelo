@@ -523,6 +523,27 @@ test('a step its own check refused has no tick in the live steps', async () => {
   assert.deepEqual([step.dataset.state, step.text()], ['declined', '⊘ Not done: Start “Buy it” 0.1s']);
 });
 
+test('a live step is marked and worded by how it ended, as the chat card does', async () => {
+  const live = row({kind: 'run', id: 'r1', state: 'running', icon: 'write', level: 2, at: 900});
+  const h = harness({rows: [live], turns: [started,
+    tool(2, 'c1', 'tool.started', {name: 'file_write', arguments: {path: 'slides.md', content: 'x'}}),
+    tool(3, 'c1', 'tool.finished', {name: 'file_write', status: 'success', output: 'ok', duration_s: 0.2}),
+    tool(4, 'c2', 'tool.started', {name: 'file_write', arguments: {path: 'notes.md', content: 'x'}}),
+    tool(5, 'c2', 'tool.finished', {name: 'file_write', status: 'error', error: 'disk full', duration_s: 0.1}),
+    tool(6, 'c3', 'tool.started', {name: 'shell_exec', arguments: {command: 'rm -rf build'}}),
+    tool(7, 'c3', 'tool.finished', {name: 'shell_exec', status: 'blocked', error: 'Blocked by policy', duration_s: 0.1}),
+    tool(8, 'c4', 'tool.started', {name: 'file_edit', arguments: {path: 'plan.md'}}),
+    tool(9, 'c4', 'approval.requested', {request_id: 'q1', tool_name: 'file_edit', arguments: {path: 'plan.md'}})]});
+  await h.panel.update(health({running: {chats: 0, tasks: 0, runs: 1, terminal: 0}}));
+  h.heads()[0].click();
+  await settle();
+  const steps = h.root.findAll((node) => node.className === 'activity-step');
+  assert.deepEqual(steps.map((step) => [step.dataset.state, step.text()]), [
+    ['success', '✓ Wrote slides.md 0.2s'], ['error', '✗ Write notes.md 0.1s'],
+    ['blocked', '⊘ Run a command 0.1s'], ['waiting_approval', '● Edit plan.md'],
+  ], 'only the step that succeeded is ticked and worded as done');
+});
+
 test('a running worker run opens to its live steps, which follow its stream until it ends', async () => {
   const live = row({kind: 'run', id: 'r1', state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
   const h = harness({rows: [live], turns: [started, tool(2, 'c1', 'tool.started', {name: 'file_read', arguments: {path: 'notes.md'}})]});
@@ -542,7 +563,7 @@ test('a running worker run opens to its live steps, which follow its stream unti
   h.sources[0].emit(tool(3, 'c1', 'tool.finished', {name: 'file_read', status: 'success', output: 'Meeting notes\n- one\n- two\n- three', duration_s: 0.2}));
   h.sources[0].emit(tool(4, 'c2', 'tool.started', {name: 'file_write', arguments: {path: 'slides.md', content: 'x'}}));
   h.timers.at(-1).fn();
-  assert.deepEqual(steps(), [['done', '✓ Read notes.md 0.2s'], ['running', '● Writing slides.md now']]);
+  assert.deepEqual(steps(), [['success', '✓ Read notes.md 0.2s'], ['running', '● Writing slides.md now']]);
   assert.match(h.root.find((node) => node.className === 'activity-output').textContent, /- one\n- two\n- three/);
   // A run is read only: its link is the one action, and Pause, Stop and the priority belong to a task's own view.
   const actions = h.root.find((node) => node.className === 'activity-actions');
@@ -555,7 +576,7 @@ test('a running worker run opens to its live steps, which follow its stream unti
   await h.panel.refresh();
   await settle();
   assert.equal(h.sources[0].closed, true);
-  assert.deepEqual(steps(), [['done', '✓ Read notes.md 0.2s']]);
+  assert.deepEqual(steps(), [['success', '✓ Read notes.md 0.2s']]);
   assert.equal(h.root.find((node) => node.className === 'activity-actions').children.length, 1, 'a finished run offers only its link');
 });
 

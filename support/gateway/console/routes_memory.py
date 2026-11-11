@@ -150,9 +150,9 @@ def _row(
     if info is not None:
         label = chat_label(info.kind, info.title, surface)
     imported = prov.get("source") == "import"
-    # A note the note gate kept says where it came from (``[memory] note_gate``): a page
-    # or file the user pointed to, a finished task's result, or the model's own
-    # inference; a note of the user's own words reads as it always did.
+    # A note the note gate kept says where it came from: a page or file the user
+    # pointed to, a finished task's result, or the model's own inference; a note of
+    # the user's own words reads as it always did.
     how = str(prov.get("source") or "")
     pointed = how == note_gate.POINTED and bool(prov.get("from"))
     inferred = how == note_gate.INFERRED
@@ -258,6 +258,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             "documents": status["documents"],
             "embedding_model": status["embedding_model"],
             "retriever": status["retriever"],
+            "answering": status["answering"],
             "last_error": status["last_error"],
         }
 

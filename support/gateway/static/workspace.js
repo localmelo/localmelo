@@ -23,7 +23,6 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
-import { stepWords } from "./step-words.mjs";
 import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { createStreams } from "./browser-stream.mjs";
 import { ACTIVE as BROWSING, mergeBrowsers, setupBrowserCards, sourceOf as browserSource } from "./browser-card.mjs";
@@ -77,6 +76,7 @@ import {
   statusLine,
   statusMark,
   statusText,
+  stepSaid,
   summaryTimed,
   TOOL_CALL_TEXT,
   toolState,
@@ -1993,13 +1993,15 @@ function statusMarkNode(severity, stopped = false) {
 // Whether the model runs on a server of the user's own (the settings have an address to change).
 const localBackend = () => S.health?.model?.local === true;
 
+// A run that used all its steps, or kept repeating, says so in its title; its raw cause line is for a developer.
+const causeInTitle = (turn) => ["budget_exhausted", "stuck"].includes(turn.status) && !developerMode;
+
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
 function failureHint(turn, can, error) {
-  const own = [];
-  if (can.continue) own.push(t("failure.continueHint"));
-  if (can.retry) own.push(t("failure.retryHint"));
+  const goOn = can.continue ? [t("failure.continueHint")] : [];
+  const again = can.retry ? [t("failure.retryHint")] : [];
   // Sentences are joined as the language writes them: a space in English, nothing in Chinese.
-  const sentences = (first) => [first, ...own].join(t("common.sentenceGap"));
+  const sentences = (first, ...more) => [first, ...goOn, ...more].join(t("common.sentenceGap"));
   switch (turn.status) {
     case "provider_error": {
       // The title says all there is to say, and the actions offer the settings.
@@ -2016,9 +2018,9 @@ function failureHint(turn, can, error) {
         ? t("failure.serverAt", { where: S.health?.model_server?.url_label || t("failure.configuredAddress") })
         : t("failure.checkKey");
     }
-    case "budget_exhausted": return sentences(t("failure.budget"));
-    case "timeout": return sentences(t("failure.timeout"));
-    case "stuck": return t("failure.stuck");
+    case "budget_exhausted": return sentences(t("failure.budget"), ...again);
+    case "timeout": return sentences(t("failure.timeout"), ...again);
+    case "stuck": return sentences(t("failure.stuck"));
     case "failed": {
       if (error === UNFINISHED_ANSWER) return t("failure.thinkingOnly");
       return t(error === TOOL_CALL_TEXT ? "failure.toolText" : "failure.failed");
@@ -2075,7 +2077,7 @@ function statusNode(turn) {
   // So does the title of a tool call written as text.
   // In the default mode a model server's own text is under Details too, with the sentence above it.
   const raw = developerMode || turn.status !== "provider_error";
-  if (!stopped && raw && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
+  if (!stopped && raw && !causeInTitle(turn) && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -2311,9 +2313,8 @@ function toolCard(item, turn, context = {}) {
   } else {
     // What the step is, not the tool's name or its arguments (they stay in the opened card). A step that
     // did not finish reads as what it was to do, beside its mark and its word.
-    const tense = state.state === "running" ? false : state.state === "success" ? true : "ask";
     summary.classList.add("plain");
-    summary.append(el("span", "tool-words", stepWords(item.name, item.arguments, tense, item.output)));
+    summary.append(el("span", "tool-words", stepSaid(item, state)));
   }
   const meta = state.text ? el("span", "tool-meta", state.text) : null;
   if (meta) summary.append(meta);
@@ -3151,8 +3152,7 @@ function turnStatus(turn) {
     line.dataset.severity = info.severity;
     line.append(statusMarkNode(info.severity), el("span", "", info.title));
     nodes.push(line);
-    // A run that used all its steps says so in the title; its raw cause ("Max steps reached") is for a developer.
-    const quiet = turn.status === "completed" || (turn.status === "budget_exhausted" && !developerMode);
+    const quiet = turn.status === "completed" || causeInTitle(turn);
     const error = quiet ? "" : cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0];
     if (error) {
       const text = el("p", "failure-error", error);

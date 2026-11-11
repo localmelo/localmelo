@@ -187,7 +187,7 @@ $ melo
 melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-melo remembers across chats by words only; melo setup adds search by meaning.
+melo remembers across chats by words; melo setup adds search by meaning.
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 melo 0.1.0 · qwen3:8b (/model to change)
 ~/demo-project
@@ -249,7 +249,7 @@ server?`); choose `Use another server` for the full menu, which developer mode
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Save these settings?` | Press Enter on `Save and continue`, or choose `Cancel setup` (piped: `Save and continue? [Y]:`). |
-| `Embedding backend` | `5. None (search by words only)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first selected; choosing one is enough. |
+| `Embedding backend` | `5. None (no search by meaning)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first selected; choosing one is enough. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
 For a cloud API, choose the vendor. The wizard then asks for

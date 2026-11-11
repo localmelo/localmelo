@@ -447,7 +447,7 @@ export function statusLine(status, error) {
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */
 export function canContinue(turn, newest) {
   return newest && !turn.origin && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
-    ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
+    ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "stuck", "provider_error", "timeout", "cancelled"].includes(turn.status);
 }
 
 /** A retry undoes the newest finished turn, never an earlier or undone one, nor a task's question. */
@@ -666,7 +666,7 @@ export function newTurn(row) {
     images: pictureRefs(source.images),
     // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
     origin: String(source.origin ?? ""),
-    // Its text is not what the person typed (a stopped task going on, a task another made).
+    // Its text is not what the person typed (a stopped task going on, a task another made, the go-ahead of Allow once).
     composed: source.composed === true,
     status: String(source.status ?? ""),
     cause: String(source.cause ?? ""),
@@ -1643,6 +1643,11 @@ export function toolState(item, {held = "", now = 0} = {}) {
     default:
       return {state: "not_run", mark: "◌", text: t("turns.tool.notRun")};
   }
+}
+
+/** A step's words for how it ended (*state* is `toolState`'s): `Reading x` while it runs, `Read x` once done, else what it was to do. */
+export function stepSaid(item, {state}) {
+  return stepWords(item.name, item.arguments, state === "running" ? false : state === "success" ? true : "ask", item.output);
 }
 
 /** `_first_line`: the first non-blank line of *text*, cleaned and collapsed. */

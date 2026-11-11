@@ -147,9 +147,7 @@ async def test_the_list_is_worded_again_for_what_was_left_out(
     setup_fakes: Fakes, client: httpx.AsyncClient
 ) -> None:
     found = (await client.get("/api/setup/plan", params={"skip": EMBED_ID})).json()
-    assert found["notes"] == [
-        "Without Qwen3 Embedding 0.6B, memory goes by words only."
-    ]
+    assert found["notes"] == ["Without Qwen3 Embedding 0.6B, memory goes by words."]
     assert (
         found["rows"][3]["state"] == "skipped"
         and found["download"] == "Download about 5.8 GB."

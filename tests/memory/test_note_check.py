@@ -186,6 +186,122 @@ def test_most_of_the_other_words_must_be_found() -> None:
     assert records.unsupported("You prefer brief answers.", [typed]) == ["brief"]
 
 
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        # Another form of a word the user typed: an irregular verb, an adverb.
+        ("Keep my notes in Obsidian.", "You kept your notes in Obsidian."),
+        ("I choose Rotterdam for the trip.", "You chose Rotterdam for the trip."),
+        ("I take the 8:15 train to Leeds.", "You took the 8:15 train to Leeds."),
+        ("I speak fluent Dutch.", "You speak Dutch fluently."),
+        ("I speak Dutch, my native language.", "You speak Dutch natively."),
+        ("Tomas is a happy cook.", "Tomas cooks happily."),
+        ("The basic plan costs 12 euros.", "The plan basically costs 12 euros."),
+        # Joining words that state no relation.
+        ("A cup of coffee is 3 euros.", "Coffee is 3 euros per cup."),
+        ("I live in Leeds.", "You now live in Leeds."),
+        ("I work on Mondays.", "You will work on Mondays."),
+        ("I work on Mondays and Fridays.", "You work on Mondays, plus some Fridays."),
+        ("You're my coach, Ms. Petrova.", "You are Ms. Petrova's coach."),
+    ],
+)
+def test_a_note_with_another_form_of_a_word_or_a_joining_word_is_grounded(
+    typed: str, note: str
+) -> None:
+    assert records.unsupported(note, [typed]) == []
+
+
+@pytest.mark.parametrize(
+    ("word", "base"),
+    [
+        ("kept", "keep"),
+        ("chose", "choose"),
+        ("chosen", "choose"),
+        ("took", "take"),
+        ("taken", "take"),
+        ("went", "go"),
+        ("written", "write"),
+        ("was", "be"),
+        ("been", "be"),
+    ],
+)
+def test_an_irregular_verb_form_is_compared_by_its_base(word: str, base: str) -> None:
+    assert records._stem(word) == records._stem(base)
+    # The shared search stemmer is not the one that knows them.
+    assert stem(word) == word
+
+
+@pytest.mark.parametrize(
+    ("note", "typed"),
+    [
+        ("You apply for jobs.", "I use an app for jobs."),
+        ("Your family lives in Leeds.", "My fami lives in Leeds."),
+        ("You only live in Leeds.", "I live in Leeds."),
+    ],
+)
+def test_an_adverb_finds_only_its_own_base(note: str, typed: str) -> None:
+    assert records.unsupported(note, [typed])
+
+
+def test_an_adverb_is_found_by_exact_endings_only() -> None:
+    assert records._adverb_bases("fluently") == ["fluent"]
+    assert records._adverb_bases("happily") == ["happy"]
+    assert records._adverb_bases("basically") == ["basical", "basic"]
+    assert records._adverb_bases("apply") == []  # "app" is too short
+    assert records._adverb_bases("family") == ["famy"]  # no base "fami"
+    assert records._adverb_bases("only") == []
+    assert records._adverb_bases("meeting") == []
+
+
+def test_a_negation_or_a_relation_is_still_a_word_of_the_note() -> None:
+    # "not" and "no" turn the fact round; "over", "before", "after", "since",
+    # "off" and "under" state how two things stand: none is a joining word.
+    assert records.unsupported("You work not in Leeds.", ["I work in Leeds."]) == [
+        "not"
+    ]
+    assert records.unsupported("You work no Mondays.", ["I work Mondays."]) == ["no"]
+    typed = "I work after lunch on Mondays."
+    assert records.unsupported("You work before lunch on Mondays.", [typed]) == [
+        "before"
+    ]
+    for word in ("not", "no", "never", "over", "after", "before", "since", "off"):
+        assert word in records.note_terms(f"You work {word} lunch.")
+    for word in ("per", "now", "so", "will", "plus", "some", "about", "re", "ll", "ve"):
+        assert word not in records.note_terms(f"You {word} work.")
+
+
+@pytest.mark.parametrize(
+    ("note", "typed", "missing"),
+    [
+        # A value is found as it is typed, in whatever form the note puts it.
+        ("You took the 9:15 train to Leeds.", "I take the 8:15 train to Leeds.", ["9"]),
+        (
+            "You took the 8:15 train to Hull.",
+            "I take the 8:15 train to Leeds.",
+            ["hull"],
+        ),
+        ("You met Sam on Friday.", "I meet Sam on Monday.", ["friday"]),
+        # A given name that is also a joining word stays a word of the note.
+        ("Your dentist is Will Park.", "My dentist is Sam Park.", ["will"]),
+        ("Your coach is Per Andersson.", "My coach is Sam Andersson.", ["per"]),
+        # Also as the first word of the note: written with a capital, it stays a word.
+        ("Will Park is your dentist.", "Sam Park is my dentist.", ["will"]),
+        ("Per Andersson coaches you.", "Sam Andersson coaches me.", ["per"]),
+        # A capitalised joining word counts as it did before: one of two, refused.
+        ("Now you live in Leeds.", "I live in Leeds.", ["now"]),
+    ],
+)
+def test_a_value_in_another_form_is_still_refused(
+    note: str, typed: str, missing: list[str]
+) -> None:
+    assert records.unsupported(note, [typed]) == missing
+
+
+def test_a_given_name_that_is_a_joining_word_is_found_when_typed() -> None:
+    note = "Your dentist is Will Park."
+    assert records.unsupported(note, ["My dentist is Will Park."]) == []
+
+
 def test_the_words_of_a_restating_note_are_not_looked_for() -> None:
     for word in ("said", "told", "then", "each", "use", "also", "always", "every"):
         assert word not in records.note_terms(f"You {word} short answers.")

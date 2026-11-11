@@ -2075,11 +2075,11 @@ test('every status maps to one next step or none', () => {
 test('a failed turn draws a shared glyph, a plain title and one filled next step on the newest turn', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  const make = (status, extra = {}, result = {}) => {
+  const make = (status, extra = {}, result = {}, on = h) => {
     const turn = turns.newTurn(turnRow({id: `t-${status}`, turn: 2, status, result: {n_tool: 2, error: 'boom\nsecond line', ...result}, ...extra}));
-    h.state().view.turns = [turn];
-    h.context.turn = turn;
-    return h.run('statusNode(turn)');
+    on.state().view.turns = [turn];
+    on.context.turn = turn;
+    return on.run('statusNode(turn)');
   };
   const filled = (node) => findNode(node, (item) => item.tag === 'button' && item.className === 'primary-button');
   const mark = (node) => findNode(node, (item) => item.className === 'status-mark');
@@ -2094,6 +2094,20 @@ test('a failed turn draws a shared glyph, a plain title and one filled next step
     assert.equal(filled(node)?.textContent, label, status);
   }
   assert.equal(filled(make('budget_exhausted', {}, {n_tool: 0}))?.textContent, 'Try again', 'Continue needs a run that used tools');
+  const offers = (node) => findNode(node, (item) => item.className === 'failure-actions').children.map((item) => item.textContent);
+  assert.deepEqual(offers(make('stuck')), ['Try again', 'Continue', 'Copy error'], 'a run that repeated itself can go on, as one that ran out of steps can');
+  // A run that used all its steps or kept repeating says its cause in the title: the raw line is a developer's.
+  const plain = harness(defaultMode());
+  await plain.run('init()');
+  const part = (node, name) => findNode(node, (item) => item.className === name);
+  for (const status of ['budget_exhausted', 'stuck']) {
+    assert.equal(part(make(status, {}, {}, plain), 'failure-error'), null, `${status}: its cause is said once`);
+    assert.equal(part(make(status), 'failure-error').textContent, 'boom', `${status}: a developer keeps the raw line`);
+  }
+  assert.equal(part(make('failed', {}, {}, plain), 'failure-error').textContent, 'boom', 'any other failure keeps its own text');
+  // The hint names Continue exactly when the card offers it.
+  assert.equal(part(make('stuck'), 'failure-hint').textContent, 'melo repeated itself. Rephrase the request, or try again. Continue picks up where it stopped.');
+  assert.equal(part(make('stuck', {}, {n_tool: 0}), 'failure-hint').textContent, 'melo repeated itself. Rephrase the request, or try again.');
   const old = turns.newTurn(turnRow({id: 'old', turn: 1, status: 'stuck'}));
   h.state().view.turns = [old, turns.newTurn(turnRow({id: 'new', turn: 2}))];
   h.context.turn = old;
@@ -3962,6 +3976,16 @@ test('a task that ran out of steps says so once in default mode, and a developer
   const developer = await openTask(routes);
   assert.match(flatten(answerBox(developer)), /Ran out of steps/);
   assert.match(flatten(answerBox(developer)), /Max steps reached/);
+});
+
+test('a task that repeated itself says so once in default mode too, and a developer also sees the raw cause', async () => {
+  const repeated = turnRow({user_text: 'Objective of t1', status: 'stuck', answer: 'Fixed the check. Remaining: run the tests.',
+    result: {status: 'stuck', result: '', error: 'Stuck: the same tool calls or errors repeated', duration_s: 10, n_tool: 3, steps: 5}, events: [liveStarted, liveTool(2)]});
+  const routes = {'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', wait_reason: ''})}, [TURNS_T1]: {turns: [repeated], has_earlier: false}};
+  const plain = await openTask({...routes, 'GET /settings': {mode: 'default'}});
+  assert.match(flatten(answerBox(plain)), /Stopped: the same calls kept repeating/);
+  assert.doesNotMatch(flatten(answerBox(plain)), /Stuck: the same tool calls/, 'the raw cause repeats the title');
+  assert.match(flatten(answerBox(await openTask(routes))), /Stuck: the same tool calls or errors repeated/);
 });
 
 test('a task code found not finished says why, lists its own tests, and Finish it continues it', async () => {

@@ -17,9 +17,10 @@ With the developer setting ``[memory] sleep`` (:mod:`.sleep`),
 :meth:`ChatMemory.undo_sleep` puts a run back.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
-``auto`` (words, and meaning too with an embedding model), ``bm25``,
-``embedding`` or ``llm`` (words pick :data:`CANDIDATES`, the chat model chooses
-among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). With the
+``auto`` (words, and meaning too with an embedding model; with none, ``llm`` when a
+chat model is set up, else words only), ``bm25``, ``embedding`` or ``llm`` (words
+pick :data:`CANDIDATES`, the chat model chooses among them within
+:data:`SELECT_TIMEOUT_S`, no embedding calls). With the
 developer setting ``[memory] recall_form = "list"`` the recall block and the
 search tool show each chat turn as one line, not an excerpt, and the chat's model
 opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`). In the
@@ -76,8 +77,6 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_PARALLEL,
-    MEMORY_NOTE_GATE,
-    MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_LIST_MAX,
     MEMORY_RECALL_MIN_COSINE,
     MEMORY_RECALL_MIN_COVERAGE,
@@ -236,8 +235,6 @@ NO_MORE_TRIES: Final = (
     "in one sentence what you could not keep."
 )
 _BATCH: Final = 16
-# Longest the embedding of a note and the windows of its sources may take: one call.
-NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
 # The size of the window a chat is encoded in, and the file in the memory folder
 # where the encoder's replies are kept when ``[memory] compress_cache`` is empty.
 COMPRESS_AT_CHARS: Final = 12_000
@@ -304,12 +301,21 @@ class Recall:
         return data
 
 
-def _resolve(mode: str, failure: str) -> tuple[str, str]:
-    """The retriever that answers and its ``fallback``, for a configured *mode*."""
+def _resolve(mode: str, failure: str, chat: bool) -> tuple[str, str]:
+    """The retriever that answers and its ``fallback``, for a configured *mode*.
+
+    *failure* is what the query embedding said (``no-embedding`` when no embedding
+    model is set up) and *chat* says a chat model is set up. ``auto`` without an
+    embedding model is the chat model's choice among the word candidates (``llm``),
+    or words only (``bm25``) when no chat model is set up either; ``embedding``
+    without a model is words only, with the reason in ``fallback``.
+    """
     if mode in ("bm25", "llm"):
         return mode, "none"
-    if failure == "no-embedding":  # `auto` without a model is just words
-        return "bm25", "none" if mode == "auto" else failure
+    if failure == "no-embedding":
+        if mode == "auto":
+            return ("llm" if chat else "bm25"), "none"
+        return "bm25", failure
     return "embedding", failure or "none"
 
 
@@ -371,15 +377,6 @@ def _guide(gathers: bool, lines: Iterable[Item]) -> str:
         parts.append(GATHER_GUIDE)
     parts.append(PREMISE_GUIDE)
     return " ".join(parts)
-
-
-class NoteSettings(NamedTuple):
-    """The ``[memory]`` settings of the note gate (:mod:`.note_gate`): its *level*,
-    ``pointed`` or ``meaning``, and *min_cosine*, the least similarity of meaning
-    that counts as a source's support."""
-
-    level: str = note_gate.POINTED
-    min_cosine: float = note_gate.MIN_COSINE
 
 
 class Admission(NamedTuple):
@@ -1020,6 +1017,11 @@ class ChatMemory:
         mode = cfg.memory.retriever if cfg is not None else "auto"
         return mode if mode in ("bm25", "embedding", "llm") else "auto"
 
+    def _answering(self, failure: str) -> tuple[str, str]:
+        """:func:`_resolve` for the settings now: the retriever that answers a recall
+        and its ``fallback``, given what the query embedding said (*failure*)."""
+        return _resolve(self.retriever(), failure, self.chat_provider() is not None)
+
     def recall_settings(self, reading: Reading | None = None) -> RecallSettings:
         """The recall settings of the settings now.
 
@@ -1057,22 +1059,6 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             items,
             auto,
-        )
-
-    def note_settings(self) -> NoteSettings:
-        """The note gate's settings of the settings now: ``[memory] note_gate`` and
-        ``note_min_cosine``. A value out of its bounds or of the wrong type reads as
-        its default (``pointed``, 0.55), as :meth:`recall_settings` reads its own."""
-        cfg = self._settings()
-        if cfg is None:
-            return NoteSettings()
-        level = getattr(cfg.memory, "note_gate", note_gate.POINTED)
-        bar = getattr(cfg.memory, "note_min_cosine", note_gate.MIN_COSINE)
-        low, high = MEMORY_NOTE_MIN_COSINE
-        fits = isinstance(bar, int | float) and not isinstance(bar, bool)
-        return NoteSettings(
-            level if level in MEMORY_NOTE_GATE else note_gate.POINTED,
-            float(bar) if fits and low <= bar <= high else note_gate.MIN_COSINE,
         )
 
     def chat_provider(self) -> BaseLLMProvider | None:
@@ -1340,12 +1326,13 @@ class ChatMemory:
         """Rank for *query* as the retriever says; the numbers go to *recall*.
 
         *min_cosine* and *min_coverage* are the bars of the ranking; the loose
-        candidates of the ``llm`` retriever take no coverage bar and no vectors.
+        candidates of the ``llm`` retriever (named, or what ``auto`` becomes with no
+        embedding model and a chat model set up) take no coverage bar and no vectors.
         With *listing* (the list form) no cap on a chat's turns applies, and a turn
         matched by meaning carries its cosine (:attr:`Item.similarity`).
         """
-        mode = self.retriever()
-        recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
+        recall.retriever, recall.fallback = self._answering(embedded.failure)
+        by_chat = recall.retriever == "llm"
         started = time.perf_counter()
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
@@ -1373,13 +1360,13 @@ class ChatMemory:
                     keep_from_turn=keep_from_turn,
                     coverage=0.0,
                 )[:CANDIDATES]
-                if mode == "llm"
+                if by_chat
                 else []
             )
             replaced = self._replaced(corpus)
             followed = self._derived(corpus)[1]
         recall.search_ms = elapsed_ms(started)
-        recall.candidates = len(loose) if mode == "llm" else len(found)
+        recall.candidates = len(loose) if by_chat else len(found)
         if loose and records_k + docs_k:
             found = await self._select(
                 query, loose, found, recall, k=records_k + docs_k
@@ -1686,7 +1673,7 @@ class ChatMemory:
         if not query.strip():
             recall.query_from = "none"
             failure = "" if self.embedding()[0] else "no-embedding"
-            recall.retriever, recall.fallback = _resolve(self.retriever(), failure)
+            recall.retriever, recall.fallback = self._answering(failure)
             return TurnMemory(recall=recall)
         started = time.perf_counter()
         embedded = await self._embed(
@@ -1802,7 +1789,7 @@ class ChatMemory:
             ):
                 return WRITE_IN_YOU
             note = records.second_person(note, protect=True, keep=typed)
-        admission = await self._admit(turn, note, said, self.note_settings())
+        admission = await self._admit(turn, note, said)
         if isinstance(admission, str):
             return admission
         admitted = (
@@ -1873,24 +1860,22 @@ class ChatMemory:
         return confirmed
 
     async def _admit(
-        self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
+        self, turn: ChatTurn, note: str, said: list[str]
     ) -> Admission | str:
-        """Where the support of *note* is, at the note gate's level, or why it is
-        refused (a message for the model). At the default level a note that needs a
-        page and a result together stays tagged ``result``, the least trusted source
-        it needs.
+        """Where the support of *note* is, or why it is refused (a message for the
+        model). A note that needs a page and a result together stays tagged
+        ``result``, the least trusted source it needs.
 
         An instruction to the assistant is refused first. Then the sources, most
         trusted first: what the user typed (its words), a page or file the user
-        pointed to, a finished task's result shown in the chat. With ``meaning``, a
-        note whose key tokens are all found may also say the same in other words or
-        another language (:meth:`_by_meaning`). A page or file the user did not
-        point to supports nothing, and one the user called someone else's supports
-        no note about the user. A page read in the browser supports nothing either;
-        the refusal says so (:data:`note_gate.NOT_BROWSER`). What a page or a file
-        supports is what it states (:func:`note_gate.material_text`): its hidden text
-        and its paragraphs that order the assistant are left out; of a result only
-        the paragraphs aimed at an assistant (:func:`note_gate.result_text`).
+        pointed to, a finished task's result shown in the chat. A page or file the
+        user did not point to supports nothing, and one the user called someone
+        else's supports no note about the user. A page read in the browser supports
+        nothing either; the refusal says so (:data:`note_gate.NOT_BROWSER`). What a
+        page or a file supports is what it states (:func:`note_gate.material_text`):
+        its hidden text and its paragraphs that order the assistant are left out; of
+        a result only the paragraphs aimed at an assistant
+        (:func:`note_gate.result_text`).
 
         A note no source supports, and that only Chinese or Japanese wording keeps
         from the typed words, goes once to the chat's model (:meth:`_judged`), which
@@ -1923,10 +1908,6 @@ class ChatMemory:
             note, evidence + [m.text for m in browsed]
         ):
             return note_gate.NOT_BROWSER
-        if gate.level == "meaning":
-            meant = await self._by_meaning(note, said, usable, results, gate)
-            if meant is not None:
-                return meant
         if await self._judged(note, said):
             return Admission(note_gate.TYPED, judged=True)
         missing = records.unsupported(note, evidence)
@@ -1939,53 +1920,6 @@ class ChatMemory:
                 else ""
             )
         )
-
-    async def _by_meaning(
-        self,
-        note: str,
-        said: list[str],
-        usable: list[note_gate.Material],
-        results: list[str],
-        gate: NoteSettings,
-    ) -> Admission | str | None:
-        """The note gate's judgement of *note* by meaning, at ``meaning`` and above.
-
-        A key token (:func:`note_gate.key_tokens`) that no source holds refuses the
-        note, named. Then the embedding of the note is compared with each source's
-        windows (:func:`note_gate.windows`): the first source, most trusted first, whose
-        best window is at least ``note_min_cosine`` close is the note's source.
-        ``None`` when meaning cannot be judged (no embedding model, a failure, nothing
-        to compare): the words check stands.
-        """
-        pages = [m.text for m in usable]
-        keys = note_gate.unsupported_keys(note, [*said, *pages, *results])
-        if keys:
-            return f"Not remembered: {', '.join(keys[:3])}: {note_gate.NOT_FOUND}"
-        wanted = note_gate.keys_of(note)
-        typed = note_gate.recent_windows(said, note_gate.TYPED_WINDOWS)
-        pointed = note_gate.keyed_windows(usable, wanted, note_gate.POINTED_WINDOWS)
-        shown = note_gate.recent_windows(results, note_gate.RESULT_WINDOWS)
-        texts = [*typed, *(w for _, w in pointed), *shown]
-        if not texts:
-            return None
-        embedded = await self._embed([note, *texts], NOTE_EMBED_TIMEOUT_S, query=False)
-        if embedded.vectors is None:
-            return None
-        mine, rest = embedded.vectors[0], embedded.vectors[1:]
-        close = [note_gate.cosine(mine, vector) for vector in rest]
-        split = len(typed), len(typed) + len(pointed)
-        nearest = {
-            note_gate.TYPED: max(close[: split[0]], default=0.0),
-            note_gate.POINTED: max(close[split[0] : split[1]], default=0.0),
-            note_gate.RESULT: max(close[split[1] :], default=0.0),
-        }
-        for source in (note_gate.TYPED, note_gate.POINTED, note_gate.RESULT):
-            if nearest[source] >= gate.min_cosine:
-                if source != note_gate.POINTED:
-                    return Admission(source)
-                scores = close[split[0] : split[1]]
-                return Admission(source, pointed[scores.index(max(scores))][0])
-        return note_gate.TOO_FAR
 
     async def _pointed(self, turn: ChatTurn) -> list[note_gate.Material]:
         """The pages and files this chat read that the user pointed to, from the
@@ -2820,9 +2754,11 @@ class ChatMemory:
         as the recall block's do, and the notes of one subject are ordered and
         marked as recall does (:func:`records.newer_values_first`). The
         lowest-ranked lines go first when *budget_chars* is short, none is cut in
-        half. No model call besides the
-        query embedding, which falls back to words as recall does. A note whose
-        key (``r:<id>``) is in *exclude* is left out: the task has it already.
+        half. No model call besides the query embedding, which falls back to
+        words as recall does, or the chat model's choice when that is the
+        retriever that answers (:meth:`_answering`), within
+        :data:`SELECT_TIMEOUT_S`. A note whose key (``r:<id>``) is in *exclude*
+        is left out: the task has it already.
         """
         if not self.enabled:
             return ""
@@ -3277,8 +3213,9 @@ class ChatMemory:
     async def status(self) -> dict[str, Any]:
         store, index = self.stores()
         mode = self.retriever()
+        provider, model = self.embedding()
         # The words-only and chat-model retrievers make no embedding call.
-        model = "" if mode in ("bm25", "llm") else self.embedding()[1]
+        model = "" if mode in ("bm25", "llm") else model
         async with self._lock:
             counts = len(await store.active_entries()), await index.count()
         return {
@@ -3287,6 +3224,8 @@ class ChatMemory:
             "documents": counts[1],
             "embedding_model": model,
             "retriever": mode,
+            # What answers a recall now: the setting, or what ``auto`` becomes.
+            "answering": self._answering("" if provider else "no-embedding")[0],
             "last_error": self.last_error,
         }
 

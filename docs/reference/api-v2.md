@@ -335,7 +335,7 @@ file's revision.
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (search by words only)"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no search by meaning)"}],
     "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
@@ -2551,7 +2551,7 @@ panel uses these routes.
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "answering": "llm", "last_error": ""}
 ```
 
 - `GET /api/memory/records` lists the notes newest first; `?session_id=ID` keeps one chat's.
@@ -2563,8 +2563,10 @@ panel uses these routes.
   `from a finished task's result, Oct 30` in both, and a note an earlier version kept as inferred has `melo inferred it from chat “Plans”, Oct 30`
   in `from` and `melo inferred it · chat “Plans”, Oct 30` in `source`; `edited` is true once the user reworded the note; `imported` is true for a note
   brought in from another assistant's file (with its `batch_id`; see below). `documents` counts the chat turns in the
-  index, `embedding_model` is the model that searches by meaning (`""`: words only, which
-  `retriever` `bm25` or `llm` always is) and `last_error` the last reason it was not used.
+  index, `embedding_model` is the model that searches by meaning (`""`: none, which
+  `retriever` `bm25` or `llm` always is), `retriever` is the `[memory] retriever` setting, `answering`
+  is the way that answers a recall now (`embedding`, `llm` or `bm25`: `auto` with no embedding model
+  is `llm` when a chat model is set up, else `bm25`) and `last_error` the last reason it was not used.
 - `PATCH /api/memory/records/{id}` with `{"text": "..."}` rewords a note in place and answers
   the note as above. The old wording is overwritten (not kept), the new one is embedded, and
   the text of the note's decision rows is blanked. A wording that is empty, over 300

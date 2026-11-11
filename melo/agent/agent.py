@@ -60,6 +60,7 @@ from localmelo.melo.agent._chat import (
     PREFIX_RUN,
     PREFIX_VERSION,
     RETRY_HOOK,
+    STUCK_ANSWER_NOTE,
     TOOL_OVER_ANSWER_NOTE,
     CallTelemetry,
     Chat,
@@ -257,6 +258,11 @@ def _split_inline_reasoning(response: Message) -> Message:
     if response.thinking:
         return dataclasses.replace(response, content=content)
     return dataclasses.replace(response, content=content, thinking=block)
+
+
+# The ends of a run that stopped with its work unfinished: ``answer_on_stop``
+# asks them for an answer, and adds the closing line the task asks for.
+_STOPPED_STATUSES = ("gate_stopped", "budget_exhausted", "stuck")
 
 
 def _answer_of(reply: Message) -> str:
@@ -1215,8 +1221,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         # Runs under way: run_task calls, each until it returns or raises,
         # or after an interactive cancellation until its finalizer ends.
         self._active_runs = 0
-        # The latest run's earlier-turns block, for closing_answer after it.
-        self._earlier_block = ""
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
@@ -3632,11 +3636,13 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
           request would pass ``max_calls``: the error says ``Call budget
           reached``, and the result is the latest text the model wrote in the
           run, if any. With ``answer_on_stop``, a
-          ``gate_stopped`` or ``budget_exhausted`` run with no result asks
-          once more for one (see :meth:`_answer_on_stop`);
+          ``gate_stopped``, ``budget_exhausted`` or ``stuck`` run with no
+          result asks once more for one (see :meth:`_answer_on_stop`);
         - ``context_budget_exceeded``: the pinned request cannot fit the
           configured input budget, or the smaller overflow retry was refused;
-        - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
+        - ``stuck``: stuck detection fired with ``attempt_policy="none"`` (with
+          ``reflect``, a reflection follows a stuck attempt). The result is
+          blank, or, with ``answer_on_stop``, the answer of its extra request;
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
           chat request after its retries, or an embedding request. The
@@ -3833,7 +3839,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         ``(what the user said, the answer)``, oldest first, from a caller that
         keeps the chat (a session's runner): the working window drops its
         oldest turns as tool output fills it, so the reflection, the answer on
-        stop (``answer_on_stop``, and :meth:`closing_answer` after the run)
+        stop (``answer_on_stop``)
         and a planning request whose window has lost what it held before the
         query (a window that began the run empty is not) carry them as one
         data block (see
@@ -3959,7 +3965,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             hidden=frozenset(hide_tools),
             earlier_block=earlier,
         )
-        self._earlier_block = earlier
         # The user's own words, which a step review reads (never tool output).
         # A window that starts over takes the person's earlier words first,
         # never the answers (#465).
@@ -4991,17 +4996,21 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     async def _answer_on_stop(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: one more request for the answer a stopped run lacks.
 
-        Only for a run that ended ``gate_stopped`` or ``budget_exhausted``,
-        or ``provider_error`` after the server refused a request for a budget
-        or rate limit (see :meth:`_run_attempts`), with a blank result. The
-        request (:meth:`Chat.final_answer`) carries the working window and the
-        latest reflection. A non-blank reply becomes the run's result (its
+        Only for a run that ended ``gate_stopped``, ``budget_exhausted`` or
+        ``stuck``, or ``provider_error`` after the server refused a request
+        for a budget or rate limit (see :meth:`_run_attempts`), with a blank
+        result. The request (:meth:`Chat.final_answer`) carries the working
+        window and the latest reflection, and ends with
+        :data:`~localmelo.melo.agent._chat.ANSWER_ON_STOP_NOTE`, or, for a
+        ``stuck`` run, which may have no evidence, with
+        :data:`~localmelo.melo.agent._chat.STUCK_ANSWER_NOTE` (answer what you
+        can, in plain words). A non-blank reply becomes the run's result (its
         ``<think>`` block removed), the status stays, and
         ``RunResult.answered_on_stop`` is true. A request that fails or that
         ``max_calls`` leaves no call for, or a blank reply, leaves the run as
         it was.
         """
-        stopped = run.status in ("gate_stopped", "budget_exhausted")
+        stopped = run.status in _STOPPED_STATUSES
         if run.result.strip() or not (stopped or run.early_stop == "refused"):
             return
         # The reflection comes as its own block: leave out the request and reply
@@ -5015,6 +5024,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 window,
                 task.query,
                 self.hippo.working.get_reflections(),
+                note=STUCK_ANSWER_NOTE if run.status == "stuck" else "",
                 earlier=run.earlier_block,
             ),
             "an answer on stop",
@@ -5029,35 +5039,13 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run.answered_on_stop = True
         run.answer_thinking = reply.thinking
 
-    async def closing_answer(self, query: str, *, note: str = "") -> str:
-        """After a run: one request, without tools, for the answer to *query* from what it found.
-
-        For a caller whose run ended with no answer it can use (a reply that
-        only said what it would do, a run that got stuck): the request is
-        the one ``answer_on_stop`` makes (the working window and the latest
-        reflection), with *note* in place of its closing instruction when
-        given. Returns the reply without its thinking, or ``""`` when it is
-        blank or a tool call written as text. A failed request raises.
-        """
-        prefix_run = self.chat.begin_prefix()
-        try:
-            reply = await self.chat.final_answer(
-                self.hippo.working.get_window(),
-                query,
-                self.hippo.working.get_reflections(),
-                note=note,
-                earlier=self._earlier_block,
-            )
-        finally:
-            PREFIX_RUN.reset(prefix_run)
-        return _answer_of(_split_inline_reasoning(reply))
-
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
 
-        For a run that ended ``completed``, ``gate_stopped`` or
-        ``budget_exhausted`` with an answer. The line is detected in the person's
-        own words (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
+        For a run that ended ``completed``, ``gate_stopped``,
+        ``budget_exhausted`` or ``stuck`` with an answer. The line is detected in
+        the person's own words
+        (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
         a task that names none is left as it is. One request, without tools
         (:meth:`Chat.closing_line`), gives the line from the answer alone, and
         it is added after the answer, which stays as it was.
@@ -5066,11 +5054,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         the run as it was, and so does a run that handed its work on: its
         result is the receipt of that hand-off, not an answer.
         """
-        if run.handed_off or run.status not in (
-            "completed",
-            "gate_stopped",
-            "budget_exhausted",
-        ):
+        if run.handed_off or run.status not in ("completed", *_STOPPED_STATUSES):
             return
         _, answer = split_thinking(run.result)
         label = requested_closing_label(run.words) if answer else None
