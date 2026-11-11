@@ -412,11 +412,11 @@ async def test_a_turn_tried_again_after_a_restart_cannot_type_a_password_given_s
         turn = await _wait_turn(client, main)
         [old] = await console.store.list_turns(main)
         [stale] = HANDLE.findall(old.user_text)
-        assert stale == "[password-100000]"
+        assert stale == "[password-100000000]"
         # The app restarts and the person gives another password in another message.
         newer = start_process(monkeypatch, 7)
         given = hide_passwords("on other.example my password is new-Secret9")
-        assert given.endswith("[password-100007]") and newer.value(stale) is None
+        assert given.endswith("[password-100000007]") and newer.value(stale) is None
         # Try again reads the old message back as the person's: its handle is not live.
         typed_again: list[str | None] = []
         real = StepReviewer.user_message
