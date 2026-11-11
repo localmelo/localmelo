@@ -195,6 +195,9 @@ class _Queued:
     # The hidden text files of a message: its turn starts with them stored, as a
     # message that did not wait does (#626).
     attachments: tuple[TextAttachment, ...] = ()
+    # The handles the door made from values in those files: in memory only, never
+    # stored, so a row read back after a restart has none (#626).
+    file_handles: frozenset[str] = frozenset()
 
     @property
     def chars(self) -> int:
@@ -619,11 +622,13 @@ class OwnerAsks:
         composed: str,
         key: str | None,
         attachments: Sequence[TextAttachment] = (),
+        file_handles: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         """Keep the person's message for the chat's next turn; its echo shows it queued.
 
         *composed* is its words and *attachments* its text files, kept apart as the
-        turn will have them. A repeat of a key still being kept waits for it and
+        turn will have them, with the *file_handles* its door made from them (kept in
+        memory, not in the stored row). A repeat of a key still being kept waits for it and
         gets its outcome.
         """
         first = self._admitting.get((chat_id, key)) if key is not None else None
@@ -634,14 +639,18 @@ class OwnerAsks:
             if key is not None and item.key == key:
                 return item.echo
         if key is None:
-            return await self._admit(chat_id, typed, composed, key, people, attachments)
+            return await self._admit(
+                chat_id, typed, composed, key, people, attachments, file_handles
+            )
         outcome: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
         )
         outcome.add_done_callback(lambda f: f.cancelled() or f.exception())
         self._admitting[(chat_id, key)] = outcome
         try:
-            echo = await self._admit(chat_id, typed, composed, key, people, attachments)
+            echo = await self._admit(
+                chat_id, typed, composed, key, people, attachments, file_handles
+            )
         except BaseException as exc:
             failed = exc if isinstance(exc, Exception) else SessionStoreError(str(exc))
             outcome.set_exception(failed)
@@ -659,6 +668,7 @@ class OwnerAsks:
         key: str | None,
         people: list[_Queued],
         attachments: Sequence[TextAttachment] = (),
+        file_handles: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         waiting = [item.chars for item in people if not item.note_of]
         rows = len(waiting) + self._places[chat_id]
@@ -668,7 +678,7 @@ class OwnerAsks:
             raise ApiError(409, "chat_queue_full", t("errors.queueFull"))
         with self._holding(chat_id, size):
             return await self._keep_message(
-                chat_id, typed, composed, key, people, attachments
+                chat_id, typed, composed, key, people, attachments, file_handles
             )
 
     async def _keep_message(
@@ -679,6 +689,7 @@ class OwnerAsks:
         key: str | None,
         people: list[_Queued],
         attachments: Sequence[TextAttachment] = (),
+        file_handles: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         busy = self._busy.get(chat_id)
         title = (
@@ -698,6 +709,7 @@ class OwnerAsks:
             composed,
             key or f"queued-{uuid.uuid4().hex}",
             attachments=tuple(attachments),
+            file_handles=file_handles,
         )
         item.echo = await front.echo(
             {"echo": "queued", "title": title, "typed": typed,
@@ -1036,7 +1048,7 @@ class OwnerAsks:
                 item.typed,
                 item.composed,
                 client_request_id=item.key,
-                extras=TurnExtras(item.attachments),
+                extras=TurnExtras(item.attachments, file_handles=item.file_handles),
                 words=None if item.attachments else item.typed,
             )
         except SessionBusyError:

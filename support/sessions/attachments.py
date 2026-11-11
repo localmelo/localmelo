@@ -12,7 +12,7 @@ from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.attachments import FILE_CLOSER, FILE_OPENER
-from localmelo.melo.contracts.sign_in import hide_passwords
+from localmelo.melo.contracts.sign_in import SPENT, VAULT
 
 _BLOCK = re.compile(
     re.escape(FILE_OPENER) + r'"([^"\n]{1,200})" chars="([0-9]+)"'
@@ -71,12 +71,18 @@ def snapshot(name: str, text: str) -> TextAttachment:
 
 @dataclass(frozen=True)
 class HiddenMessage:
-    """A message's parts as :func:`hide_message` returns them."""
+    """A message's parts as :func:`hide_message` returns them.
+
+    ``file_handles`` are the handles the pass made from values in the files'
+    texts (see :func:`hide_message`); empty when it replaced none, or when a
+    value of the message was too long to keep.
+    """
 
     text: str
     attachments: tuple[TextAttachment, ...] = ()
     words: str | None = None
     title: str | None = None
+    file_handles: frozenset[str] = frozenset()
 
 
 def hide_message(
@@ -95,23 +101,44 @@ def hide_message(
     not a string is passed on as it is, for the checks after the door to refuse.
     The console's routes call it before a message is checked, queued, composed or
     keyed, and a session's runner calls it again before it stores the turn.
+
+    The result's ``file_handles`` say which handles this pass made from values in
+    the files' texts (not their names): the one place that is known (#626). A
+    file that already holds handle-shaped text gave none, so a second pass, which
+    finds no value, returns an empty set. A value anywhere in the message that was
+    too long to keep makes the count unknown: the set is empty. The caller that
+    read the message as it arrived hands the set on, as data, beside the message.
     """
 
-    def cut(part: Any) -> Any:
-        return hide_passwords(part) if isinstance(part, str) else part
+    made: set[str] = set()
+    lost = False
 
+    def cut(part: Any, file: bool = False) -> Any:
+        nonlocal lost
+        if not isinstance(part, str):
+            return part
+        hidden, handles = VAULT.hide_with(part)
+        lost = lost or SPENT in handles
+        if file:
+            made.update(handles)
+        return hidden
+
+    # In reading order: the typed text, then each file, then the rest.
+    hidden = cut(text)
+    files = tuple(
+        (
+            TextAttachment(cut(item.name), cut(item.text, True))
+            if isinstance(item, TextAttachment)
+            else item
+        )
+        for item in attachments
+    )
     return HiddenMessage(
-        cut(text),
-        tuple(
-            (
-                TextAttachment(cut(item.name), cut(item.text))
-                if isinstance(item, TextAttachment)
-                else item
-            )
-            for item in attachments
-        ),
+        hidden,
+        files,
         cut(words),
         cut(title),
+        file_handles=frozenset() if lost else frozenset(made),
     )
 
 
