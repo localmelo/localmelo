@@ -119,6 +119,15 @@ func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval) -> PetMood 
     return .sleeping
 }
 
+/// Whether the pet shows how a run ended in this reply (done, or the error still): the pet reads the run's age from each
+/// reply, so its reaction ends at the first reply past the window, and the app asks at the base interval until then.
+func petShowsEnd(_ data: Data) -> Bool {
+    switch petMood(health: data, stopped: false, sinceTouch: 0) {
+    case .done, .failed: return true
+    case .unknown, .resting, .sleeping, .working, .waiting, .stopped, .noModel, .unreachable: return false
+    }
+}
+
 /// `configured` of `GET /api/health`: false while no model is set up, nil when the reply does not say.
 func healthConfigured(_ data: Data) -> Bool? {
     guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }

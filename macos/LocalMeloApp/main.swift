@@ -865,13 +865,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         armHealthTimer()
     }
 
-    // A reply the server gave: the next check is at the base interval if it brings something new or anything runs or
-    // waits, and later while nothing changes.
+    // A reply the server gave: the next check is at the base interval if it brings something new, anything runs or
+    // waits, or the pet still shows how a run ended, and later while nothing changes.
     private func healthChecked(_ data: Data) {
         let signature = healthSignature(data)
         let changed = signature != lastHealth
         lastHealth = signature
-        setHealthInterval(nextHealthInterval(current: healthInterval, failed: false, changed: changed, busy: healthBusy(data)))
+        setHealthInterval(nextHealthInterval(current: healthInterval, failed: false, changed: changed, busy: healthBusy(data) || petShowsEnd(data)))
     }
 
     private func pollHealth() {

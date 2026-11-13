@@ -14,8 +14,18 @@
  * - the model chip (the model server stopped or came back, a switch of models): 16 s; the server's own check of the
  *   model server runs only every 30 s;
  * - the offline notice: a server that stopped shows after 16 s at most (the chat's own live connection says so sooner);
- *   while the server does not answer the page asks at the base interval, so the notice goes soon after it is back.
+ *   while the server does not answer the page asks at the base interval, so the notice goes soon after it is back;
+ * - the header's mood (done or an error for `MOOD_WINDOW_S` after a run ends): the page asks at the base interval
+ *   until the window is over, so the mood ends about when it always did;
+ * - the day's lists (the sidebar's day groups and times, the Activity tab's day): a new day is a change, and the
+ *   Activity tab's list is read again every 30 s and when its read failed, as before (`panel.keep`).
+ *
+ * What a reading says that the page derives from a clock is part of the comparison (the mood's window, the day);
+ * what only a command or a dialog reads on demand (the uptime, the age of the model server's last check) is not: the
+ * newest reading is kept as it came, drawn or not.
  */
+
+import { showsEnd } from "./panel.mjs";
 
 export const LIST_BASE_MS = 4000;
 export const LIST_CEILING_MS = 16000;
@@ -32,7 +42,8 @@ export function nextListDelay(current, { changed = false, failed = false, busy =
 
 /**
  * Whether anything runs or waits for the person in what a refresh read: a chat's turn, a task, a run, an approval, a
- * question, a task held for the person or queued, a page the person holds.
+ * question, a task held for the person or queued, a page the person holds, or a run that ended so lately that the
+ * header still shows how.
  */
 export function listBusy(list, health) {
   const rows = [list?.main, ...(list?.sessions ?? [])].filter(Boolean);
@@ -40,14 +51,23 @@ export function listBusy(list, health) {
   const status = health?.status;
   const running = Object.values(status?.running ?? {}).reduce((total, count) => total + (Number(count) || 0), 0);
   return running > 0 || (status?.waiting?.length ?? 0) > 0 || (status?.control?.length ?? 0) > 0
-    || (status?.tasks?.queued ?? 0) > 0 || (status?.tasks?.held ?? 0) > 0;
+    || (status?.tasks?.queued ?? 0) > 0 || (status?.tasks?.held ?? 0) > 0 || showsEnd(status?.recent);
 }
 
-// The fields of the health that tick by themselves: the seconds since the server started, since the newest run ended
-// and since the model server was last asked. Two reads of an unchanged server differ in these and nothing else.
-const CLOCKS = new Set(["uptime_s", "ended_s_ago", "checked_s_ago"]);
+// The fields of the health that tick by themselves and that the page shows only on demand: the seconds since the server
+// started and since the model server was last asked. The age of the newest finished run ticks too, but the header
+// derives its mood from it: the comparison keeps whether that mood is on (`showsEnd`) and leaves the age out.
+const CLOCKS = new Set(["uptime_s", "checked_s_ago"]);
 
-/** What a body says, as text: equal text is nothing new. The clocks are left out. */
+/** What a body says, as text: equal text is nothing new. The clocks are left out, the mood's window is kept. */
 export function fingerprint(body) {
-  return JSON.stringify(body ?? null, (key, value) => (CLOCKS.has(key) ? undefined : value));
+  return JSON.stringify(body ?? null, (key, value) => {
+    if (CLOCKS.has(key)) return undefined;
+    if (key === "recent" && value) {
+      const kept = { ...value, shown: showsEnd(value) };
+      delete kept.ended_s_ago;
+      return kept;
+    }
+    return value;
+  });
 }

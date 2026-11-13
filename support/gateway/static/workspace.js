@@ -772,16 +772,18 @@ function sessionRow(session, active) {
   return row;
 }
 
-// What the page shows of the lists, as `fingerprint`s: the chats' (`OFFLINE` while the server does not answer) and the
-// health's. A refresh whose bodies read the same writes nothing to the page.
+// What the page shows of the lists, as `fingerprint`s: the chats' with the day they were drawn on (`OFFLINE` while the
+// server does not answer) and the health's. A refresh whose bodies read the same, on the same day, writes nothing to
+// the page.
 const OFFLINE = "offline";
 const drawn = { list: null, health: null };
 
 /**
  * Read the chats (and with `withHealth` the health) and draw what differs from what is shown. The one comparison is
- * here, before any list is touched: bodies equal to the ones shown leave the page as it is. Says whether anything
- * differed, whether the server did not answer and whether anything runs or waits for the person; the poll's pace
- * follows the three.
+ * here, before any list is touched: bodies equal to the ones shown, on the same day, leave the page as it is. The
+ * newest health is kept as it came either way, for what reads it on demand (`/status`, Settings). Says whether
+ * anything differed, whether the server did not answer and whether anything runs or waits for the person; the poll's
+ * pace follows the three.
  */
 async function refreshList({ withHealth = false } = {}) {
   let list = null;
@@ -793,8 +795,16 @@ async function refreshList({ withHealth = false } = {}) {
   }
   const failed = list === null;
   const busy = listBusy(list, health ?? S.health);
-  const listKey = failed ? OFFLINE : fingerprint(list);
+  // The sidebar's day groups and times follow the calendar: a new day draws them again, with the chats unchanged.
+  const listKey = failed ? OFFLINE : `${new Date().toDateString()}\n${fingerprint(list)}`;
   const healthKey = health === null ? drawn.health : fingerprint(health);
+  if (health !== null && healthKey === drawn.health) {
+    // Nothing new to draw: what reads the health on demand (S.health) and what goes by its own clock (the panel's day,
+    // a model list that failed to load) hear the newest reading all the same.
+    S.health = health;
+    panel.keep(health);
+    serve.update();
+  }
   if (listKey === drawn.list && healthKey === drawn.health) return { changed: false, failed, busy };
   let heldChanged = false;
   if (listKey !== drawn.list) {

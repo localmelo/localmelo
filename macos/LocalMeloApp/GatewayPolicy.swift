@@ -163,7 +163,8 @@ func menuBarState(_ data: Data) -> MenuBarState {
 }
 
 /// Seconds between two health checks while the server starts, after a failed check, while anything runs or waits for
-/// the person and after anything changed; and the most it grows to while the server keeps answering with nothing new.
+/// the person (or ended so lately that the pet still shows how: `petShowsEnd`) and after anything changed; and the most
+/// it grows to while the server keeps answering with nothing new.
 ///
 /// What reads the check, and how late each may show at the ceiling: the menu-bar mark and its menu (work that starts
 /// somewhere else, an approval that waits), the pill and the pet on the desktop (the same, with the window put away),

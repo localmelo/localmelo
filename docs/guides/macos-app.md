@@ -70,7 +70,7 @@ The pinned Python and uv archives and the wheels are checked against their hashe
 - The menu lists what runs, **Waiting for your approval** (it opens that chat or task), **Open localmelo**, **Settings…** and **Quit localmelo**.
 - With melo_serve, a **Model** submenu lists its chat models, the current one checked; picking one switches every chat ([Switch the model](model-servers.md#switch-the-model)). While a switch waits, **Cancel Switch** ends the wait. A switch that failed says why at the top of the submenu until the next one.
 - **Sign In Again** appears only when it can help: after four failed sign-ins, on the Locked screen, and always in developer mode.
-- The app checks every 2 seconds while anything runs or waits, so an approval shows within one check. With nothing running it checks less often, every 8 seconds at most, and every 2 seconds again as soon as something changes or you put the window away or bring it back. VoiceOver and the tooltip say the same in words.
+- The app checks every 2 seconds while anything runs or waits, and for a few seconds after a run ends, so an approval shows within one check. With nothing running it checks less often, every 8 seconds at most, and every 2 seconds again as soon as something changes or you put the window away or bring it back. VoiceOver and the tooltip say the same in words.
 
 ## Melo on your desktop
 

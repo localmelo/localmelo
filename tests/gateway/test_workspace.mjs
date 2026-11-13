@@ -15,7 +15,7 @@ import {maker} from '../../support/gateway/static/dom.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
-import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
+import {headline, setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
 import {liveRoute, liveUrl} from '../../support/gateway/static/browser-live.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
@@ -1074,7 +1074,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
-    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], kept: [], state: {task: null}, update(body) { this.health.push(body); }, keep(body) { this.kept.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
       lost: [], offline(value) { this.lost.push(value); }, stopped: [], stopping(count) { this.stopped.push(count); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {}, redraw() {},
       remember(key) { this.remembered.push(key); },
@@ -2534,6 +2534,58 @@ test('a refresh that brings nothing new writes nothing to the page', async () =>
   await fire();
   assert.ok(domWrites.count > writes, 'a changed title is drawn');
   assert.match(h.text('session-list'), /Renamed/);
+});
+
+const idle = {running: {chats: 0, tasks: 0, runs: 0, terminal: 0}, tasks: {}, items: [], waiting: [], control: []};
+const endedAgo = (seconds) => ({body: {...health, status: {...idle, recent: {kind: 'chat', id: 'a', title: 'Done', outcome: 'done', ended_s_ago: seconds}}}});
+
+test('the header\'s done mood ends with its window, with the data otherwise unchanged, and the page asks at 4 s until then', async () => {
+  const routes = baseRoutes({'GET /health': endedAgo(2)});
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const mood = () => headline(h.run('panel').health.at(-1)).mood;
+  assert.equal(mood(), 'done');
+  routes['GET /health'] = endedAgo(6);
+  assert.equal(await fire(), 4000, 'inside the window it does not back off');
+  assert.equal(mood(), 'done');
+  routes['GET /health'] = endedAgo(10);
+  assert.equal(await fire(), 4000, 'the window closing is a change');
+  assert.equal(mood(), 'idle', 'the header is told, so it rests again');
+  routes['GET /health'] = endedAgo(14);
+  assert.equal(await fire(), 8000, 'and from then on nothing new backs off');
+});
+
+test('a new day draws the sidebar\'s day groups and times again, with the chats unchanged', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const old = mainChat.dayLabel(NOW - 3 * 86400, NOW);
+  assert.deepEqual(rowsOf(h), ['day:Today', 'a', `day:${old}`, 'b']);
+  await fire();
+  assert.deepEqual(rowsOf(h), ['day:Today', 'a', `day:${old}`, 'b']);
+  // Midnight passes with the page left open: the clock inside the page moves a day on, the gateway says the same.
+  const RealDate = Date;
+  const later = 86400 * 1000;
+  h.context.Date = class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [RealDate.now() + later])); }
+    static now() { return RealDate.now() + later; }
+  };
+  await fire();
+  assert.deepEqual(rowsOf(h), ['day:Yesterday', 'a', `day:${old}`, 'b']);
+});
+
+test('what reads the health on demand (the status command, Settings) sees the newest reading, drawn or not', async () => {
+  let uptime = 100;
+  const routes = baseRoutes({'GET /health': () => ({body: {...health, uptime_s: (uptime += 4), model_server: {url_label: 'http://127.0.0.1:1/', reachable: true, error: '', checked_s_ago: uptime % 30}}})});
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const first = h.state().health.uptime_s;
+  await fire(); await fire();
+  assert.ok(uptime > first, 'the gateway counted on');
+  assert.equal(h.state().health.uptime_s, uptime, 'the page kept the newest reading although nothing new was drawn');
+  assert.equal(h.run('panel').kept.at(-1).uptime_s, uptime, 'and told the panel, which draws nothing for it');
 });
 
 test('the chat shows the server\'s status segments and refreshes them on a frame', async () => {

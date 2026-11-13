@@ -108,7 +108,7 @@ for you to send or change, and step aside once there is text.
    hidden at 0 and stays on a narrow screen. Select it for a short list, each
    row naming the kind and the title and opening that chat, the task's card or
    the Workers detail; Esc or a click elsewhere closes it. The numbers come
-   from `status` of `GET /api/health`, read with the page's list refresh (every 4 seconds while anything runs or changes); the
+   from `status` of `GET /api/health`, read with the page's list refresh (every 4 seconds while anything runs or changes, and for a few seconds after a run ends); the
    list shows 20 rows at most and says how many more run.
 
 The sidebar pins the main chat on top and lists its side chats under it, newest

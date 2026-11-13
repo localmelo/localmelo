@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fingerprint, LIST_BASE_MS, LIST_CEILING_MS, listBusy, nextListDelay} from '../../support/gateway/static/rest.mjs';
+import {MOOD_WINDOW_S} from '../../support/gateway/static/panel.mjs';
 
 test('the list refresh asks at 4 s while it must and backs off in steps to 16 s while nothing changes', () => {
   assert.equal(LIST_BASE_MS, 4000);
@@ -37,7 +38,9 @@ test('anything that runs or waits for the person keeps the page asking at the ba
     ['the person holds a page', null, {status: {...quiet, control: [{kind: 'chat', id: 'a'}]}}, true],
     ['a task is queued', null, {status: {...quiet, tasks: {queued: 1, held: 0}}}, true],
     ['a task is held', null, {status: {...quiet, tasks: {queued: 0, held: 1}}}, true],
-    ['a finished run alone is nothing to wait for', null, {status: {...quiet, recent: {kind: 'chat', id: 'a', outcome: 'done', ended_s_ago: 1}}}, false],
+    ['a run that just ended: the header still shows how', null, {status: {...quiet, recent: {kind: 'chat', id: 'a', outcome: 'done', ended_s_ago: 1}}}, true],
+    ['a run that ended long ago is nothing to wait for', null, {status: {...quiet, recent: {kind: 'chat', id: 'a', outcome: 'done', ended_s_ago: MOOD_WINDOW_S + 1}}}, false],
+    ['a stopped run shows no ending', null, {status: {...quiet, recent: {kind: 'chat', id: 'a', outcome: 'stopped', ended_s_ago: 1}}}, false],
   ];
   for (const [name, list, health, busy] of cases) assert.equal(listBusy(list, health), busy, name);
 });
@@ -54,4 +57,12 @@ test('two reads of an unchanged server read the same, and any other difference i
   assert.notEqual(fingerprint(health(10)), fingerprint({...health(10), model_server: {reachable: false, checked_s_ago: 1}}));
   assert.notEqual(fingerprint(health(10)), fingerprint(null));
   assert.equal(fingerprint(undefined), fingerprint(null));
+});
+
+test('what the header derives from the age of a run\'s end is part of the comparison: the window opening and closing is something new', () => {
+  const body = (ended) => ({ok: true, status: {running: {chats: 0}, recent: {kind: 'chat', id: 'a', outcome: 'done', ended_s_ago: ended}}});
+  assert.equal(fingerprint(body(1)), fingerprint(body(MOOD_WINDOW_S - 1)), 'two readings inside the window read the same');
+  assert.equal(fingerprint(body(MOOD_WINDOW_S)), fingerprint(body(60)), 'two readings outside it too');
+  assert.notEqual(fingerprint(body(MOOD_WINDOW_S - 1)), fingerprint(body(MOOD_WINDOW_S)), 'the window closing is a change');
+  assert.notEqual(fingerprint(body(1)), fingerprint({ok: true, status: {running: {chats: 0}, recent: null}}));
 });
