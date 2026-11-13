@@ -864,8 +864,7 @@ def _source_records(
     """``(id, text)`` for the records of this turn's JSON tool results.
 
     The text is the record object as JSON, cut to 500 characters. It is
-    what :func:`candidate_items` compares an item with; the ids are the
-    same ones :func:`_source_ids` returns.
+    what :func:`candidate_items` compares an item with.
     """
     records: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -895,10 +894,6 @@ def source_records(
 ) -> list[tuple[str, str]]:
     """The records of one reply's tool results, in call order (see ``_source_records``)."""
     return _source_records(pairs)
-
-
-def _source_ids(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> list[str]:
-    return [record_id for record_id, _text in _source_records(pairs)]
 
 
 TASK_SOURCE_RECORD_LIMIT = 200  # the task's most recent tool-result records kept
