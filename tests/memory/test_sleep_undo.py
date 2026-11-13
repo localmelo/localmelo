@@ -543,53 +543,38 @@ async def test_an_explicit_sleep_lock_replaces_the_gpu_lock(
     assert len(provider.calls) == 1
 
 
-LOCKS = [
-    None,
-    "",
-    "   \n",
-    "busy",
-    "holder:\nrun: 1\n",
-    "holder: bench\n",
-    "holder: bench\nrun: r1\n",
-    "holder: bench\r\nrun: r1\r\n",
-    "holder: bench\nholder: other\n",
-    "purpose: x\nholder:  bench  \n",
-    "holder: bench:r1\n",
+MINES = ["", "bench", "bench:r1", "bench:r2", "other", "bench:"]
+
+# A lock file's content (None: no file) and the self holders it is ours for; for
+# every other self holder it is held. Unreadable files are held for all.
+LOCKS: list[tuple[str | bytes | None, tuple[str, ...]]] = [
+    (None, tuple(MINES)),
+    ("", ()),
+    ("   \n", ()),
+    ("busy", ()),
+    ("holder:\nrun: 1\n", ()),
+    ("holder: bench\n", ("bench", "bench:")),
+    ("holder: bench\nrun: r1\n", ("bench", "bench:r1")),
+    ("holder: bench\r\nrun: r1\r\n", ("bench", "bench:r1")),
+    ("holder: bench\nholder: other\n", ("bench", "bench:")),
+    ("purpose: x\nholder:  bench  \n", ("bench", "bench:")),
+    ("holder: bench:r1\n", ("bench:r1",)),
+    ("holder: bench\n" + "x" * 70_000, ()),  # over 64 KiB: no lock claim
+    (b"holder: \xff\xfe\n", ()),  # not UTF-8
 ]
 
 
-@pytest.mark.parametrize("text", LOCKS)
-@pytest.mark.parametrize(
-    "mine", ["", "bench", "bench:r1", "bench:r2", "other", "bench:"]
-)
-def test_the_lock_reader_agrees_with_the_schedulers_gate(
-    tmp_path: Path, text: str | None, mine: str
+@pytest.mark.parametrize(("content", "ours"), LOCKS)
+@pytest.mark.parametrize("mine", MINES)
+def test_a_lock_is_held_unless_it_is_missing_or_names_our_own_holder(
+    tmp_path: Path, content: str | bytes | None, ours: tuple[str, ...], mine: str
 ) -> None:
-    from localmelo.support.gateway.machine_monitor import classify_lock, read_lock_file
-
     path = tmp_path / "lock"
-    if text is not None:
-        path.write_text(text)
-    gate = classify_lock(
-        read_lock_file(path, now_wall=time.time(), self_holder=mine), mine
-    )
-    assert sleep.lock_held(str(path), mine) == (gate == "foreign")
-
-
-def test_the_lock_reader_holds_for_what_is_no_plain_lock(tmp_path: Path) -> None:
-    from localmelo.support.gateway.machine_monitor import classify_lock, read_lock_file
-
-    big = tmp_path / "big"
-    big.write_text("holder: bench\n" + "x" * 70_000)
-    bad = tmp_path / "bad"
-    bad.write_bytes(b"holder: \xff\xfe\n")
-    for path in (big, bad, tmp_path):  # a directory too
-        gate = classify_lock(
-            read_lock_file(path, now_wall=time.time(), self_holder="bench"), "bench"
-        )
-        assert gate == "foreign" and sleep.lock_held(str(path), "bench")
-    assert not sleep.lock_held(str(tmp_path / "missing"), "bench")
-    assert not sleep.lock_held(str(tmp_path / "missing"))
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    elif content is not None:
+        path.write_text(content)
+    assert sleep.lock_held(str(path), mine) == (mine not in ours)
 
 
 # ── Low: the start time, and tasks ──
