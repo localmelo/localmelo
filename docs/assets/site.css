@@ -387,7 +387,7 @@ caption {
 }
 
 .lead {
-  max-width: 56ch;
+  max-width: 760px;
   margin: 0;
   color: var(--muted);
   font-size: 1.14rem;
@@ -576,12 +576,6 @@ caption {
 .content p,
 .content li {
   color: var(--muted);
-}
-
-/* A reading line of about 75 characters; pictures, cards and tables keep the full width. */
-.content p,
-.content li:not(.step) {
-  max-width: 56ch;
 }
 
 .content ul,
