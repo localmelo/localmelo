@@ -1856,11 +1856,6 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .diff-added .diff-sign { color: var(--ok); }
 .approval-actions, .failure-actions, .approval-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .approval-actions { margin: 12px 0 8px; }
-/* In the docked panel three answers or more sit two to a row, and Deny alone under them: one line of buttons does not fit. */
-@media (min-width: 900px) {
-  .panel .approval-actions:has(> :nth-child(3)) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .panel .approval-actions:has(> :nth-child(3)) > [data-approval-deny] { grid-column: 1 / -1; }
-}
 .approval-actions button, .deny-view button { font-size: var(--text-body); min-height: 36px; padding: var(--space-2) var(--space-4); }
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: var(--space-2) var(--space-4); }
