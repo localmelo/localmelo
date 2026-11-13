@@ -369,6 +369,28 @@ async def compare_park_identity(
     return int(row[0]) + 1
 
 
+async def carry_launch_receipt(
+    conn: Any,
+    task_id: str,
+    old: tuple[int | None, str | None, str],
+    new: tuple[int | None, str | None, str],
+) -> None:
+    """Move the active launch receipt from *old* to *new*, each a tuple of
+    generation, operation ID and task state.
+
+    Runs in the caller's event transaction. Only a committed start receipt of
+    an active capture that holds *old* moves; a superseded one is never revived.
+    """
+    await conn.execute(
+        "UPDATE recovery_operations SET generation = ?, pending_operation_id = ?, task_state = ? "
+        "WHERE task_id = ? AND kind = 'start' AND phase = 'committed' "
+        "AND generation IS ? AND pending_operation_id IS ? AND task_state = ? "
+        "AND json_extract(request, '$.execution_id') IN "
+        "(SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1)",
+        (*new, task_id, *old, task_id),
+    )
+
+
 async def read_operation_receipt(
     conn: Any, task_id: str, operation_id: str
 ) -> tuple[dict[str, Any], bool] | None:
@@ -651,22 +673,11 @@ class TaskStore:
             and current[0] in {"running", "held"}
             and (state or current[0]) in {"running", "held"}
         ):
-            await conn.execute(
-                "UPDATE recovery_operations SET generation = ?, pending_operation_id = ?, task_state = ? "
-                "WHERE task_id = ? AND kind = 'start' AND phase = 'committed' "
-                "AND generation IS ? AND pending_operation_id IS ? AND task_state = ? "
-                "AND json_extract(request, '$.execution_id') IN "
-                "(SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1)",
-                (
-                    generation,
-                    op if pending else None,
-                    state or current[0],
-                    task_id,
-                    expected_generation,
-                    expected_operation_id,
-                    current[0],
-                    task_id,
-                ),
+            await carry_launch_receipt(
+                conn,
+                task_id,
+                (expected_generation, expected_operation_id, current[0]),
+                (generation, op if pending else None, state or current[0]),
             )
         await self._store.append_component_event(
             conn,
