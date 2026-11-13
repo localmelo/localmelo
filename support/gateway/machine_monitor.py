@@ -485,23 +485,6 @@ class MachineSnapshot:
             battery_pct=self.battery_pct,
         )
 
-    def payload(self) -> dict[str, Any]:
-        """The public page/API payload (R15)."""
-        return {
-            "lock": self.lock,
-            "holder": self.holder,
-            "purpose": self.purpose,
-            "run": self.run,
-            "eta": self.eta,
-            "stale": self.stale,
-            "readable": self.readable,
-            "on_ac": self.on_ac,
-            "battery_pct": self.battery_pct,
-            "battery_state": self.battery_state,
-            "band": self.band,
-            "gate": self.gate,
-        }
-
     def log_values(self) -> dict[str, Any]:
         """The fixed keys of one ``machine.jsonl`` line (section 6.4)."""
         return {
@@ -517,6 +500,10 @@ class MachineSnapshot:
             "battery_state": self.battery_state,
             "band": self.band,
         }
+
+    def payload(self) -> dict[str, Any]:
+        """The public page/API payload (R15): the log's keys, then the gate."""
+        return {**self.log_values(), "gate": self.gate}
 
 
 MachineWrite = Callable[[dict[str, Any]], None]
