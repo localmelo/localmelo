@@ -13,8 +13,8 @@ Four commands::
 ``episodes`` turns a run's ``history.db`` into rows of the export format;
 ``replay`` measures the progress rules on such rows, offline; ``export``
 prints every row of a ``procedures.db``; ``forget`` deletes rows from it.
-``docs/procedures.md`` documents the formats, the output and the exit
-codes: 0 on success, 2 for usage and input errors, 130 on Ctrl-C.
+``docs/reference/procedures.md`` documents the formats, the output and the
+exit codes: 0 on success, 2 for usage and input errors, 130 on Ctrl-C.
 
 The command calls no model and reads no config file; only ``forget``
 writes, and only to the store it names.

@@ -14,8 +14,9 @@ one JSON line per query as it finishes, then a summary line. Export::
     melo-retrieve --export-run DIR|FILE
 
 prints the corpus lines of a run's model calls: from its ``history.db`` (in
-DIR, or the file itself), or from raw-call JSONL. ``docs/retrieval.md``
-documents the formats, the output lines and the exit codes.
+DIR, or the file itself), or from raw-call JSONL.
+``docs/reference/retrieval.md`` documents the formats, the output lines and the
+exit codes.
 
 The command reads no config file and writes nothing but stdout and stderr.
 Exit codes: 0 when the run finished (fallbacks included), 2 for usage and
