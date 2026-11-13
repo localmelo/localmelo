@@ -294,7 +294,9 @@ class Palette:
             {
                 **{name: self.look(name).rich() for name in NAMES},
                 "shell": "magenta",
-                "yolo": "white on red",
+                # YOLO in the bar: the error colour on a chip (reverse video), bold; with
+                # no colour the chip is still there, and its text keeps the error's contrast.
+                "yolo": self.look("error").rich() + RichStyle(bold=True, reverse=True),
                 # The user's band, inline-code chips and code panels; with no
                 # fill, the band is gone, inline code is bold and code has a gutter.
                 "raised": fill,
@@ -345,7 +347,7 @@ class Palette:
                 **{name: self.look(name).pt() for name in NAMES},
                 "tool": "bold",
                 "shell": "ansimagenta",
-                "yolo": "ansiwhite bg:ansired",
+                "yolo": f"{replace(self.look('error'), bold=True).pt()} reverse",
                 # Auto in the bar: the colour of what melo runs, bold so that it
                 # also stands out from the muted Ask without a colour (NO_COLOR).
                 "mode_auto": f"{self.look('run').pt()} bold".strip(),
@@ -357,6 +359,10 @@ class Palette:
                 # Lists and panels: the chosen row's band, a frame, its title,
                 # the keys a footer names, and the diff's rows.
                 "chosen": self.band("selection", "accent"),
+                # A muted word on the chosen row (a step's time) moves until it reads on
+                # the band; on the reversed row of NO_COLOR it is not dimmed.
+                "chosen muted": self.band("selection", "muted")
+                + (" nodim" if self.depth == "none" else ""),
                 "diff_add": self.band("diff_add", "ok_text"),
                 "diff_remove": self.band("diff_remove", "error"),
                 "frame": self.look("warn").pt(),

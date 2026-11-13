@@ -138,6 +138,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `melo task` says Did not finish where it said Failed, and Continued in a newer task (with no hint to continue it) for a run whose work went on.
 - In the terminal, the sentence melo words itself for Allow once never lands in your input box or ↑ history, and `/retry` says what it tries again.
 - The terminal's question panel breaks its own sentences at a space, not in the middle of a word.
+- With `--yolo`, the bar's no-approvals mark is a bold chip that reads on a light and a dark terminal and with `NO_COLOR`.
 
 ### Setup
 
