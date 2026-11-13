@@ -11,7 +11,7 @@ import vm from 'node:vm';
 import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown, renderPartialMarkdown} from '../../support/gateway/static/markdown.mjs';
 import * as approvals from '../../support/gateway/static/approval-card.mjs';
-import {maker} from '../../support/gateway/static/dom.mjs';
+import {maker, reachable, titleWhenCut} from '../../support/gateway/static/dom.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
@@ -817,6 +817,8 @@ function makeElement(tag, id = '') {
     setAttribute(name, value) { element.attributes[name] = String(value); },
     getAttribute(name) { return element.attributes[name] ?? null; },
     removeAttribute(name) { delete element.attributes[name]; },
+    // The page's markup is never parsed here, so a rendered answer holds no code block or table to look up.
+    querySelectorAll: () => [],
     append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
     prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
     // As in a browser, the focused element leaves the page with the node that held it: focus falls to the body (null here).
@@ -1001,6 +1003,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     guardLeft: approvals.guardLeft,
     stepWords,
     maker,
+    reachable,
+    titleWhenCut,
     t,
     formatTime,
     renderMarkdown,

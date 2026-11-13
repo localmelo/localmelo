@@ -26,6 +26,8 @@
   "activity.untitled.task": "Task",
   "activity.untitled.terminal": "Terminal chat",
   "activity.wroteCode": "Wrote some code",
+  "answer.code": "Code",
+  "answer.table": "Table",
   "app.action.openLog": "Open Log",
   "app.action.quit": "Quit",
   "app.action.tryAgain": "Try Again",

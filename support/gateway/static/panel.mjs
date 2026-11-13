@@ -1,6 +1,7 @@
 import {cleanOutput, formatDuration, stepSaid, toolState} from './turns.mjs';
 import {stepWords} from './step-words.mjs';
 import {maker} from './dom.mjs';
+import {STATE_MARKS} from './marks.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
@@ -32,7 +33,7 @@ import {REST_STILL_AFTER_MS, SIT_MS, idleMove, startMoves} from './moves.mjs';
  */
 export const GLYPHS = {
   wait: '!', held: '◷', queued: '◷', paused: '‖', read: '▤', write: '✎', run: '>_', web: '⊕',
-  memory: '◎', think: '…', tool: '⚙', done: '✓', failed: '✗', stopped: '⊘', running: '●', draft: '◐', blocked: '?',
+  memory: '◎', think: '…', tool: '⚙', done: STATE_MARKS.ok, failed: STATE_MARKS.failed, stopped: STATE_MARKS.stopped, running: STATE_MARKS.running, draft: '◐', blocked: '?',
 };
 // The icon of a task that did not end ready, by how code decided it ended.
 const ENDING_ICONS = {draft: 'draft', blocked: 'blocked', failed: 'failed', dropped: 'stopped'};

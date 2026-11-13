@@ -13,7 +13,7 @@
  */
 
 import { approvalCard as drawApprovalCard, guardLeft } from "./approval-card.mjs";
-import { maker } from "./dom.mjs";
+import { maker, reachable, titleWhenCut } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown, renderPartialMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
@@ -570,7 +570,9 @@ function syncUI() {
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
   // melo_serve's pick has a name of its own (Qwen3.8 27B), shorter than the model it serves.
-  $("model-btn").textContent = `${(serve.serves() && serve.current()?.name) || model?.name || t("header.chooseModel")}  ⌄`;
+  const modelName = (serve.serves() && serve.current()?.name) || model?.name || t("header.chooseModel");
+  $("model-btn").textContent = `${modelName}  ⌄`;
+  titleWhenCut($("model-btn"), modelName);
   if (serve.serves()) $("model-btn").setAttribute("aria-haspopup", "menu");
   else $("model-btn").removeAttribute("aria-haspopup");
   $("send-btn").hidden = false;
@@ -1909,10 +1911,18 @@ function shotsOf(turn) {
   return row ? [row] : [];
 }
 
+/** The code blocks and tables of rendered Markdown, each reachable from the keyboard while it scrolls. */
+function reachableMarkdown(node) {
+  for (const box of node.querySelectorAll("pre, table, .table-scroll")) {
+    reachable(box, t(box.localName === "pre" ? "answer.code" : "answer.table"));
+  }
+  return node;
+}
+
 function answerNode(answer) {
   const node = el("div", "answer");
   node.innerHTML = renderMarkdown(answer);
-  return node;
+  return reachableMarkdown(node);
 }
 
 /**
@@ -2202,12 +2212,12 @@ function itemNode(item, turn, context = {}) {
     case "tool":
       return toolCard(item, turn, context);
     case "thinking": {
-      if (context.inline) return el("div", "thinking-body", item.text);
+      if (context.inline) return reachable(el("div", "thinking-body", item.text), t("turns.summary.thought"));
       const card = el("details", "thinking");
       card.open = item.expanded ?? prefs.thinking;
       card.append(el("summary", "", item.durationS === null ? t("turns.summary.thought")
         : t("tool.thoughtFor", { duration: formatDuration(item.durationS) })));
-      const body = el("div", "thinking-body", item.text);
+      const body = reachable(el("div", "thinking-body", item.text), t("turns.summary.thought"));
       card.append(body);
       // Only a change of the person's own is kept: opening it by /thinking is not.
       card.addEventListener("toggle", () => {
@@ -2218,7 +2228,7 @@ function itemNode(item, turn, context = {}) {
     case "assistant_text": {
       const node = el("div", "assistant-text");
       node.innerHTML = renderMarkdown(item.text);
-      return node;
+      return reachableMarkdown(node);
     }
     case "notice": {
       const node = el("div", "notice-item", `${item.noticeKind === "retry" ? "↻" : "⚠"} ${item.message}`);
@@ -2375,7 +2385,7 @@ function toolBody(item, context = {}) {
     pre.textContent = entries
       .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
       .join("\n");
-    section.append(pre);
+    section.append(reachable(pre, t("tool.arguments")));
     body.append(section);
   }
   const declined = declinedStep(item);
@@ -2407,7 +2417,7 @@ function outputBlock(item, context = {}) {
     item.showAll || (text.length <= 2000 && lines.length <= 40)
       ? text
       : lines.slice(0, 40).join("\n").slice(0, 2000);
-  section.append(el("pre", "tool-output", shown));
+  section.append(reachable(el("pre", "tool-output", shown), t("tool.output")));
   // The count is the design's raw character count, not the house's 2.0k.
   const hidden = item.outputChars || text.length;
   if (shown !== text) {

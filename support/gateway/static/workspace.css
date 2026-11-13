@@ -111,6 +111,8 @@ summary:focus-visible,
 }
 /* A row inside a box that clips (a scrolling list, a folded group) draws its ring inside the row, so the whole ring shows. */
 .session-info:focus-visible, .work-summary:focus-visible, .tool-summary:focus-visible, .st-tab:focus-visible { outline-offset: -2px; }
+/* A scrolling box a keyboard can reach (dom.mjs reachable) shows the same ring, inside its edge, where the scroll cuts nothing. */
+[role="group"][tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 button {
   transition: background var(--motion);
 }
@@ -779,6 +781,7 @@ button:hover:not(:disabled) {
 .setup-card .setup-aside { color: var(--ink-3); font-size: var(--text-caption); line-height: 16px; overflow-wrap: anywhere; }
 .setup-rows, .setup-steps { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
 .setup-row, .setup-step { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--space-3); row-gap: 2px; align-items: baseline; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--raised); }
+.setup-pick { display: contents; }
 .setup-lead { grid-row: 1 / span 2; display: flex; justify-content: center; align-self: start; padding-top: 2px; }
 .setup-lead input { appearance: none; display: grid; place-content: center; width: 18px; height: 18px; margin: 0; border: 1.5px solid var(--ink-3); border-radius: var(--radius-control); background: var(--surface); cursor: pointer; }
 .setup-lead input:checked { border-color: var(--accent); background: var(--accent); }

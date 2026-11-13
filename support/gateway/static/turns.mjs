@@ -15,6 +15,7 @@
 import { blockWords } from "./blocked.mjs";
 import { mergeBrowsers } from "./browser-card.mjs";
 import { formatTime, t } from "./i18n.mjs";
+import { STATE_MARKS } from "./marks.mjs";
 import { readMemory } from "./memory.mjs";
 import { refusedStep, stepWords } from "./step-words.mjs";
 
@@ -22,7 +23,7 @@ const SEPARATOR = " · ";
 // `support/cli/render.py`: these two calls end after SESSION_TOOL_TIMEOUT_S.
 const LIMITED_TOOLS = new Set(["shell_exec", "python_exec"]);
 const SESSION_TOOL_TIMEOUT_S = 600;
-const ITEM_MARKS = {done: "✓", current: "◐", skipped: "–", pending: "○"};
+const ITEM_MARKS = {done: STATE_MARKS.ok, current: "◐", skipped: "–", pending: STATE_MARKS.waiting};
 
 // ── Values ──
 
@@ -390,7 +391,7 @@ export function turnFace(turn, {newest = false, pending = 0} = {}) {
   return severity === "ok" ? "done" : severity === "stopped" ? "idle" : "error";
 }
 
-const STATUS_MARK = {ok: "✓", error: "✗", warn: "⚠", stopped: "■"};
+const STATUS_MARK = {ok: STATE_MARKS.ok, error: STATE_MARKS.failed, warn: "⚠", stopped: STATE_MARKS.stopped};
 
 /** The glyph of a status line, as the terminal draws it (`support/cli/theme.py`). */
 export function statusMark(severity) {
@@ -1587,15 +1588,15 @@ export function toolState(item, {held = "", now = 0} = {}) {
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   switch (item.status) {
     case "running": {
-      if (held) return {state: "held", mark: "●", text: holdText(held)};
+      if (held) return {state: "held", mark: STATE_MARKS.running, text: holdText(held)};
       let clock = item.startedTs ? toolElapsed(now - item.startedTs) : "0:00";
       if (LIMITED_TOOLS.has(item.name)) {
         clock = t("turns.tool.clockOf", {clock, limit: toolElapsed(SESSION_TOOL_TIMEOUT_S)});
       }
-      return {state: "running", mark: "●", text: `${t("turns.tool.running")}${SEPARATOR}${clock}`};
+      return {state: "running", mark: STATE_MARKS.running, text: `${t("turns.tool.running")}${SEPARATOR}${clock}`};
     }
     case "waiting_approval":
-      return {state: "waiting_approval", mark: "●", text: t("turns.tool.needsApproval")};
+      return {state: "waiting_approval", mark: STATE_MARKS.running, text: t("turns.tool.needsApproval")};
     case "success": {
       // The terminal's order: the time, then a non-zero exit, then the tag.
       const extra = [];
@@ -1606,7 +1607,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
       if (tag) extra.push(tag.short);
       // A call its own check refused did nothing: no tick beside "Not done".
       if (refusedStep(item.output)) return {state: "declined", mark: "⊘", text: extra.join(SEPARATOR)};
-      return {state: "success", mark: "✓", text: extra.join(SEPARATOR)};
+      return {state: "success", mark: STATE_MARKS.ok, text: extra.join(SEPARATOR)};
     }
     case "error":
     case "timeout":
@@ -1614,7 +1615,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
       const word = t(`turns.tool.${item.status}`);
       return {
         state: item.status,
-        mark: "✗",
+        mark: STATE_MARKS.failed,
         text: duration === null ? word : `${word}${SEPARATOR}${duration}`,
       };
     }

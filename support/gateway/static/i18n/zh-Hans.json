@@ -26,6 +26,8 @@
   "activity.untitled.task": "任务",
   "activity.untitled.terminal": "终端对话",
   "activity.wroteCode": "写了一些代码",
+  "answer.code": "代码",
+  "answer.table": "表格",
   "app.action.openLog": "打开日志",
   "app.action.quit": "退出",
   "app.action.tryAgain": "重试",

@@ -9,7 +9,7 @@
  * pick (`pick(path)`); the chat's first message sends it as `workspace`. `null` is the default.
  */
 import {t} from "./i18n.mjs";
-import {maker} from "./dom.mjs";
+import {maker, titleWhenCut} from "./dom.mjs";
 
 const bare = (path) => String(path ?? "").replace(/\/+$/, "");
 const labelOf = (path, sessions) => sessions.find((item) => item.workspace === path)?.workspace_label || path;
@@ -138,7 +138,9 @@ export function setupFolderPicker({doc, state, pick, notify, bridge}) {
       const label = current === null ? fallback : labelOf(current, sessions);
       $("folder-picker").hidden = !visible || !label;
       if ($("folder-picker").hidden) toggle(false);
-      put("folder-text", t("folder.chip", {name: folderName(label)}));
+      const chip = t("folder.chip", {name: folderName(label)});
+      put("folder-text", chip);
+      titleWhenCut($("folder-text"), chip);
       put("folder-full", label);
     },
     isOpen: () => open,
