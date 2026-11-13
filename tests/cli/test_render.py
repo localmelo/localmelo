@@ -16,7 +16,6 @@ from rich.console import Group
 from rich.text import Text
 
 from localmelo.melo.schema import RunResult, ToolInfo, ToolTier
-from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.hanging import Hung
 from localmelo.support.cli.output import RecordingOut, TerminalOut
@@ -24,6 +23,7 @@ from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
 from localmelo.support.cli.theme import ASCII, UNICODE, Palette, Symbols
 from localmelo.support.cli.views import BackendInfo, banner
+from localmelo.support.sessions import edits
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.store import StoredEvent
 
@@ -2404,8 +2404,8 @@ def test_a_retry_ends_at_the_next_event() -> None:
 def _snapshots(
     request_id: str, *, old: str | None, new: str, added: int = 1, removed: int = 0
 ) -> Any:
-    from localmelo.support.cli import edits
     from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+    from localmelo.support.sessions import edits
 
     snapshots = EditSnapshots()
     target = (
@@ -2493,8 +2493,8 @@ def test_a_write_without_a_snapshot_shows_its_output() -> None:
 
 
 def test_a_file_write_block_uses_the_snapshots_counts() -> None:
-    from localmelo.support.cli import edits
     from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+    from localmelo.support.sessions import edits
 
     snapshots = EditSnapshots()
     target = edits.Target(path="todo.md", exists=True, text="a\n")
@@ -2515,8 +2515,8 @@ def test_a_file_write_block_uses_the_snapshots_counts() -> None:
 
 
 def test_a_write_with_no_diff_shows_that() -> None:
-    from localmelo.support.cli import edits
     from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+    from localmelo.support.sessions import edits
 
     snapshots = EditSnapshots()
     target = edits.Target(
@@ -2539,8 +2539,8 @@ def test_a_write_with_no_diff_shows_that() -> None:
 
 
 def test_verbose_hunks_cannot_act_on_the_terminal() -> None:
-    from localmelo.support.cli import edits
     from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+    from localmelo.support.sessions import edits
 
     snapshots = EditSnapshots()
     target = edits.Target(path="todo.md", exists=True, text="old\x1b[2J\n")

@@ -21,7 +21,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import ToolTier
-from localmelo.support.cli import edits, theme
+from localmelo.support.cli import theme
 from localmelo.support.cli.approvals import (
     APPROVAL_KEY_GUARD_S,
     Approvals,
@@ -38,6 +38,7 @@ from localmelo.support.cli.approvals import (
 )
 from localmelo.support.cli.render import LiveState, declined_line, declined_step
 from localmelo.support.cli.text import cells
+from localmelo.support.sessions import edits
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
