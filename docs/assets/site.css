@@ -42,7 +42,7 @@
     --surface-2: #202734;
     --ink: #edf2f7;
     --muted: #a7b0bf;
-    --muted-2: #7f8a9c;
+    --muted-2: #838ea0;
     --line: #2c3544;
     --line-2: #3a4658;
     --diagram-line: #a7b0bf;
@@ -97,7 +97,10 @@ a:hover {
   outline-offset: 2px;
 }
 
-[id] {
+[id],
+a,
+button,
+summary {
   scroll-margin-top: 86px;
 }
 
@@ -492,6 +495,7 @@ caption {
 }
 
 .button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--ink));
   color: var(--accent-ink);
 }
 
@@ -740,7 +744,7 @@ caption {
   background: var(--surface);
   color: var(--muted-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .group.core {
@@ -774,7 +778,7 @@ caption {
   position: absolute;
   color: var(--amber);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .checker-zone .cz-label {
@@ -859,7 +863,7 @@ a.node:focus-visible {
   background: var(--surface);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   text-align: center;
   white-space: pre;
@@ -985,7 +989,10 @@ a.node:focus-visible {
 }
 
 @media (max-width: 700px) {
-  [id] {
+  [id],
+  a,
+  button,
+  summary {
     scroll-margin-top: 16px;
   }
 
@@ -1018,7 +1025,20 @@ a.node:focus-visible {
   }
 
   .sidebar {
+    flex-wrap: nowrap;
+    align-items: center;
+    overflow-x: auto;
     margin-bottom: 28px;
+    padding-top: 6px;
+  }
+
+  .sidebar-label,
+  .sidebar a {
+    flex: none;
+  }
+
+  .sidebar-label {
+    margin-right: 6px;
   }
 
   .doc-hero h1 {
