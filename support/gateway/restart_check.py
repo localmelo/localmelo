@@ -12,8 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Final
 
-from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.memory.procedures.mask import mask_credentials
+from localmelo.melo.memory.procedures.mask import redact_and_mask
 from localmelo.melo.schema import RESTART_CHECK_HEADER
 from localmelo.support.gateway.handover import fenced
 from localmelo.support.sessions.store import StoredEvent
@@ -31,7 +30,7 @@ SUMMARY_CHARS: Final = 200
 def _text(value: object, limit: int) -> str:
     if not isinstance(value, str):
         return ""
-    value = mask_credentials(redact_secrets(value)[0])
+    value = redact_and_mask(value)
     value = " ".join(value.split())
     return value if len(value) <= limit else value[: limit - 1] + "…"
 

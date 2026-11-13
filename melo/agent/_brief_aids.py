@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.memory.procedures.mask import mask_credentials
+from localmelo.melo.memory.procedures.mask import redact_and_mask
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import Message, ReflectionEntry
@@ -63,7 +63,7 @@ def _describe(name: str, arguments: dict[str, object]) -> str:
     key, value = _key_arg(arguments)
     if not key:
         return name
-    arg = _shorten(mask_credentials(redact_secrets(value)[0]), ARG_LIMIT)
+    arg = _shorten(redact_and_mask(value), ARG_LIMIT)
     return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
 
 
