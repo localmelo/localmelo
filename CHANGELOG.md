@@ -51,6 +51,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
+- The check-in's line always says what finished or waits, in plain words from the facts, with `and N more` when the list is long; it no longer asks the model, so it never wakes the model server.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
 - One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
 - After a restart, a task cut off in the middle of writing a file in its folder goes on and looks at that file first; any other half-done step waits for you.

@@ -35,7 +35,7 @@ from .test_chat_owns_tasks import (
     state,
     stop_run,
 )
-from .test_chores import Summary, chore_console
+from .test_chores import chore_console
 from .test_front_followup import _finished
 from .test_side_equals import chats_console
 from .test_turn_writes import _post_turn, _wait_turn
@@ -684,9 +684,7 @@ def held_ask() -> Any:
 async def test_a_task_held_on_an_approval_shows_in_the_check_in(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path, summary=Summary("Slides waits for you.")) as (
-        console, client, clock, summary, _
-    ):  # fmt: skip
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         task, _ = await console.workers.create(
             {"objective": "Make slides", "title": "Slides"}
         )
@@ -696,12 +694,11 @@ async def test_a_task_held_on_an_approval_shows_in_the_check_in(
                 "updated_at = ? WHERE task_id = ?",
                 (clock.now, task["task_id"]),
             )
-        await console.chore_runner.checkin()
-        assert summary.facts == [], "the approval card told the person just now"
+        card = await console.chore_runner.checkin()
+        assert card is None, "the approval card told the person just now"
         clock.now += CHECKIN_S + 1
         card = await console.chore_runner.checkin()
-        assert card is not None
-        assert summary.facts == [["Slides: waiting for the user"]]
+        assert card is not None and card["line"] == "Slides: waiting for the user"
         clock.now += CHECKIN_S
         assert await console.chore_runner.checkin() is None, "mentioned once"
 
@@ -709,7 +706,7 @@ async def test_a_task_held_on_an_approval_shows_in_the_check_in(
 async def test_a_task_held_for_a_model_slot_is_not_waiting_for_the_person(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path) as (console, client, clock, summary, _):
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         task, _ = await console.workers.create(
             {"objective": "Make slides", "title": "Slides"}
         )
@@ -728,7 +725,7 @@ async def test_a_task_whose_question_waits_for_the_person_shows_in_the_check_in(
 ) -> None:
     """A task on a question to the person stays ``running``: the ask says it waits."""
     question = held_ask()
-    async with chore_console(tmp_path) as (console, client, clock, summary, _):
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         task, _ = await console.workers.create(
             {"objective": "Make slides", "title": "Slides"}
         )
@@ -743,11 +740,12 @@ async def test_a_task_whose_question_waits_for_the_person_shows_in_the_check_in(
             "waiting_on_person",
             lambda owner: [question(task["task_id"])] if owner == chat else [],
         )
-        await console.chore_runner.checkin()
-        assert summary.facts == [], "just asked: the reply box told the person"
+        assert (
+            await console.chore_runner.checkin() is None
+        ), "just asked: the reply box told the person"
         clock.now += CHECKIN_S + 1
-        await console.chore_runner.checkin()
-        assert summary.facts == [["Slides: waiting for the user"]]
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["line"] == "Slides: waiting for the user"
 
 
 # ── One message, one receipt ──

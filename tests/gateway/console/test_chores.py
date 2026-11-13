@@ -3,7 +3,8 @@
 Every test runs a real console with the main chat's scripted model and a fake
 clock the test moves by hand; the chore loop's beat is set so long that only
 ``tick()`` ever runs it. Workers never start (the scheduler's start is a
-no-op), so a started chore is a queued task and no request reaches a model.
+no-op), so a started chore is a queued task and no request reaches a model, and
+a check-in's line is written by code: the console is given no way to build one.
 """
 
 from __future__ import annotations
@@ -18,18 +19,26 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import httpx
 import pytest
 
+from localmelo.support.backends.registry import get_backend
 from localmelo.support.config import ConsoleConfig
 from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
 from localmelo.support.gateway.chore_store import CHORE_NOTE
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import chores as chores_module
-from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
+from localmelo.support.gateway.console.chores import (
+    CHECKIN_S,
+    LINE_CHARS,
+    ChoreOptions,
+    checkin_line,
+)
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.front import ECHO_EVENT
+from localmelo.support.gateway.i18n import using
 from localmelo.support.gateway.task_policy import configured_root
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
@@ -58,42 +67,39 @@ class Clock:
         self.now = at(text)
 
 
-class Summary:
-    """The check-in's summary, counting its calls."""
-
-    def __init__(self, note: str = "All quiet.", fail: bool = False) -> None:
-        self.note, self.fail = note, fail
-        self.facts: list[list[str]] = []
-
-    async def __call__(self, facts: list[str]) -> str:
-        self.facts.append(facts)
-        if self.fail:
-            raise RuntimeError("no model")
-        return self.note
-
-
 @contextlib.asynccontextmanager
 async def chore_console(
     tmp_path: Path,
     *replies: Any,
     jitter: float = 0.0,
-    summary: Summary | None = None,
     tick_s: float = 1e9,
-) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Clock, Summary, ScriptedLLM]]:
-    clock, summarize = Clock(), summary or Summary()
-    options = ChoreOptions(
-        clock=clock, tz=UTC, jitter=lambda: jitter, tick_s=tick_s, summarize=summarize
-    )
-    async with front_console(tmp_path, *replies, chores=options) as (
-        console,
-        client,
-        llm,
-    ):
-        # The first check-in is half an hour after the gateway starts ...
-        assert console.chore_runner.next_checkin == clock.now + CHECKIN_S
-        # ... and a test gets none until it asks: moving the clock never starts one by accident.
-        console.chore_runner.next_checkin = 1e12
-        yield console, client, clock, summarize, llm
+) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Clock, list[str], ScriptedLLM]]:
+    """The console, its client and clock, the model providers built so far, the main chat's model.
+
+    The memory builds one for a task's pack: a test that watches a check-in
+    clears the list right before it.
+    """
+    clock = Clock()
+    options = ChoreOptions(clock=clock, tz=UTC, jitter=lambda: jitter, tick_s=tick_s)
+    built: list[str] = []
+    backend_class = type(get_backend("mlc"))
+    build = backend_class.build_chat_provider
+
+    def spy(backend: Any, cfg: Any) -> Any:
+        built.append(cfg.chat_backend)
+        return build(backend, cfg)
+
+    with mock.patch.object(backend_class, "build_chat_provider", spy):
+        async with front_console(tmp_path, *replies, chores=options) as (
+            console,
+            client,
+            llm,
+        ):
+            # The first check-in is half an hour after the gateway starts ...
+            assert console.chore_runner.next_checkin == clock.now + CHECKIN_S
+            # ... and a test gets none until it asks: moving the clock never starts one by accident.
+            console.chore_runner.next_checkin = 1e12
+            yield console, client, clock, built, llm
 
 
 async def add(
@@ -571,25 +577,23 @@ async def test_the_checkin_comes_once_every_half_hour(tmp_path: Path) -> None:
 async def test_a_checkin_with_nothing_due_makes_no_model_call_and_no_card(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path) as (console, client, clock, summary, llm):
+    async with chore_console(tmp_path) as (console, client, clock, _, llm):
         await add(
             client, "Brief me", {"kind": "daily", "at": "08:30"}
         )  # not yet run: nothing to report
         for _ in range(3):
             await beat(console, clock)
-        assert summary.facts == [] and llm.requests == []
+        assert llm.requests == []
         assert await echoes(console, "checkin") == []
         assert (await client.get("/api/chores")).json()["checkin"][
             "last_at"
         ] is not None
 
 
-async def test_a_finished_chore_run_is_summarized_once_in_one_card(
+async def test_a_finished_chore_run_is_in_one_card_once_and_no_model_writes_it(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path, summary=Summary("Your calendar brief is ready.")) as (
-        console, client, clock, summary, llm
-    ):  # fmt: skip
+    async with chore_console(tmp_path) as (console, client, clock, built, llm):
         chore = await add(
             client,
             "Brief me on my calendar",
@@ -601,23 +605,26 @@ async def test_a_finished_chore_run_is_summarized_once_in_one_card(
         await finish(
             console, task_id, clock.now, "Three meetings today. The first is at ten."
         )
+        built.clear()
         await beat(console, clock)
 
-        assert summary.facts == [["Calendar brief: Three meetings today."]]
         [card] = await echoes(console, "checkin")
-        assert (card["line"], card["items"]) == ("Your calendar brief is ready.", 1)
+        assert (card["line"], card["items"]) == (
+            "Calendar brief: Three meetings today.",
+            1,
+        )
         row = await console.chore_runner.store.get(chore["id"])
         assert row.reported_task_id == task_id
-        # Nothing new: the next beats say nothing and call nothing.
+        # Nothing new: the next beat says nothing. No model was asked for any of it.
         await beat(console, clock)
-        assert len(summary.facts) == 1 and len(await echoes(console, "checkin")) == 1
-        assert llm.requests == []
+        assert len(await echoes(console, "checkin")) == 1
+        assert built == [] and llm.requests == []
 
 
 async def test_the_checkin_switch_off_posts_nothing_and_keeps_results_for_later(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path) as (console, client, clock, summary, _):
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         await add(
             client, "Brief me", {"kind": "daily", "at": "08:30"}, title="Calendar brief"
         )
@@ -626,97 +633,56 @@ async def test_the_checkin_switch_off_posts_nothing_and_keeps_results_for_later(
         await finish(console, task_id, clock.now)
         await client.put("/api/checkin", json={"on": False})
         await beat(console, clock)
-        assert summary.facts == [] and await echoes(console, "checkin") == []
+        assert await echoes(console, "checkin") == []
         await client.put("/api/checkin", json={"on": True})
         await beat(console, clock)
         assert len(await echoes(console, "checkin")) == 1
 
 
-async def test_when_the_model_cannot_write_the_note_code_does(tmp_path: Path) -> None:
-    async with chore_console(tmp_path, summary=Summary(fail=True)) as (
-        console,
-        client,
-        clock,
-        _,
-        _,
-    ):
-        await add(
-            client, "Brief me", {"kind": "daily", "at": "08:30"}, title="Calendar brief"
-        )
-        clock.to("2026-10-28 08:31")
-        [task_id] = await console.chore_runner.tick()
-        await finish(console, task_id, clock.now)
-        await beat(console, clock)
-        [card] = await echoes(console, "checkin")
-        assert card["line"] == "Calendar brief: Three meetings today."
+# One fact is the line; facts that fit are joined; too many give the first ones and how many are left.
 
 
-async def test_the_note_is_one_short_line(tmp_path: Path) -> None:
-    async with chore_console(tmp_path, summary=Summary("word " * 300)) as (
-        console,
-        client,
-        clock,
-        _,
-        _,
-    ):
-        await add(client, "Brief me", {"kind": "daily", "at": "08:30"})
-        clock.to("2026-10-28 08:31")
-        [task_id] = await console.chore_runner.tick()
-        await finish(console, task_id, clock.now)
-        await beat(console, clock)
-        [card] = await echoes(console, "checkin")
-        assert len(card["line"]) <= 400 and card["line"].endswith("…")
+def long_titles(n: int) -> list[str]:
+    """*n* long task titles."""
+    return [f"Task number {i:02d} with a long title to fill the line" for i in range(n)]
 
 
-async def test_the_default_note_is_one_call_to_the_chat_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    llm = ScriptedLLM([answer("  Your brief\nis ready.  ")])
-    closed: list[bool] = []
-
-    async def close() -> None:
-        closed.append(True)
-
-    llm.close = close  # type: ignore[method-assign]
-
-    class Backend:
-        def build_chat_provider(self, cfg: Any) -> ScriptedLLM:
-            built.append(cfg)
-            return llm
-
-    built: list[Any] = []
-    monkeypatch.setattr(
-        "localmelo.support.backends.registry.get_backend", lambda name: Backend()
+def test_one_fact_is_the_line() -> None:
+    assert checkin_line(["Calendar brief: Three meetings today."]) == (
+        "Calendar brief: Three meetings today."
     )
-    clock = Clock()
-    options = ChoreOptions(clock=clock, tz=UTC, jitter=lambda: 0.0, tick_s=1e9)
-    async with front_console(tmp_path, chores=options) as (console, client, _):
-        console.chore_runner.next_checkin = (
-            1e12  # this test asks for the check-in itself
-        )
-        forgotten: list[str] = []
-        real_forget = console.gate.forget
 
-        def spy(session_id: str) -> None:
-            forgotten.append(session_id)
-            real_forget(session_id)
 
-        console.gate.forget = spy  # type: ignore[method-assign]
-        await add(
-            client, "Brief me", {"kind": "daily", "at": "08:30"}, title="Calendar brief"
-        )
-        clock.to("2026-10-28 08:31")
-        [task_id] = await console.chore_runner.tick()
-        await finish(console, task_id, clock.now)
-        card = await console.chore_runner.checkin()
-        assert card is not None and card["line"] == "Your brief is ready."
-        [request] = llm.requests
-        assert [m.role for m in request] == ["system", "user"]
-        assert "Calendar brief: Three meetings today." in request[1].content
-        assert closed == [True] and len(built) == 1
-        # The note's own gate session is dropped when the call is done.
-        assert len(forgotten) == 1
-        assert forgotten[0].startswith(f"checkin:{console.main_id}:")
+def test_facts_that_fit_are_joined() -> None:
+    assert checkin_line(["A: ready", "B: waiting for the user"]) == (
+        "A: ready; B: waiting for the user"
+    )
+    with using("zh-Hans"):
+        assert checkin_line(["A：好了", "B：在等你"]) == "A：好了；B：在等你"
+
+
+def test_too_many_facts_give_the_first_ones_and_how_many_are_left() -> None:
+    facts = [f"{title}: waiting for the user" for title in long_titles(12)]
+    line = checkin_line(facts)
+    kept = [f for f in facts if f in line]
+    assert 0 < len(kept) < 12 and kept == facts[: len(kept)]
+    assert line == "; ".join(kept) + f"; and {12 - len(kept)} more"
+    assert len(line) <= LINE_CHARS
+    # One more fact would not have fitted: the first ones are as many as fit.
+    assert len("; ".join(facts[: len(kept) + 1]) + f"; and {11 - len(kept)} more") > (
+        LINE_CHARS
+    )
+    with using("zh-Hans"):
+        line = checkin_line(facts)
+        assert line.endswith(f"；还有 {12 - sum(f in line for f in facts)} 项")
+        assert len(line) <= LINE_CHARS
+
+
+def test_a_fact_longer_than_the_line_is_cut_at_a_word_and_the_count_stays() -> None:
+    long = " ".join(["failed"] * 100)
+    line = checkin_line([long, "B: ready"])
+    assert line.endswith("failed…; and 1 more") and len(line) <= LINE_CHARS
+    assert checkin_line([long]).endswith("failed…")
 
 
 # ── The main chat: a repeating phrase proposes a chore ──
@@ -1231,45 +1197,44 @@ async def test_a_refused_chore_change_says_why_in_the_page_s_language(
 async def test_the_checkin_is_written_in_the_console_s_language(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path, summary=Summary("你的日程简报好了。")) as (
-        console, client, clock, summary, _
-    ):  # fmt: skip
-        task, _ = await console.workers.create(
-            {"objective": "Make slides", "title": "Slides"}
-        )
-        await set_waiting(console, task["task_id"], clock.now)
-        clock.now += CHECKIN_S + 1
-        # The setting wins; with the setting on auto, the language a page asked for last.
-        assert console.language() == "en"
-        await client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
-        assert console.language() == "zh-Hans"
-        card = await console.chore_runner.checkin()
-        assert card is not None and card["line"] == "你的日程简报好了。"
-        assert summary.facts == [["Slides：在等你"]]
-        # The model is asked for the note in that language too.
-        assert "Simplified Chinese" in chores_module._NOTE_LANGUAGE["zh-Hans"]
-        console.cfg = replace(console.cfg, console=ConsoleConfig(language="en"))
-        assert console.language() == "en"
-
-
-async def test_the_checkin_the_code_writes_is_in_the_console_s_language(
-    tmp_path: Path,
-) -> None:
-    async with chore_console(tmp_path, summary=Summary(fail=True)) as (
-        console, client, clock, _, _
-    ):  # fmt: skip
-        console.cfg = replace(console.cfg, console=ConsoleConfig(language="zh-Hans"))
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         for title in ("Slides", "Photos"):
             task, _ = await console.workers.create(
                 {"objective": "Do it", "title": title}
             )
             await set_waiting(console, task["task_id"], clock.now)
         clock.now += CHECKIN_S + 1
+        # The setting wins; with the setting on auto, the language a page asked for last.
+        assert console.language() == "en"
+        await client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
+        assert console.language() == "zh-Hans"
         card = await console.chore_runner.checkin()
-        assert card is not None and card["line"] in (
+        assert card is not None and card["items"] == 2
+        assert card["line"] in (
             "Slides：在等你；Photos：在等你",
             "Photos：在等你；Slides：在等你",
         )
+        console.cfg = replace(console.cfg, console=ConsoleConfig(language="en"))
+        assert console.language() == "en"
+
+
+async def test_a_checkin_of_many_waiting_tasks_names_the_first_and_counts_the_rest(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, built, _):
+        for title in long_titles(12):
+            task, _ = await console.workers.create(
+                {"objective": f"Do {title}", "title": title}
+            )
+            await set_waiting(console, task["task_id"], clock.now)
+        clock.now += CHECKIN_S + 1
+        built.clear()
+        card = await console.chore_runner.checkin()
+        assert card is not None and card["items"] == 12
+        shown = [title for title in long_titles(12) if title in card["line"]]
+        assert 0 < len(shown) < 12 and len(card["line"]) <= LINE_CHARS
+        assert card["line"].endswith(f"; and {12 - len(shown)} more")
+        assert built == []
 
 
 async def test_a_chore_carries_its_schedule_as_words_for_the_page(
@@ -1487,18 +1452,15 @@ async def test_a_reminder_never_waits_for_an_earlier_run_so_nothing_is_skipped(
 async def test_a_chore_run_waiting_on_the_person_is_in_the_checkin_once(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path, summary=Summary("Waiting.")) as (
-        console, client, clock, summary, _
-    ):  # fmt: skip
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         await add(client, "Check in at the shop", BRIEF, title="Shop check-in")
         clock.to("2026-10-28 08:31")
         [task_id] = await console.chore_runner.tick()
         await set_waiting(console, task_id, clock.now)
         clock.now += CHECKIN_S + 1
         card = await console.chore_runner.checkin()
-        assert card is not None and summary.facts == [
-            ["Shop check-in: waiting for the user"]
-        ]
+        assert card is not None
+        assert card["line"] == "Shop check-in: waiting for the user"
         assert await console.chore_runner.checkin() is None  # said once
 
 
@@ -1608,9 +1570,7 @@ async def test_a_run_that_waited_less_than_an_hour_or_whose_page_you_hold_stays(
 async def test_a_side_chat_chore_waiting_on_you_is_in_the_checkin_once(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path, summary=Summary("Waiting.")) as (
-        console, client, clock, summary, _
-    ):  # fmt: skip
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
         side = (await seed_turn(console.store, str(tmp_path))).session_id
         await add(client, "Sort the photos", BRIEF, title="Photo sort", front_id=side)
         clock.to("2026-10-28 08:31")
@@ -1618,9 +1578,8 @@ async def test_a_side_chat_chore_waiting_on_you_is_in_the_checkin_once(
         await set_waiting(console, task_id, clock.now)
         clock.now += CHECKIN_S + 1
         card = await console.chore_runner.checkin()
-        assert card is not None and summary.facts == [
-            ["Photo sort: waiting for the user"]
-        ]
+        assert card is not None
+        assert card["line"] == "Photo sort: waiting for the user"
         assert await console.chore_runner.checkin() is None
 
 
