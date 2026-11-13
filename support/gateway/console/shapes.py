@@ -1,9 +1,9 @@
 """The JSON shapes of API v2: sessions, turns, events, approvals, submissions.
 
-The shapes here are the ones ``docs/api.md`` documents. Every function is
-pure: it takes a store record and returns a JSON-ready ``dict``. Labels go
-through :mod:`localmelo.support.sessions.display`, so the console and the
-terminal word a path the same way.
+The shapes here are the ones ``docs/reference/api-v2.md`` documents. Every
+function is pure: it takes a store record and returns a JSON-ready ``dict``.
+Labels go through :mod:`localmelo.support.sessions.display`, so the console and
+the terminal word a path the same way.
 """
 
 from __future__ import annotations
