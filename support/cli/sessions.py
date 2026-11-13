@@ -16,6 +16,7 @@ from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionR
 from localmelo.support.sessions.store import (
     SessionInfo,
     UnknownSessionError,
+    iter_events,
     process_holder,
 )
 from localmelo.support.sessions.sync import SessionMark, session_mark
@@ -251,38 +252,29 @@ class SessionNavigation:
         for turn in wanted:
             if any(c.ref.startswith(f"{turn}.") for c in calls):
                 break
-            after, count = 0, 0
-            while True:
-                events = await s.store.list_events(
-                    sid, turns=(turn, turn), after_id=after
+            count = 0
+            async for stored in iter_events(s.store, sid, turns=(turn, turn)):
+                event = stored.event
+                if event.get("type") != "tool.finished":
+                    continue
+                data = event.get("data", {})
+                count += 1
+                status = str(data.get("status") or "")
+                error = str(data.get("error") or "")
+                text = (
+                    error
+                    if error and status != "success"
+                    else str(data.get("output") or "")
                 )
-                for stored in events:
-                    event = stored.event
-                    if event.get("type") != "tool.finished":
-                        continue
-                    data = event.get("data", {})
-                    count += 1
-                    status = str(data.get("status") or "")
-                    error = str(data.get("error") or "")
-                    text = (
-                        error
-                        if error and status != "success"
-                        else str(data.get("output") or "")
+                calls.append(
+                    ToolOutput(
+                        f"{turn}.{count}",
+                        str(data.get("name") or "?"),
+                        "",
+                        status,
+                        text,
                     )
-                    calls.append(
-                        ToolOutput(
-                            f"{turn}.{count}",
-                            str(data.get("name") or "?"),
-                            "",
-                            status,
-                            text,
-                        )
-                    )
-                if len(events) < 1000:
-                    break
-                last_id = events[-1].id
-                assert last_id is not None  # list_events returns durable events
-                after = last_id
+                )
             if count or dot:
                 break
         return sorted(

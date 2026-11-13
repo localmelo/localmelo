@@ -3497,3 +3497,26 @@ class SessionStore:
             return False
         parsed = _parse_holder(lease_holder)
         return parsed is not None and parsed[0] != cli_host_id()
+
+
+async def iter_events(
+    store: SessionStore, session_id: str, *, turns: tuple[int, int] | None = None
+) -> AsyncIterator[StoredEvent]:
+    """Every event of a session in id order, one page of ``list_events`` at a time.
+
+    With ``turns=(a, b)``, only those of the turns ``a..b``. It reads through
+    ``store.list_events`` (so a store that overrides it is honoured), holds no
+    lock between pages and keeps one page in memory.
+    """
+    after = 0
+    while True:
+        page = await store.list_events(
+            session_id, after_id=after, limit=1000, turns=turns
+        )
+        for stored in page:
+            yield stored
+        if len(page) < 1000:
+            return
+        last = page[-1].id
+        assert last is not None  # a stored event always has an id
+        after = last
