@@ -61,11 +61,9 @@ import asyncio
 import copy
 import logging
 import re
-import stat
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
@@ -74,6 +72,7 @@ from localmelo.melo.memory.hippo.policy import content_tokens, overlap
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import new_record_id
+from localmelo.support.gpu_lock import classify_lock, read_lock_file
 from localmelo.support.memory import records
 from localmelo.support.memory.index import ConversationIndex
 from localmelo.support.memory.recall import Item, unit
@@ -427,10 +426,6 @@ class _StoppedError(Exception):
         self.reason = reason
 
 
-# A lock file larger than this is no lock claim (the gate's limit, unreadable).
-_MAX_LOCK_BYTES: Final = 64 * 1024
-
-
 def lock_held(path: str, self_holder: str = "") -> bool:
     """Whether the lock file *path* is held by someone else (read only).
 
@@ -439,41 +434,11 @@ def lock_held(path: str, self_holder: str = "") -> bool:
     exists is a claim. With *self_holder* (``[scheduler] lock_self``), a lock of
     that holder is ours and does not stop a run: the whole ``holder`` line, or
     ``holder:run`` against the file's ``holder:`` and ``run:`` lines, exact and
-    case-sensitive, as the scheduler's gate reads it
-    (``machine_monitor.classify_lock``). Never writes or removes the file.
+    case-sensitive, as the scheduler's gate reads it (``gpu_lock``). Never writes
+    or removes the file.
     """
-    target = Path(path).expanduser()
-    try:
-        info = target.stat(follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-    wanted = self_holder.strip()
-    if not wanted:
-        return True
-    if not stat.S_ISREG(info.st_mode):
-        return True
-    try:
-        with target.open("rb") as handle:
-            raw = handle.read(_MAX_LOCK_BYTES + 1)
-        text = raw.decode("utf-8") if len(raw) <= _MAX_LOCK_BYTES else ""
-    except FileNotFoundError:
-        return False
-    except (OSError, UnicodeDecodeError):
-        return True
-    fields: dict[str, str] = {}
-    for line in text.splitlines():
-        key, sep, value = line.rstrip("\r ").partition(":")
-        if sep and key.strip() not in fields:
-            fields[key.strip()] = value.strip()
-    holder = fields.get("holder", "")
-    if not holder:
-        return True
-    if holder == wanted:
-        return False
-    mine, sep, run = wanted.rpartition(":")
-    return not (sep and mine and holder == mine and fields.get("run", "") == run)
+    found = read_lock_file(path, now_wall=time.time(), self_holder=self_holder)
+    return classify_lock(found, self_holder) == "foreign"
 
 
 async def _check(lock: str, is_active: IsActive | None, lock_self: str = "") -> None:
