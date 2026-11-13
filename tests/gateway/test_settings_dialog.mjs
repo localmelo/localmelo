@@ -1104,7 +1104,7 @@ test('the check-in switch shows the next time, saves with PUT /checkin and can b
   await flush();
   assert.equal(h.element('s-checkin').checked, true);
   assert.match(h.element('s-checkin-state').dataset.text, /^On · next check-in today at /);
-  assert.equal(h.element('s-checkin-hint').textContent, 'Every 30 min while localmelo runs · uses the model only if something is due');
+  assert.equal(h.element('s-checkin-hint').textContent, 'Every 30 min while localmelo runs · only speaks up if something is due');
   assert.equal(h.element('settings-note-scheduled').textContent, 'Check-in on');
   h.element('s-checkin').checked = false;
   await h.element('s-checkin').emit('change');

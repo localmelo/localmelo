@@ -40,7 +40,7 @@ import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnP
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardBlock, cardNode, drawnUpTo, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, stepState, taskEnds, timeline, unansweredSleep } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, drawnUpTo, echoDone, echoNodes, endedTasks, foldNode, isMain, mergeCards, mergeEchoes, shortTime, stepState, taskEnds, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
   acknowledgeNote,
@@ -1316,7 +1316,8 @@ function mainNodes(view, turns, placed) {
   // A task nothing more will run for takes no more changes: its lines lose their buttons. One its chat still
   // follows up on keeps them, Stop included (#431).
   const ended = endedTasks(view?.cards ?? [], echoes);
-  const items = timeline(turns, view?.cards ?? [], nowSeconds(), echoes);
+  // The newest turn, while its approval waits, stands last: the rows that came meanwhile stand above it.
+  const items = timeline(turns, view?.cards ?? [], nowSeconds(), echoes, { waiting: newest && view?.pending?.size ? newest : null });
   // What a send says the person had in front of them: the newest card or line drawn here, never one held back.
   if (view) view.seen = drawnUpTo(items, heldCards.filter((held) => held.view === view).map((held) => held.frame));
   return items.flatMap((item) => {
@@ -1327,6 +1328,7 @@ function mainNodes(view, turns, placed) {
       return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
         step: step && { ...step, onAllow: () => allowCardBlock(card, card.block), onKeep: () => allowCardBlock(card, card.block, "keep") } })];
     }
+    if (item.kind === "fold") return [foldNode({ doc: document, fold: item.fold, open: openCard })];
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = echoDone(echo, done, ended) || dismissed.has(echo.id);
