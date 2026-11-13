@@ -154,7 +154,7 @@ SCHEMA_VERSION: Final = 3
 # started that stopped (#411) (``turns.origin``; ``""`` the person).
 TURN_ORIGINS: Final = frozenset({"", "ask_owner", "followup"})
 
-# The statuses a RunResult can have (docs/run-results.md, "Statuses").
+# The statuses a RunResult can have (docs/reference/run-results.md, "Statuses").
 RUN_STATUSES: Final = frozenset(
     {
         "completed",
@@ -809,6 +809,11 @@ def _check_kind(kind: object) -> str:
             f"kind must be one of {', '.join(sorted(SESSION_KINDS))}, got {kind!r}"
         )
     return str(kind)
+
+
+def _check_event_limit(limit: object) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+        raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
 
 
 def _meta_text(meta: Mapping[str, Any] | None) -> str:
@@ -1842,6 +1847,26 @@ class SessionStore:
             )
         return FinishedTurn(*rows[0]) if rows else None
 
+    async def _read_events(
+        self,
+        sql: str,
+        args: Sequence[Any],
+        session_id: str | None = None,
+        *,
+        newest_last: bool = False,
+    ) -> list[StoredEvent]:
+        """The events one read gives: ``id, turn, event`` rows of *session_id*,
+        or ``id, session_id, turn, event`` rows when it is ``None``; the rows
+        reversed with *newest_last* (a newest-first query read in id order)."""
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql, args)
+        if newest_last:
+            rows.reverse()
+        if session_id is None:
+            return [StoredEvent(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
+        return [StoredEvent(r[0], session_id, r[1], json.loads(r[2])) for r in rows]
+
     async def list_events(
         self,
         session_id: str,
@@ -1855,12 +1880,7 @@ class SessionStore:
         With ``turns=(a, b)``, only the events whose turn is in ``a..b``,
         and none that belongs to no turn.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        _check_event_limit(limit)
         sql = "SELECT id, turn, event FROM events WHERE session_id = ? AND id > ?"
         args: list[Any] = [session_id, after_id]
         if turns is not None:
@@ -1868,34 +1888,19 @@ class SessionStore:
             args += [turns[0], turns[1]]
         sql += " ORDER BY id LIMIT ?"
         args.append(limit)
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(conn, sql, args)
-        return [
-            StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
-        ]
+        return await self._read_events(sql, args, session_id)
 
     async def latest_events(
         self, session_id: str, *, limit: int = 40
     ) -> list[StoredEvent]:
         """The session's newest *limit* events (1..1000), newest first."""
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(
-                conn,
-                "SELECT id, turn, event FROM events WHERE session_id = ? "
-                "ORDER BY id DESC LIMIT ?",
-                (session_id, limit),
-            )
-        return [
-            StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
-        ]
+        _check_event_limit(limit)
+        return await self._read_events(
+            "SELECT id, turn, event FROM events WHERE session_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+            session_id,
+        )
 
     async def approval_events(
         self, session_ids: Collection[str], since: float, *, limit: int = 1000
@@ -1905,29 +1910,18 @@ class SessionStore:
         The newest *limit* (1..1000), in id order. A session's index is walked
         for them, so a caller passes the few sessions it lists, not every one.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        _check_event_limit(limit)
         ids = list(session_ids)
         if not ids:
             return []
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(
-                conn,
-                "SELECT id, session_id, turn, event FROM events "
-                f"WHERE session_id IN ({', '.join('?' * len(ids))}) "
-                "AND type IN ('approval.requested', 'approval.resolved') "
-                "AND json_extract(event, '$.ts') >= ? ORDER BY id DESC LIMIT ?",
-                (*ids, since, limit),
-            )
-        return [
-            StoredEvent(row[0], row[1], row[2], json.loads(row[3]))
-            for row in reversed(rows)
-        ]
+        return await self._read_events(
+            "SELECT id, session_id, turn, event FROM events "
+            f"WHERE session_id IN ({', '.join('?' * len(ids))}) "
+            "AND type IN ('approval.requested', 'approval.resolved') "
+            "AND json_extract(event, '$.ts') >= ? ORDER BY id DESC LIMIT ?",
+            (*ids, since, limit),
+            newest_last=True,
+        )
 
     async def auto_records(
         self, session_id: str, *, limit: int = 100
@@ -1940,26 +1934,16 @@ class SessionStore:
         its ``tool_asks`` (a question its tool asked itself). The newest
         *limit* (1..1000), in id order.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(
-                conn,
-                "SELECT id, turn, event FROM events WHERE session_id = ? "
-                f"AND type = 'tool.finished' AND ({_auto('event', '$.data.approval')} "
-                "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
-                f"WHERE {_auto('value', '$')})) ORDER BY id DESC LIMIT ?",
-                (session_id, limit),
-            )
-        return [
-            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
-            for row in reversed(rows)
-        ]
+        _check_event_limit(limit)
+        return await self._read_events(
+            "SELECT id, turn, event FROM events WHERE session_id = ? "
+            f"AND type = 'tool.finished' AND ({_auto('event', '$.data.approval')} "
+            "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
+            f"WHERE {_auto('value', '$')})) ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+            session_id,
+            newest_last=True,
+        )
 
     async def denied_records(
         self, session_id: str, *, limit: int = 100
@@ -1975,26 +1959,16 @@ class SessionStore:
         tries a blocked step again and again never pushes the block out of
         the newest *limit* (1..1000), in id order.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(
-                conn,
-                "SELECT id, turn, event FROM events WHERE session_id = ? "
-                f"AND type = 'tool.finished' AND ({_block('event', '$.data.approval')} "
-                "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
-                f"WHERE {_block('value', '$')})) ORDER BY id DESC LIMIT ?",
-                (session_id, _TURN_STOPPED, _TURN_STOPPED, limit),
-            )
-        return [
-            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
-            for row in reversed(rows)
-        ]
+        _check_event_limit(limit)
+        return await self._read_events(
+            "SELECT id, turn, event FROM events WHERE session_id = ? "
+            f"AND type = 'tool.finished' AND ({_block('event', '$.data.approval')} "
+            "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
+            f"WHERE {_block('value', '$')})) ORDER BY id DESC LIMIT ?",
+            (session_id, _TURN_STOPPED, _TURN_STOPPED, limit),
+            session_id,
+            newest_last=True,
+        )
 
     async def day_turns(
         self, since: float, kinds: Collection[str], *, limit: int = 100
@@ -2204,13 +2178,12 @@ class SessionStore:
         if before_id is not None:
             sql += " AND id < ?"
             args.append(before_id)
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
-        return [
-            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
-            for row in reversed(rows)
-        ]
+        return await self._read_events(
+            sql + " ORDER BY id DESC LIMIT ?",
+            (*args, limit),
+            session_id,
+            newest_last=True,
+        )
 
     async def read_notes(self, session_id: str, turn: int) -> list[str]:
         """The words the person added to turn *turn* that its run read, in read order.
@@ -2306,10 +2279,9 @@ class SessionStore:
         if before_id is not None:
             sql += " AND id < ?"
             args.append(before_id)
-        async with self._lock:
-            conn = await self._ready()
-            rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
-        return [StoredEvent(row[0], row[1], row[2], json.loads(row[3])) for row in rows]
+        return await self._read_events(
+            sql + " ORDER BY id DESC LIMIT ?", (*args, limit)
+        )
 
     async def rename_session(
         self, session_id: str, title: str, *, only_if: str | None = None
@@ -3497,3 +3469,26 @@ class SessionStore:
             return False
         parsed = _parse_holder(lease_holder)
         return parsed is not None and parsed[0] != cli_host_id()
+
+
+async def iter_events(
+    store: SessionStore, session_id: str, *, turns: tuple[int, int] | None = None
+) -> AsyncIterator[StoredEvent]:
+    """Every event of a session in id order, one page of ``list_events`` at a time.
+
+    With ``turns=(a, b)``, only those of the turns ``a..b``. It reads through
+    ``store.list_events`` (so a store that overrides it is honoured), holds no
+    lock between pages and keeps one page in memory.
+    """
+    after = 0
+    while True:
+        page = await store.list_events(
+            session_id, after_id=after, limit=1000, turns=turns
+        )
+        for stored in page:
+            yield stored
+        if len(page) < 1000:
+            return
+        last = page[-1].id
+        assert last is not None  # a stored event always has an id
+        after = last

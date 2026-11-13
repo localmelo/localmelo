@@ -161,7 +161,7 @@ from localmelo.support.memory.recall import (
     whole_turn,
 )
 from localmelo.support.sessions.attachments import is_stand_in
-from localmelo.support.sessions.store import typed_words
+from localmelo.support.sessions.store import iter_events, typed_words
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -1938,23 +1938,15 @@ class ChatMemory:
         typed[turn.info.turn] = turn.typed
         events: list[tuple[int | None, dict[str, Any]]] = []
         started: set[tuple[int | None, str]] = set()
-        after = 0
-        while True:
-            page = await turn.store.list_events(
-                turn.info.session_id, after_id=after, limit=1000
-            )
-            for stored in page:
-                data = stored.event.get("data") or {}
-                call = (stored.turn, str(data.get("call_id") or ""))
-                kind = stored.event.get("type")
-                if kind == "tool.started" and note_gate.reads(data.get("name")):
-                    started.add(call)
-                    events.append((stored.turn, stored.event))
-                elif kind == "tool.finished" and call in started:
-                    events.append((stored.turn, stored.event))
-            if len(page) < 1000:
-                break
-            after = int(page[-1].id or 0)
+        async for stored in iter_events(turn.store, turn.info.session_id):
+            data = stored.event.get("data") or {}
+            call = (stored.turn, str(data.get("call_id") or ""))
+            kind = stored.event.get("type")
+            if kind == "tool.started" and note_gate.reads(data.get("name")):
+                started.add(call)
+                events.append((stored.turn, stored.event))
+            elif kind == "tool.finished" and call in started:
+                events.append((stored.turn, stored.event))
         async with self._lock:
             active = await self.stores()[0].active_entries()
         own = [
@@ -2080,20 +2072,12 @@ class ChatMemory:
         from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
 
         ids = {int(item.key[2:]) for item in turn.memory.used if item.is_turn}
-        after = 0
-        while True:
-            events = await turn.store.list_events(
-                turn.info.session_id, after_id=after, limit=1000
-            )
-            for stored in events:
-                if stored.event.get("type") != MEMORY_EVENT_TYPE:
-                    continue
-                for used in stored.event.get("data", {}).get("used", []):
-                    if isinstance(used, dict) and used.get("kind") == "chat":
-                        ids.add(int(used.get("id") or 0))
-            if len(events) < 1000:
-                break
-            after = int(events[-1].id or 0)
+        async for stored in iter_events(turn.store, turn.info.session_id):
+            if stored.event.get("type") != MEMORY_EVENT_TYPE:
+                continue
+            for used in stored.event.get("data", {}).get("used", []):
+                if isinstance(used, dict) and used.get("kind") == "chat":
+                    ids.add(int(used.get("id") or 0))
         async with self._lock:
             index = self.stores()[1]
             recalled = [d for d in await index.fetch(ids) if d.kind in _TASK_KINDS]

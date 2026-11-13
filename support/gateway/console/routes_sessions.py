@@ -21,6 +21,7 @@ from localmelo.support.sessions.store import (
     SessionStore,
     StoredEvent,
     TurnInfo,
+    iter_events,
 )
 from localmelo.support.sessions.submissions import check_client_request_id
 
@@ -67,16 +68,9 @@ async def _turn_events(
     console: Console, store: SessionStore, session_id: str, turn: int
 ) -> list[StoredEvent]:
     """Every stored event of one turn, in id order, in pages."""
-    events: list[StoredEvent] = []
-    after = 0
-    while True:
-        page = await store.list_events(
-            session_id, after_id=after, limit=1000, turns=(turn, turn)
-        )
-        events.extend(page)
-        if len(page) < 1000:
-            return events
-        after = page[-1].id or after
+    return [
+        stored async for stored in iter_events(store, session_id, turns=(turn, turn))
+    ]
 
 
 def _completion_tokens(turn: TurnInfo) -> int:

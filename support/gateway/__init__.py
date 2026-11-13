@@ -75,7 +75,7 @@ class GatewayServer:
 
         # No Swagger or ReDoc page: /docs loads Swagger UI from a CDN, which
         # the console's no-CDN rule forbids. API v2 is documented in
-        # docs/api.md instead.
+        # docs/reference/api-v2.md instead.
         self.app = FastAPI(
             title="localmelo gateway",
             lifespan=self._lifespan,
