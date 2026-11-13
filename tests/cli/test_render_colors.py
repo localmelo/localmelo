@@ -15,11 +15,11 @@ from rich.console import Console, RenderableType
 from rich.style import Style
 from rich.text import Text
 
-from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import Snapshot
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.termcolors import XTERM, contrast
 from localmelo.support.cli.theme import ASCII, Colour, Palette
+from localmelo.support.sessions import edits
 
 from .test_render import Turn, Writes, _block, _header_text, _hung_text, _message
 

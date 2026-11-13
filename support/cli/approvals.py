@@ -53,9 +53,9 @@ from localmelo.melo.contracts.review import (
     url_site,
 )
 from localmelo.support.browser.sites import TAKEOVER_NEEDS
-from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells, wrap_words
 from localmelo.support.config import SavedFolders
+from localmelo.support.sessions import edits
 from localmelo.support.sessions.approvals import (
     AskFunction,
     CardWatch,
