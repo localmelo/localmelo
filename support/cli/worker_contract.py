@@ -21,6 +21,7 @@ from localmelo.melo.agent._brief_gate import (
     BriefCheckResult,
 )
 from localmelo.melo.contracts.events import AgentEvent
+from localmelo.melo.contracts.redaction import map_strings
 from localmelo.melo.executor import TOOL_EXIT_CODE, Executor
 from localmelo.melo.executor.models import (
     ErrorCategory,
@@ -51,17 +52,9 @@ _SECRET_ASSIGNMENT = re.compile(
 
 def redact_output(value: Any) -> Any:
     """Mask common secret assignments in addition to worker redaction."""
-
-    def mask(item: Any) -> Any:
-        if isinstance(item, str):
-            return _SECRET_ASSIGNMENT.sub(r"\1[redacted]", item)
-        if isinstance(item, dict):
-            return {mask(key): mask(child) for key, child in item.items()}
-        if isinstance(item, list):
-            return [mask(child) for child in item]
-        return item
-
-    return mask(redact_worker(value))
+    return map_strings(
+        redact_worker(value), lambda text: _SECRET_ASSIGNMENT.sub(r"\1[redacted]", text)
+    )
 
 
 def read_brief(path: str | Path) -> str:

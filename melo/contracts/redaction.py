@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from typing import Any, Final
+from typing import Any, Callable, Final  # noqa: UP035  # imports pinned by a test
 
 REDACTED: Final = "[redacted]"
 
@@ -143,13 +143,24 @@ def secret_spans(text: str) -> list[tuple[int, int]]:
     return sorted(spans)
 
 
-def redacted(value: Any) -> Any:
-    """*value* with every string in it (and in its lists) redacted."""
+def map_strings(value: Any, leaf: Callable[[str], str]) -> Any:
+    """*value* with *leaf* applied to every string in it: a list's items, a dict's
+    keys and values, at any depth. Any other value (a number, a tuple) is kept."""
     if isinstance(value, str):
-        return redact_secrets(value)[0]
+        return leaf(value)
+    if isinstance(value, dict):
+        return {
+            map_strings(key, leaf): map_strings(item, leaf)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [redacted(item) for item in value]
+        return [map_strings(item, leaf) for item in value]
     return value
+
+
+def redacted(value: Any) -> Any:
+    """*value* with every string in it (in its lists and dicts, keys too) redacted."""
+    return map_strings(value, lambda text: redact_secrets(text)[0])
 
 
 def _redact_pem(text: str) -> tuple[str, int]:
