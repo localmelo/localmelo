@@ -57,6 +57,15 @@ button:disabled {
   /* Spacing grid, in 4px steps. */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-7: 32px; --space-8: 48px;
+  /* Motion: one duration for every transition, one for every loop. */
+  --motion: 0.15s; --motion-loop: 2.4s;
+  /* Layers, lowest first: a z-index names one of these and has no number of its own (-1 only puts a pseudo-element behind its parent). */
+  --layer-part: 1;    /* a part above its neighbours inside one component: Settings' sliding page, the Browser view's key box */
+  --layer-over: 2;    /* a control or view above its neighbours: Settings' close button, the details drawer, the Browser view and its dialog */
+  --layer-dock: 3;    /* the Browser dock over the chat */
+  --layer-menu: 20;   /* open menus and lists, and the phone's sidebar; its backdrop is one below */
+  --layer-browser: 28; /* the Browser view as a phone's whole screen */
+  --layer-sheet: 30;  /* the phone's panel sheet and the drop hint; the sheet's backdrop is one below */
 }
 body {
   background: var(--canvas);
@@ -100,8 +109,10 @@ summary:focus-visible,
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* A row inside a box that clips (a scrolling list, a folded group) draws its ring inside the row, so the whole ring shows. */
+.session-info:focus-visible, .work-summary:focus-visible, .tool-summary:focus-visible, .st-tab:focus-visible { outline-offset: -2px; }
 button {
-  transition: background 0.15s;
+  transition: background var(--motion);
 }
 button:hover:not(:disabled) {
   filter: brightness(0.97);
@@ -565,7 +576,7 @@ button:hover:not(:disabled) {
   position: absolute;
   right: 0;
   top: calc(100% + var(--space-2));
-  z-index: 20;
+  z-index: var(--layer-menu);
   min-width: 164px;
   padding: var(--space-1);
   background: var(--surface);
@@ -615,7 +626,7 @@ button:hover:not(:disabled) {
   width: 6px;
   border-radius: var(--radius-pill);
   background: var(--accent);
-  animation: pulse 1.4s infinite;
+  animation: pulse var(--motion-loop) infinite;
 }
 .running-chip:hover,
 .running-chip[aria-expanded="true"] {
@@ -625,7 +636,7 @@ button:hover:not(:disabled) {
   position: absolute;
   right: 0;
   top: calc(100% + var(--space-2));
-  z-index: 20;
+  z-index: var(--layer-menu);
   width: min(340px, 90vw);
   max-height: 60dvh;
   overflow-y: auto;
@@ -802,7 +813,7 @@ button:hover:not(:disabled) {
 .setup-bar::-moz-progress-bar { background: var(--accent); }
 .setup-step[data-state="waiting"] .setup-name, .setup-step[data-state="skipped"] .setup-name, .setup-step[data-state="stopped"] .setup-name, .setup-step[data-state="waiting"] .setup-mark, .setup-step[data-state="skipped"] .setup-mark, .setup-step[data-state="stopped"] .setup-mark { color: var(--ink-3); }
 .setup-step[data-state="done"] .setup-mark, .setup-step[data-state="done"] .setup-state { color: var(--ok); }
-.setup-step[data-state="running"] .setup-mark { color: var(--accent); animation: pulse 1.4s infinite; }
+.setup-step[data-state="running"] .setup-mark { color: var(--accent); animation: pulse var(--motion-loop) infinite; }
 .setup-step[data-state="failed"] .setup-mark, .setup-step[data-state="failed"] .setup-state, .setup-step[data-state="failed"] .setup-line { color: var(--error); }
 /* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
 .import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
@@ -1142,7 +1153,7 @@ dialog.picture-box {
   color: var(--ink-3);
 }
 .working .status-dot {
-  animation: pulse 1.4s infinite;
+  animation: pulse var(--motion-loop) infinite;
 }
 @keyframes pulse {
   50% {
@@ -1221,7 +1232,7 @@ dialog.picture-box {
 /* The model chip's words are one text (name and caret), so it stays a line box to be cut with an ellipsis. */
 .composer-models .model-button { line-height: 26px; }
 .folder-chip:hover, .folder-chip[aria-expanded="true"], .composer-models .model-button:hover, .composer-models .model-button[aria-expanded="true"] { background: var(--raised); }
-.folder-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: 20; width: min(360px, 80vw); max-height: 60dvh; overflow-y: auto; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.folder-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: var(--layer-menu); width: min(360px, 80vw); max-height: 60dvh; overflow-y: auto; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
 .folder-menu-title { margin: 0; padding: var(--space-2) var(--space-2) var(--space-1); font-size: var(--text-caption); color: var(--ink-3); }
 #folder-list { margin-bottom: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); }
 .folder-item, .folder-action { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-2); background: none; border: 0; border-radius: var(--radius-control); font-size: var(--text-small); text-align: left; }
@@ -1374,7 +1385,7 @@ dialog::backdrop {
   padding: var(--space-5);
   border-left: 1px solid var(--line);
   background: var(--surface);
-  z-index: 2;
+  z-index: var(--layer-over);
 }
 .details-drawer h2 { margin: var(--space-2) 0 0; font-size: var(--text-title); }
 .details-drawer .drawer-tabs { margin: var(--space-3) 0; }
@@ -1433,12 +1444,12 @@ dialog::backdrop {
     position: fixed;
     inset: 0 auto 0 0;
     width: min(290px, 84vw);
-    z-index: 20;
+    z-index: var(--layer-menu);
     transform: translateX(-100%);
     visibility: hidden;
     transition:
-      transform 0.18s,
-      visibility 0.18s;
+      transform var(--motion),
+      visibility var(--motion);
   }
   .app.sidebar-open .sidebar {
     transform: translateX(0);
@@ -1449,7 +1460,7 @@ dialog::backdrop {
     position: fixed;
     inset: 0;
     background: var(--scrim);
-    z-index: 19;
+    z-index: calc(var(--layer-menu) - 1);
     border: 0;
   }
   #sidebar-toggle {
@@ -1557,12 +1568,17 @@ dialog::backdrop {
   .folder-chip, .composer-models .model-button, .mode-chip, .starters button { min-height: 44px; }
   .composer-models .model-button { line-height: 42px; }
 }
+/* Reduced motion stops every animation and transition on the page, here and nowhere else. The language fallback only
+   shows words after a delay: it is no motion, so it keeps running. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+  :root[data-i18n-pending] [data-i18n] {
+    animation: i18n-show 0s 1s forwards !important;
   }
 }
 /* Keyboard hints mean nothing on a touch screen or in a phone-width window. */
@@ -1654,7 +1670,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 }
 .tool-card[data-state="running"] .tool-mark {
   color: var(--accent);
-  animation: pulse 1.4s infinite;
+  animation: pulse var(--motion-loop) infinite;
 }
 /* The live steps panel marks a step by the same states, in the same colours. */
 :is(.tool-card, .activity-step)[data-state="success"] :is(.tool-mark, .activity-mark) {
@@ -1823,6 +1839,11 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .diff-added .diff-sign { color: var(--ok); }
 .approval-actions, .failure-actions, .approval-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .approval-actions { margin: 12px 0 8px; }
+/* In the docked panel three answers or more sit two to a row, and Deny alone under them: one line of buttons does not fit. */
+@media (min-width: 900px) {
+  .panel .approval-actions:has(> :nth-child(3)) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel .approval-actions:has(> :nth-child(3)) > [data-approval-deny] { grid-column: 1 / -1; }
+}
 .approval-actions button, .deny-view button { font-size: var(--text-body); min-height: 36px; padding: var(--space-2) var(--space-4); }
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: var(--space-2) var(--space-4); }
@@ -1953,7 +1974,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   align-items: center;
 }
 .live-line .status-dot {
-  animation: pulse 1.4s infinite;
+  animation: pulse var(--motion-loop) infinite;
 }
 /* One clipped line: a segment that does not fit wraps below and is hidden, so a
    narrow width drops the rightmost segments first, as the terminal's bar does. */
@@ -2243,7 +2264,6 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   --kind-run: light-dark(#015b77, #61b1cf);
   --kind-web: light-dark(#183d86, #7496e3);
   --kind-memory: light-dark(#9f5b7f, #f1cbdf);
-  --wait-fill: light-dark(#fbf1df, #2f2614);
   --tab-shadow: 0 1px 2px light-dark(rgb(0 0 0 / 8%), rgb(0 0 0 / 45%));
 }
 .app { grid-template-columns: 248px minmax(0, 1fr) 340px; }
@@ -2251,7 +2271,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .panel { position: relative; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; background: var(--sidebar); border-left: 1px solid var(--line); }
 .panel-head { display: grid; justify-items: center; gap: 2px; padding: var(--space-7) var(--space-5) var(--space-4); text-align: center; }
 .panel-handle, .panel-chip, .panel-backdrop { display: none; }
-.panel-portrait { position: relative; width: 112px; height: 112px; margin-bottom: 12px; overflow: hidden; display: grid; justify-items: center; border-radius: var(--radius-pill); background: var(--tint); box-shadow: 0 0 0 3px var(--sidebar), 0 0 0 6px var(--ring, var(--line)); transition: box-shadow 0.3s; }
+.panel-portrait { position: relative; width: 112px; height: 112px; margin-bottom: 12px; overflow: hidden; display: grid; justify-items: center; border-radius: var(--radius-pill); background: var(--tint); box-shadow: 0 0 0 3px var(--sidebar), 0 0 0 6px var(--ring, var(--line)); transition: box-shadow var(--motion); }
 .panel[data-mood="working"] { --ring: var(--accent); }
 .panel[data-mood="waiting"] { --ring: var(--warn); }
 .panel[data-mood="done"] { --ring: var(--ok); }
@@ -2259,7 +2279,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 /* Melo's moves (moves.mjs) draw on a canvas laid over the still picture (a poster of the same canvas); the ring's
    `data-moves` says which of the two shows, and they cross-fade. The dog's paws rest a little above the bottom of the
    ring. Before the gateway answers, and while it cannot be reached, the still picture is the resting dog, dimmed. */
-.panel-picture, .panel-moves { position: absolute; top: 6px; left: 6px; width: 100px; height: 100px; transition: opacity 0.2s; }
+.panel-picture, .panel-moves { position: absolute; top: 6px; left: 6px; width: 100px; height: 100px; transition: opacity var(--motion); }
 .panel-picture img { display: block; width: 100%; height: 100%; }
 .panel-moves { opacity: 0; pointer-events: none; }
 .panel-portrait[data-moves="on"] .panel-moves { opacity: 1; }
@@ -2295,7 +2315,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .activity-row:is([data-state="waiting"], :has(> .activity-detail)) + .activity-row::before { content: none; }
 .activity-row:hover::before, .activity-row:hover + .activity-row::before { opacity: 0; }
 .activity-row:has(> .activity-detail) { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
-.activity-row[data-state="waiting"] { background: var(--wait-fill); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
+.activity-row[data-state="waiting"] { background: var(--warn-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
 .activity-head { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: start; width: 100%; padding: var(--space-2) var(--space-2); border: 0; border-radius: var(--radius-card); background: none; color: inherit; text-align: left; }
 .activity-row:not([data-state="waiting"]) > .activity-head:hover { background: var(--tint); }
 .activity-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-reading); font-weight: 600; line-height: 1; letter-spacing: -0.08em; }
@@ -2330,7 +2350,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .activity-open { margin-left: auto; font-size: var(--text-small); }
 .approval-fold { padding: 0 8px 8px 50px; }
 .approval-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-3); font-size: var(--text-caption); }
-.approval-toggle::before { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; }
+.approval-toggle::before { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--motion); }
 .approval-toggle[aria-expanded="true"]::before { transform: rotate(45deg); }
 .approval-toggle:hover { color: var(--ink); }
 .approval-fold[data-waiting="true"] .approval-toggle { color: var(--warn); font-weight: 600; }
@@ -2343,7 +2363,6 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .approval-item[data-answer="waiting"] .approval-answer { color: var(--warn); }
 .approval-item[data-answer="denied"] .approval-answer { color: var(--error); }
 .approval-choices { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: var(--space-2); }
-@media (prefers-reduced-motion: reduce) { .approval-toggle::before { transition: none; } }
 /* The Memory tab: the notes melo keeps, newest first, with the switch that turns memory across chats on or off. */
 .memory-tab { display: grid; gap: var(--space-3); padding: 0 var(--space-2); }
 .memory-head { display: grid; gap: var(--space-1); padding-top: var(--space-3); }
@@ -2351,7 +2370,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .memory-line { margin: 0; color: var(--ink-3); font-size: var(--text-small); text-wrap: pretty; }
 .memory-switch { position: relative; flex: none; width: 40px; height: 24px; padding: 0; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); }
 .memory-switch::after { content: ""; position: absolute; inset: -10px -6px; }
-.memory-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
+.memory-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform var(--motion), background-color var(--motion); }
 .memory-switch[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
 .memory-switch[aria-checked="true"] .memory-knob { transform: translateX(16px); background: var(--surface); }
 .memory-search, .memory-edit { appearance: none; width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font-size: var(--text-small); }
@@ -2392,7 +2411,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .sched-keep > button { flex: none; white-space: nowrap; }
 .sched-switch { position: relative; flex: none; width: 40px; height: 24px; padding: 0; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); }
 .sched-switch::after { content: ""; position: absolute; inset: -10px -6px; }
-.sched-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
+.sched-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform var(--motion), background-color var(--motion); }
 .sched-switch[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
 .sched-switch[aria-checked="true"] .sched-knob { transform: translateX(16px); background: var(--surface); }
 .sched-list { margin: 0; padding: 0; list-style: none; }
@@ -2431,7 +2450,6 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
 .notes-ask h2 { margin: 0 0 var(--space-2); font-size: var(--text-title); letter-spacing: -0.02em; }
 .notes-ask p { margin: 0 0 var(--space-4); color: var(--ink-2); font-size: var(--text-small); }
 .notes-ask button { display: block; width: 100%; margin-top: var(--space-2); min-height: 40px; }
-@media (prefers-reduced-motion: reduce) { .memory-knob, .sched-knob { transition: none; } }
 /* Details, in developer mode, is a mode of the panel: while it is open it takes the place of the tabs below Melo. */
 .panel .details-drawer { position: static; width: auto; padding: 4px 16px 24px; overflow: visible; border: 0; background: none; }
 .panel:has(> .details-drawer:not([hidden])) > :is(.panel-tabs, .panel-body) { display: none; }
@@ -2478,12 +2496,12 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
    waits for the person is the one row that asks, so it alone keeps a box, amber as a waiting row in the panel. */
 .panel .task-panel .task-row { position: relative; margin: 0; border: 0; background: none; }
 .panel .task-panel .task-row + .task-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--line); }
-.panel .task-panel .task-row[data-awaited="person"] { margin: 4px 0; background: var(--wait-fill); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
+.panel .task-panel .task-row[data-awaited="person"] { margin: 4px 0; background: var(--warn-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
 .panel .task-panel .task-row[data-awaited="person"]::before,
 .panel .task-panel .task-row[data-awaited="person"] + .task-row::before,
 .panel .task-panel .task-row:hover::before,
 .panel .task-panel .task-row:hover + .task-row::before { content: none; }
-.panel .task-panel .task-row[data-awaited="person"]:hover { background: var(--wait-fill); }
+.panel .task-panel .task-row[data-awaited="person"]:hover { background: var(--warn-tint); }
 /* A task's facts in default mode: one quiet line under its title, its state coloured as in the full record. */
 .panel .task-panel .task-facts { margin: 0 0 8px; color: var(--ink-3); font-size: var(--text-small); }
 .task-facts [data-ending], .task-facts [data-awaited="person"] { font-weight: 600; }
@@ -2504,7 +2522,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
   .sidebar { align-items: center; padding: var(--space-5) var(--space-2) var(--space-3); }
   .brand { padding: 0 0 var(--space-5); }
   :is(.brand strong, .local-badge, .worker-navigation, .search, .list-heading, .session-title, .session-meta, .session-close, .local-caption, .list-empty) { display: none; }
-  .sidebar .nav-button { justify-content: center; padding: var(--space-3) 0; }
+  .sidebar .nav-button { justify-content: center; min-width: 40px; padding: var(--space-3) 0; }
   :is(.nav-label, #settings-label, .new-chat kbd) { display: none; }
   .session-list { width: 100%; }
   .session-item, .session-item.active, .session-item:hover { justify-content: center; background: none; box-shadow: none; }
@@ -2514,7 +2532,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
 }
 @media (max-width: 899px) {
   .app { grid-template-columns: 64px minmax(0, 1fr); }
-  .panel { position: fixed; inset: auto 0 0; z-index: 30; height: min(80dvh, 680px); border: 0; border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-float); transform: translateY(105%); visibility: hidden; transition: transform 0.22s, visibility 0.22s; }
+  .panel { position: fixed; inset: auto 0 0; z-index: var(--layer-sheet); height: min(80dvh, 680px); border: 0; border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-float); transform: translateY(105%); visibility: hidden; transition: transform var(--motion), visibility var(--motion); }
   .panel.sheet-open { transform: none; visibility: visible; }
   .panel:has(> .details-drawer:not([hidden])) { transform: none; visibility: visible; }
   .panel[data-view="task"] > .task-panel { padding-top: var(--space-7); }
@@ -2528,7 +2546,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
   .panel-chip { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 2px 10px 2px 3px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-2); font-size: var(--text-small); font-weight: 600; }
   .panel-chip[data-mood="waiting"] { border-color: var(--warn); color: var(--warn); }
   .panel-chip img { border-radius: var(--radius-pill); }
-  .panel-backdrop { position: fixed; inset: 0; z-index: 29; display: block; border: 0; background: var(--scrim); }
+  .panel-backdrop { position: fixed; inset: 0; z-index: calc(var(--layer-sheet) - 1); display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
   .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
@@ -2546,7 +2564,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-tab-text { display: grid; min-width: 0; }
 .st-tab-note, .st-chevron { display: none; }
 .st-glyph { flex: none; width: 16px; color: var(--ink-3); text-align: center; }
-.st-close { position: absolute; top: var(--space-3); right: var(--space-3); z-index: 2; }
+.st-close { position: absolute; top: var(--space-3); right: var(--space-3); z-index: var(--layer-over); }
 .st-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); }
 .st-back { display: none; }
 .st-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-7) var(--space-7); }
@@ -2588,8 +2606,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* The switch is a checkbox: the track is drawn beside it, and the checkbox keeps the focus and the state. */
 .st-switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
 .st-switch input { position: absolute; inset: -10px -6px; width: auto; height: auto; margin: 0; opacity: 0; cursor: pointer; }
-.st-track { position: relative; width: 40px; height: 24px; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); transition: background-color 0.15s, border-color 0.15s; }
-.st-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
+.st-track { position: relative; width: 40px; height: 24px; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); transition: background-color var(--motion), border-color var(--motion); }
+.st-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform var(--motion), background-color var(--motion); }
 .st-switch input:checked + .st-track { border-color: var(--accent); background: var(--accent); }
 .st-switch input:checked + .st-track::after { transform: translateX(16px); background: var(--surface); }
 .st-switch input:focus-visible + .st-track { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -2658,7 +2676,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .st-tab[aria-selected="true"]::before { display: none; }
   .st-tab-note { display: block; overflow: hidden; color: var(--ink-3); font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
   .st-chevron { display: block; margin-left: auto; color: var(--ink-3); }
-  .st-main { position: absolute; inset: 0; z-index: 1; visibility: hidden; transform: translateX(100%); transition: transform 0.2s ease, visibility 0.2s; }
+  .st-main { position: absolute; inset: 0; z-index: var(--layer-part); visibility: hidden; transform: translateX(100%); transition: transform var(--motion) ease, visibility var(--motion); }
   .st[data-view="section"] .st-main { visibility: visible; transform: none; }
   .st-back { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; min-height: 44px; margin: var(--space-2) 0 0 var(--space-2); padding: 0 var(--space-2); border: 0; background: none; color: var(--accent); font-size: var(--text-body); }
   .st-body { padding: var(--space-2) var(--space-4) var(--space-6); }
@@ -2672,9 +2690,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .st-segments label { flex: 1; min-width: 0; min-height: 36px; display: grid; place-items: center; }
   .st-actions button, .st-test button, .st-editor-actions button { min-height: 44px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .st-main, .st-track, .st-track::after { transition: none; }
-}
 
 /* Ask or Auto (#339): the chip beside the model, its menu above it, and the card under a step Auto blocked. */
 .mode-picker { position: relative; flex: none; }
@@ -2685,7 +2700,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .mode-glyph:empty { display: none; }
 .mode-chip[data-mode="auto"] .mode-glyph::before { content: "»"; font-weight: 600; }
 .mode-chip[data-mode="auto"] .mode-glyph { display: inline; }
-.mode-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: 20; width: min(360px, 86vw); padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.mode-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: var(--layer-menu); width: min(360px, 86vw); padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
 .mode-menu-title { margin: 0; padding: var(--space-2) var(--space-2) var(--space-1); font-size: var(--text-caption); color: var(--ink-3); }
 .mode-item { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; padding: var(--space-2); background: none; border: 0; border-radius: var(--radius-control); color: var(--ink); text-align: left; }
 .mode-item:hover { background: var(--raised); }
@@ -2751,7 +2766,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
    a /help table are one grid, so the names, arguments and words line up from row to row. */
 .composer { position: relative; }
 .slash-menu, .local-table { display: grid; grid-template-columns: max-content minmax(0, 17ch) minmax(0, 1fr); column-gap: var(--space-3); align-content: start; }
-.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2)); z-index: 20; max-height: min(340px, 45dvh); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2)); z-index: var(--layer-menu); max-height: min(340px, 45dvh); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
 .slash-item, .local-help { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; }
 .slash-item { padding: var(--space-2) var(--space-2); border-radius: var(--radius-control); cursor: pointer; }
 .slash-item[aria-selected="true"] { background: var(--tint); box-shadow: inset 2px 0 0 var(--accent); }
@@ -2806,7 +2821,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .media-warning .link-button { margin-left: var(--space-1); padding: 0; font-size: inherit; }
 .attach-button { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -4px -4px -4px -8px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink-2); }
 .attach-button:hover:not(:disabled) { background: var(--raised); color: var(--ink); filter: none; }
-.drop-hint { position: absolute; inset: var(--space-3); z-index: 30; display: grid; place-items: center; padding: var(--space-4); border: 2px dashed var(--accent); border-radius: var(--radius-panel); background: var(--tint); background: color-mix(in srgb, var(--tint) 90%, transparent); color: var(--accent); font-size: var(--text-title); font-weight: 600; text-align: center; pointer-events: none; }
+.drop-hint { position: absolute; inset: var(--space-3); z-index: var(--layer-sheet); display: grid; place-items: center; padding: var(--space-4); border: 2px dashed var(--accent); border-radius: var(--radius-panel); background: var(--tint); background: color-mix(in srgb, var(--tint) 90%, transparent); color: var(--accent); font-size: var(--text-title); font-weight: 600; text-align: center; pointer-events: none; }
 .user-bubble.has-media { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
 .bubble-media { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 .bubble-picture { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); line-height: 0; cursor: zoom-in; }
@@ -2827,7 +2842,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* The Browser view: the page melo is working in, big (browser-live.mjs). One click on a card opens it at once. It covers
    the work area, the chat and Melo's panel, so the picture is as large as the window allows; the chat stays under it,
    hidden and still live, and Back to chat or Escape returns to it. On a phone it is the whole screen. The sidebar stays. */
-.browser-panel { position: relative; z-index: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); outline: none; }
+.browser-panel { position: relative; z-index: var(--layer-over); display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); outline: none; }
 @media (min-width: 701px) {
   .app > .sidebar { grid-area: 1 / 1; }
   .app > .chat { grid-area: 1 / 2; }
@@ -2848,8 +2863,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bp-stage { flex: 1; min-height: 0; display: flex; padding: var(--space-4) var(--space-5); background: var(--sidebar); }
 .bp-viewport { position: relative; flex: 1; min-width: 0; min-height: 0; }
 /* The page's picture, in a ring of the web colour while melo is in the middle of a browser step. */
-.bp-canvas { position: absolute; display: block; border-radius: var(--radius-card); background: var(--canvas); box-shadow: 0 0 0 1px var(--line), var(--tab-shadow); transition: opacity 0.3s, filter 0.3s; }
-.browser-panel[data-browsing="true"] .bp-canvas { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 5px color-mix(in srgb, var(--kind-web) 18%, transparent); animation: bp-breathe 2.4s ease-in-out infinite; }
+.bp-canvas { position: absolute; display: block; border-radius: var(--radius-card); background: var(--canvas); box-shadow: 0 0 0 1px var(--line), var(--tab-shadow); transition: opacity var(--motion), filter var(--motion); }
+.browser-panel[data-browsing="true"] .bp-canvas { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 5px color-mix(in srgb, var(--kind-web) 18%, transparent); animation: bp-breathe var(--motion-loop) ease-in-out infinite; }
 .browser-panel[data-state="stale"] .bp-canvas { opacity: 0.55; filter: grayscale(0.7); }
 @keyframes bp-breathe {
   50% { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 8px color-mix(in srgb, var(--kind-web) 28%, transparent); }
@@ -2857,13 +2872,13 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* Without a picture the note takes the picture's place, as an empty window; over a picture it is a small label. */
 .bp-note { position: absolute; inset: 0 0 auto; display: grid; place-items: center; aspect-ratio: 16 / 10; width: min(100%, 640px); margin: 0 auto; padding: var(--space-7) var(--space-5) var(--space-4); border: 1px dashed var(--control); border-radius: var(--radius-card); background: linear-gradient(var(--raised) 0 24px, transparent 24px); color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; text-align: center; text-wrap: balance; }
 .bp-note[data-over="true"] { inset: var(--space-2) auto auto var(--space-2); display: block; margin: 0; width: max-content; max-width: calc(100% - 16px); aspect-ratio: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); }
-.browser-panel[data-state="loading"] .bp-note { border-color: var(--kind-web); animation: bp-wait 2.4s ease-in-out infinite; }
+.browser-panel[data-state="loading"] .bp-note { border-color: var(--kind-web); animation: bp-wait var(--motion-loop) ease-in-out infinite; }
 .browser-panel[data-state="idle"] .bp-note { border-color: var(--line); color: var(--ink-3); }
 @keyframes bp-wait {
   50% { border-color: color-mix(in srgb, var(--kind-web) 35%, var(--line)); }
 }
 /* The bar under the picture: what melo is doing now, in the card's words, and the actions: Stop, and Take over or Done. */
-.bp-foot { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color 0.2s; }
+.bp-foot { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color var(--motion); }
 .bp-foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 36px; }
 .bp-status { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 1.5em; margin-right: auto; color: var(--ink-2); }
 .bp-take, .bp-give, .bp-stop, .bp-window { flex: none; padding: var(--space-1) var(--space-3); font-size: var(--text-small); }
@@ -2874,7 +2889,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .browser-panel[data-state="live"] .bp-status::before { background: var(--ok); }
 .browser-panel[data-state="loading"] .bp-status::before { background: var(--kind-web); }
 .browser-panel[data-state="stale"] .bp-status::before { background: var(--warn); }
-.browser-panel[data-browsing="true"] .bp-status::before { background: var(--kind-web); animation: bp-dot 1.8s ease-in-out infinite; }
+.browser-panel[data-browsing="true"] .bp-status::before { background: var(--kind-web); animation: bp-dot var(--motion-loop) ease-in-out infinite; }
 @keyframes bp-dot {
   50% { opacity: 0.35; }
 }
@@ -2890,9 +2905,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
    brings the window to the front (or moves a page with a form there) sits with Done at the end of the bar. */
 .browser-panel[data-place="window"] .bp-canvas { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--line)), var(--tab-shadow); cursor: default; }
 /* The keys' box: invisible, over the point last clicked, so an input method's window opens where the person types. */
-.bp-keys { position: absolute; left: 0; top: 0; z-index: 1; width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
+.bp-keys { position: absolute; left: 0; top: 0; z-index: var(--layer-part); width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
 /* A box the page put up while the person has it: answered here, over the bottom of the picture. */
-.bp-dialog { position: absolute; left: 50%; bottom: var(--space-3); z-index: 2; width: min(380px, calc(100% - 24px)); transform: translateX(-50%); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
+.bp-dialog { position: absolute; left: 50%; bottom: var(--space-3); z-index: var(--layer-over); width: min(380px, calc(100% - 24px)); transform: translateX(-50%); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
 .bp-dialog-title { margin: 0 0 4px; font-weight: 600; }
 .bp-dialog-text { margin: 0; color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .bp-dialog-input { width: 100%; margin-top: var(--space-3); }
@@ -2900,7 +2915,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* The header chip brings a hidden panel back, and tells while melo is browsing. */
 .browser-chip { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .browser-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
-.browser-chip[data-browsing="true"] .browser-dot { background: var(--kind-web); animation: bp-dot 1.8s ease-in-out infinite; }
+.browser-chip[data-browsing="true"] .browser-dot { background: var(--kind-web); animation: bp-dot var(--motion-loop) ease-in-out infinite; }
 
 /* ── Who has the page: one map every browser surface reads (--own), so the card, the dock and the page's ring agree. ──
    melo at work is the web colour, the person is the console's own accent, amber is the one colour that asks for the
@@ -2919,7 +2934,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .own-ring { display: block; border-radius: var(--radius-control); background: var(--canvas); box-shadow: 0 0 0 2px var(--own), 0 0 0 5px color-mix(in srgb, var(--own) 18%, transparent); }
 [data-own="done"] .own-ring, [data-own="stopped"] .own-ring, [data-fresh="false"] .own-ring { box-shadow: 0 0 0 1px var(--line); }
 [data-fresh="false"] .own-ring { filter: grayscale(0.7); opacity: 0.55; animation: none; }
-[data-own="working"] .own-ring { animation: own-breathe 2.4s ease-in-out infinite; }
+[data-own="working"] .own-ring { animation: own-breathe var(--motion-loop) ease-in-out infinite; }
 @keyframes own-breathe {
   50% { box-shadow: 0 0 0 2px var(--own), 0 0 0 8px color-mix(in srgb, var(--own) 28%, transparent); }
 }
@@ -2935,7 +2950,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bcard-goal { overflow: hidden; color: var(--ink-2); font-size: var(--text-small); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .bcard-picture { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
 /* The page view is about 16:9 (1280 x 713), so the picture shows its whole width. */
-.bcard-canvas { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; transition: opacity 0.3s, filter 0.3s; }
+.bcard-canvas { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; transition: opacity var(--motion), filter var(--motion); }
 .bcard[data-own="waiting"] .bcard-canvas { aspect-ratio: 16 / 7; }
 /* While the first picture is on its way the note holds the picture's place, so the card does not grow when it comes
    and the chat, pinned to its end, does not leave the card's button under the composer. */
@@ -2957,7 +2972,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
    The anchor takes no room, so the dock appearing never moves the conversation. Its backdrop is the chat's own colour
    from the top edge to a line below the card, fading out there, so no line shows cut off in the gap above the card,
    through its rounded corners or at its bottom edge (#576). */
-.bdock-anchor { position: sticky; top: 0; z-index: 3; height: 0; max-width: 800px; margin: 0 auto; }
+.bdock-anchor { position: sticky; top: 0; z-index: var(--layer-dock); height: 0; max-width: 800px; margin: 0 auto; }
 .bdock { position: absolute; inset: var(--space-2) 0 auto; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
 .bdock::before { content: ""; position: absolute; z-index: -1; top: calc(-1 * var(--space-2) - 1px); right: -1px; bottom: calc(-1 * var(--space-4) - 1px); left: -1px; background: linear-gradient(to bottom, var(--canvas) calc(100% - var(--space-4)), transparent); }
 .bdock-jump { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-3); padding: 0; border: 0; background: none; color: inherit; text-align: left; }
@@ -2967,10 +2982,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bdock .outline-button { flex: none; }
 @media (max-width: 899px) { .bcard { width: 100%; } }
 @media (pointer: coarse), (max-width: 700px) { .bcard-actions button, .bdock .outline-button, .bdock-jump { min-height: 44px; } }
-@media (prefers-reduced-motion: reduce) { [data-own="working"] .own-ring { animation: none; } }
 /* A phone: the whole screen, above the chat (its sidebar and sheets come back when it closes). */
 @media (max-width: 700px) {
-  :root:not([data-view="live"]) .browser-panel { position: fixed; inset: 0; z-index: 28; height: 100dvh; }
+  :root:not([data-view="live"]) .browser-panel { position: fixed; inset: 0; z-index: var(--layer-browser); height: 100dvh; }
   .bp-head { min-height: 64px; padding: var(--space-2) var(--space-3); }
   .bp-stage { padding: var(--space-2); }
   .bp-foot { padding: var(--space-3); padding-bottom: max(var(--space-3), env(safe-area-inset-bottom)); }
@@ -2979,9 +2993,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @media (pointer: coarse), (max-width: 700px) {
   .browser-chip, .bp-pop, .bp-back, .bp-take, .bp-give, .bp-stop, .bp-window, .bp-dialog-actions button { min-height: 44px; }
   .bp-foot-row { gap: var(--space-2) var(--space-3); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .browser-panel[data-browsing="true"] .bp-canvas, .browser-panel[data-state="loading"] .bp-note, .browser-panel .bp-status::before, .browser-chip .browser-dot { animation: none; }
 }
 /* `#/live/<chat>`: the panel alone (the macOS app's pop-out window). */
 :root[data-view="live"] .app { display: block; }
@@ -2997,7 +3008,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .connection-chip .chip-backend, .connection-chip .chip-caret { color: var(--ink-3); }
 .connection-chip[aria-expanded="true"] { background: var(--raised); }
 /* A switch runs: the chip's dot pulses, as the running chip's does. */
-.connection-chip[data-switching] .status-dot, .pick-busy { animation: pulse 1.4s infinite; }
+.connection-chip[data-switching] .status-dot, .pick-busy { animation: pulse var(--motion-loop) infinite; }
 /* The header's list hangs below the chip; the composer's opens above it, as the mode menu does. */
 .model-menu { top: calc(100% + var(--space-2)); bottom: auto; left: auto; right: 0; width: 320px; }
 /* One word says whether a pick fits in memory; its colour repeats the word, never replaces it. */
@@ -3030,4 +3041,16 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 }
 @media (max-width: 700px) {
   :root[data-window-bar] .chat-header { padding-left: max(var(--space-4), calc(var(--window-buttons) + var(--space-2))); }
+}
+/* A text button or link keeps a 24 px target on a line as tall as its words: the 4 px are padding, taken back as margin, so
+   no word moves (a narrow or touch window makes the target 44 px, in its own rules). Last in the file: it wins over each one's padding. */
+@media (min-width: 701px) and (pointer: fine) {
+  .header-parent, .main-card-foot .link-button, .panel-link { padding-block: 2px; margin-block: -2px; }
+}
+/* A short window (the app's smallest is 480 px high): the composer takes one row and no hint line, and the first-run card
+   gets the room the mascot took. */
+@media (max-height: 560px) {
+  .composer textarea { min-height: 29px; }
+  .composer-hint { display: none; }
+  .welcome:has(> .setup-card:not([hidden])) .welcome-mascot { display: none; }
 }
