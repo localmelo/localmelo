@@ -338,6 +338,25 @@ MENU_PALETTES = {
 }
 
 
+@pytest.mark.parametrize("palette", MENU_PALETTES.values(), ids=MENU_PALETTES)
+def test_yolo_is_a_chip_in_the_error_colour_and_a_muted_word_reads_on_the_chosen_band(
+    palette: Palette,
+) -> None:
+    from localmelo.support.cli.termcolors import contrast
+
+    style = palette.pt_style
+    yolo, error = (
+        style.get_attrs_for_style_str(f"class:{n}") for n in ("yolo", "error")
+    )
+    # The bar's no-approvals mark is a reversed bold chip at every depth, with no colour too.
+    assert yolo.reverse and yolo.bold and yolo.color == error.color  # type: ignore[attr-defined]
+    word = style.get_attrs_for_style_str("class:chosen class:muted")
+    if palette.fills:  # a band: the word keeps the text contrast on it
+        assert contrast(f"#{word.color}", f"#{word.bgcolor}") >= theme.TEXT  # type: ignore[attr-defined]
+    elif palette.depth == "none":  # the reversed row: a dim word would fade into it
+        assert word.reverse and not word.dim  # type: ignore[attr-defined]
+
+
 def _menu_attrs(palette: Palette, name: str) -> object:
     """What the app draws for *name*: prompt_toolkit's defaults merged under ours."""
     from prompt_toolkit.styles import default_ui_style, merge_styles
