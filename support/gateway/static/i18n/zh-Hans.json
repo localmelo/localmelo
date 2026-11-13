@@ -1204,6 +1204,7 @@
   "mainChat.echo.sleepOp.updated": "更新",
   "mainChat.echo.stop": "停止",
   "mainChat.echo.undo": "撤销",
+  "mainChat.fold": "{heading} · {n} 次",
   "mainChat.openSideChat": "打开旁支对话",
   "mainChat.openTask": "打开任务",
   "memory.forgotten": "已忘记：{note}",

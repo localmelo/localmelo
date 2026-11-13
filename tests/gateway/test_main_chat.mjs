@@ -659,3 +659,105 @@ test('a send says the newest card or line drawn, never one held back while the p
   assert.equal(mainChat.drawnUpTo(shown, []), 7);
   assert.equal(mainChat.drawnUpTo([], []), 0, 'nothing drawn: nothing counts');
 });
+
+// ── Task rows never crowd the conversation or the step that waits for the person (#669) ──
+
+const END = (state) => ({state, reasons: []});
+const taskCard = (id, at, title, {state = 'done', ending = 'ready', kind = 'task', ...more} = {}) => readCard({
+  id, ts: at, data: {state, source_id: `src${id}`, source_kind: kind, title, at, ...(ending ? {ending: END(ending)} : {}), ...more}});
+const kinds = (items) => items.map((item) => (item.kind === 'card' ? `card:${item.card.id}` : item.kind === 'fold' ? `fold:${item.fold.cards.map((card) => card.id).join(',')}` : item.kind === 'echo' ? `echo:${item.echo.id}` : item.kind));
+
+test('finished runs of one request fold into one row at the newest run, and only those', () => {
+  const T = 'Sign in to the dashboard';
+  const cases = [
+    ['three finished runs fold into one', [taskCard(1, NOON, T), taskCard(2, NOON + 1, T), taskCard(3, NOON + 2, T)], ['day', 'fold:1,2,3']],
+    ['two fold too', [taskCard(1, NOON, T), taskCard(2, NOON + 1, T)], ['day', 'fold:1,2']],
+    ['one stays a card', [taskCard(1, NOON, T)], ['day', 'card:1']],
+    ['another title stays apart', [taskCard(1, NOON, T), taskCard(2, NOON + 1, 'Other'), taskCard(3, NOON + 2, T)], ['day', 'card:2', 'fold:1,3']],
+    ['the run that needs you never folds into them', [taskCard(1, NOON, T), taskCard(2, NOON + 1, T, {ending: 'blocked'}), taskCard(3, NOON + 2, T)],
+      ['day', 'fold:1,3', 'card:2']],
+    ['a run that did not finish well never folds', [taskCard(1, NOON, T), taskCard(2, NOON + 1, T, {ending: 'failed'}), taskCard(3, NOON + 2, T, {ending: 'draft'}), taskCard(4, NOON + 3, T, {state: 'stopped', ending: ''})],
+      ['day', 'card:1', 'card:2', 'card:3', 'card:4']],
+    ['a task that waits for an approval never folds', [taskCard(1, NOON, T), taskCard(2, NOON + 1, T, {state: 'waiting', ending: ''}), taskCard(3, NOON + 2, T)],
+      ['day', 'fold:1,3', 'card:2']],
+    ['a finished run with no ending still folds', [taskCard(1, NOON, T, {ending: ''}), taskCard(2, NOON + 1, T, {ending: ''})], ['day', 'fold:1,2']],
+    ['a reminder is its own row', [taskCard(1, NOON, T, {reminder: true}), taskCard(2, NOON + 1, T, {reminder: true})], ['day', 'card:1', 'card:2']],
+    ['a side chat never folds', [taskCard(1, NOON, T, {kind: 'chat'}), taskCard(2, NOON + 1, T, {kind: 'chat'})], ['day', 'card:1', 'card:2']],
+  ];
+  for (const [name, cards, want] of cases) assert.deepEqual(kinds(timeline([], cards, NOON + 10)), want, name);
+  // Runs on both sides of a message are two stretches: nothing folds across a turn.
+  const across = timeline([{id: 'x', turn: 1, startedAt: NOON + 5}], [taskCard(1, NOON, T), taskCard(2, NOON + 10, T)], NOON + 20);
+  assert.deepEqual(kinds(across), ['day', 'card:1', 'turn', 'card:2']);
+});
+
+test('the number on a fold is the length of the list it opens, and each run keeps its link and time', () => {
+  const T = 'Sign in to the dashboard';
+  const cards = [taskCard(1, NOON, T, {line: 'Signed in.'}), taskCard(2, NOON + 60, T, {line: 'Signed in again.'}), taskCard(3, NOON + 120, T, {line: 'Signed in once more.'})];
+  const fold = timeline([], cards, NOON + 200).find((item) => item.kind === 'fold').fold;
+  assert.equal(fold.cards.length, 3);
+  assert.equal(fold.at, NOON + 120, 'it stands at its newest run');
+  const made = [];
+  const doc = {createElement(tag) {
+    const node = {tag, className: '', textContent: '', type: '', dataset: {}, attributes: {}, children: [], listeners: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+      append(...items) { this.children.push(...items); },
+      addEventListener(type, fn) { this.listeners[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  const opened = [];
+  const node = mainChat.foldNode({doc, fold, open: (card) => opened.push(card.id)});
+  assert.equal(node.dataset.state, 'done');
+  const summary = made.find((item) => item.tag === 'summary');
+  assert.equal(summary.textContent, 'Ready: Sign in to the dashboard · 3 times');
+  const rows = made.filter((item) => item.tag === 'li');
+  assert.equal(rows.length, 3, 'three runs, three lines');
+  assert.deepEqual(rows.map((row) => row.children.find((child) => child.tag === 'button').textContent), ['Open task', 'Open task', 'Open task']);
+  rows[1].children.find((child) => child.tag === 'button').listeners.click();
+  assert.deepEqual(opened, [2], 'a run opens its own task');
+  assert.ok(made.some((item) => item.textContent === 'Signed in again.'), 'a run says what it said');
+});
+
+test('what asks the person stands after the rest of its stretch, and an older stretch keeps its place', () => {
+  const echoes = mainChat.mergeEchoes([], [{id: 30, ts: NOON + 3, data: {echo: 'checkin', line: 'Check-in.'}}]);
+  const cards = [taskCard(1, NOON, 'Needs me', {ending: 'blocked'}), taskCard(2, NOON + 1, 'Done one'), taskCard(3, NOON + 2, 'A step', {state: 'blocked', ending: ''})];
+  assert.deepEqual(kinds(timeline([], cards, NOON + 10, echoes)), ['day', 'card:2', 'echo:30', 'card:1', 'card:3'],
+    'quiet rows keep their time order; the rows that ask follow in theirs');
+  const old = [taskCard(1, NOON - 100, 'Needs me', {ending: 'blocked'}), taskCard(2, NOON - 90, 'Done one')];
+  const turn = {id: 'x', turn: 1, startedAt: NOON - 50};
+  assert.deepEqual(kinds(timeline([turn], [...old, taskCard(3, NOON, 'Done two')], NOON + 10)), ['day', 'card:2', 'card:1', 'turn', 'card:3'],
+    'before a message the same rule holds; the rows after it are another stretch');
+  // A blocked step its task went on from (a newer card of the task) asks nothing now: it keeps its time.
+  const went = [taskCard(1, NOON, 'Same task', {state: 'blocked', ending: '', source_id: 'same'}), taskCard(2, NOON + 1, 'Same task', {source_id: 'same'}),
+    taskCard(3, NOON + 2, 'Other')];
+  assert.deepEqual(kinds(timeline([], went, NOON + 10)), ['day', 'card:1', 'card:2', 'card:3']);
+  // A question a task asked the chat (with its reply box) asks too, until it is answered.
+  const ask = mainChat.mergeEchoes([], [{id: 40, ts: NOON, data: {echo: 'task_escalate', task_id: 't1', title: 'Q'}},
+    {id: 41, ts: NOON + 1, data: {echo: 'checkin', line: 'Later.'}}]);
+  assert.deepEqual(kinds(timeline([], [], NOON + 10, ask)), ['day', 'echo:41', 'echo:40']);
+  const answeredAsk = mainChat.mergeEchoes(ask, [{id: 42, ts: NOON + 2, data: {echo: 'task_answered', of: 40, text: 'yes'}}]);
+  assert.deepEqual(kinds(timeline([], [], NOON + 10, answeredAsk)), ['day', 'echo:40', 'echo:41', 'echo:42']);
+});
+
+test('the turn that waits for the person stands last, and the rows that came meanwhile stand above it', () => {
+  const first = {id: 'a', turn: 1, startedAt: NOON - 100};
+  const waiting = {id: 'b', turn: 2, startedAt: NOON - 50};
+  const cards = [taskCard(1, NOON, 'Done one'), taskCard(2, NOON + 1, 'Done one'), taskCard(3, NOON + 2, 'Needs me', {ending: 'blocked'})];
+  assert.deepEqual(kinds(timeline([first, waiting], cards, NOON + 10)), ['day', 'turn', 'turn', 'fold:1,2', 'card:3'], 'by time, as before');
+  assert.deepEqual(kinds(timeline([first, waiting], cards, NOON + 10, [], {waiting})), ['day', 'turn', 'fold:1,2', 'card:3', 'turn'],
+    'while its approval waits it is the thing nearest the message box');
+  // Messages keep their order: the waiting turn is the newest, so it stands after the others anyway.
+  const placed = timeline([first, waiting], cards, NOON + 10, [], {waiting}).filter((item) => item.kind === 'turn').map((item) => item.turn.id);
+  assert.deepEqual(placed, ['a', 'b']);
+  // Never two days' labels out of order because it moved.
+  const long = {id: 'c', turn: 1, startedAt: NOON - 2 * DAY};
+  const days = timeline([long], [taskCard(1, NOON, 'Done one')], NOON + 10, [], {waiting: long});
+  assert.deepEqual(kinds(days), ['day', 'card:1', 'turn'], 'a turn that waited for days still stands last');
+  assert.deepEqual(days.filter((item) => item.kind === 'day').map((item) => item.label), ['Today'], 'and no label goes back in time');
+});
+
+test('a send counts the newest run of a fold as drawn', () => {
+  const T = 'Sign in to the dashboard';
+  const items = timeline([], [taskCard(5, NOON, T), taskCard(6, NOON + 1, T)], NOON + 10);
+  assert.equal(mainChat.drawnUpTo(items, []), 6);
+});

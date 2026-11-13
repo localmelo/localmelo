@@ -1233,6 +1233,7 @@
   "mainChat.echo.sleepOp.updated": "Updated",
   "mainChat.echo.stop": "stop",
   "mainChat.echo.undo": "Undo",
+  "mainChat.fold": "{heading} · {n} times",
   "mainChat.openSideChat": "Open side chat",
   "mainChat.openTask": "Open task",
   "memory.forgotten": "Forgotten: {note}",

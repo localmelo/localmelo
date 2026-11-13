@@ -177,6 +177,8 @@ thin line under melo's replies, apart from the talk; only a card that asks you s
 
 Between two of your messages a busy side chat keeps only its newest card. A stop of your own, a shutdown or an approval answered before the main chat was looked at makes no card.
 
+Between two of your messages, finished runs of one request (tasks with the same title that ended `Ready`, or finished with no ending) fold into one row, `Ready: Fix CI · 3 times`; a click opens a line for each run with its own **Open task**. A task that needs you, one that did not finish, a stopped one and a reminder never fold. What waits for you stands last: after the finished rows, and below everything else the turn whose approval waits, so it is the thing nearest the message box.
+
 In developer mode the panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
 the main chat all of today's. For runs of earlier days, an empty main chat links **See what
 worker runs did**. Default mode has neither; Activity shows the same tasks as what melo did.

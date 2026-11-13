@@ -158,12 +158,47 @@ export function mergeCards(cards, more) {
 }
 
 /**
+ * Whether a card asks the person something now: an approval that waits, a step Auto blocked, or a task that ended
+ * "Needs you", while nothing newer of its task came after it (*newest*: the newest card id of each source). Whether
+ * its step was answered since is its task's to say, which the order does not wait for.
+ */
+const asksCard = (card, newest) => {
+  const asks = card.state === "waiting" || card.state === "blocked" || (card.state === "done" && card.ending?.state === "blocked");
+  return asks && (newest.get(card.sourceId) ?? card.id) <= card.id;
+};
+
+/** A finished run that takes part in a fold: a task that ended ready (or says nothing of how it ended), not a reminder. */
+const foldable = (card) => card.sourceKind === "task" && card.state === "done" && !card.reminder && (!card.ending || card.ending.state === "ready");
+
+/**
+ * One stretch of rows (what stands between two turns), as the person reads it: finished runs of one request (the same
+ * title) are one `fold` at the place of their newest run, and what asks the person comes last, so it is the row nearest
+ * the message box. Rows keep their time order otherwise. The runs that need the person never fold into the finished ones.
+ */
+function arrange(stretch, asks) {
+  const groups = new Map();
+  for (const item of stretch) {
+    if (item.kind === "card" && foldable(item.card)) groups.set(item.card.title, [...(groups.get(item.card.title) ?? []), item.card]);
+  }
+  const rows = [];
+  for (const item of stretch) {
+    const group = item.kind === "card" && foldable(item.card) ? groups.get(item.card.title) : null;
+    if (!group || group.length < 2) rows.push(item);
+    else if (item.card === group.at(-1)) rows.push({kind: "fold", fold: {key: String(group[0].id), title: item.card.title, cards: group, at: item.card.at}});
+  }
+  return [...rows.filter((item) => !asks(item)), ...rows.filter(asks)];
+}
+
+/**
  * The main chat's conversation: its turns, cards and echoes by time, with a divider at each new day.
  * Between two turns, a source shows only its newest card, so a busy side chat is one card; every
- * echo stays, and so does every blocked step (each has its own Allow once). Items: `{kind: "day", label}`, `{kind: "turn", turn}`, `{kind: "card", card}`,
- * `{kind: "echo", echo}`.
+ * echo stays, and so does every blocked step (each has its own Allow once). Finished runs of one request fold
+ * into one row and what asks the person stands last in its stretch (`arrange`). *waiting* is the newest turn, when its
+ * approval waits for the person: it stands last, so the rows that came meanwhile stand above it and what waits is
+ * the thing nearest the message box; the order of turns never changes. Items: `{kind: "day", label}`, `{kind: "turn", turn}`,
+ * `{kind: "card", card}`, `{kind: "fold", fold: {key, title, cards, at}}`, `{kind: "echo", echo}`.
  */
-export function timeline(turns, cards, now, echoes = []) {
+export function timeline(turns, cards, now, echoes = [], {waiting = null} = {}) {
   // melo's follow-up row is written once its turn began (#411): it stands just before that turn.
   const starts = new Map(turns.map((turn) => [String(turn.id ?? ""), Number(turn.startedAt) || 0]));
   const at = (item) => {
@@ -171,11 +206,14 @@ export function timeline(turns, cards, now, echoes = []) {
     const lead = item.kind === "echo" && item.echo.kind === "followup" ? starts.get(String(item.echo.turn_id ?? "")) : 0;
     return lead ? lead - 0.001 : item[item.kind].at;
   };
+  // The waiting turn, and the row melo wrote for it (#411), come last, in that order.
+  const leads = (item) => item.kind === "echo" && item.echo.kind === "followup" && waiting !== null && String(item.echo.turn_id ?? "") === String(waiting.id ?? "");
+  const order = (item) => (item.kind === "turn" && item.turn === waiting ? Number.MAX_SAFE_INTEGER : leads(item) ? Number.MAX_SAFE_INTEGER - 1 : at(item));
   const items = [
     ...turns.map((turn) => ({kind: "turn", turn})),
     ...foldAnswers(cards).map((card) => ({kind: "card", card})),
     ...echoes.map((echo) => ({kind: "echo", echo})),
-  ].sort((left, right) => at(left) - at(right));
+  ].sort((left, right) => order(left) - order(right));
   const kept = [];
   let since = new Map();
   for (const item of items) {
@@ -189,11 +227,32 @@ export function timeline(turns, cards, now, echoes = []) {
     since.set(item.card.sourceId, kept.length);
     kept.push(item);
   }
-  const out = [];
-  let day = "";
+  const gone = answered(echoes);
+  const ended = endedTasks(cards, echoes);
+  const newest = new Map();
+  for (const card of cards) newest.set(card.sourceId, Math.max(newest.get(card.sourceId) ?? 0, card.id));
+  const asks = (item) => (item.kind === "card" ? asksCard(item.card, newest) : item.kind === "echo" && (leads(item) || (item.echo.kind === "task_escalate" && !echoDone(item.echo, gone, ended))));
+  const arranged = [];
+  let stretch = [];
+  const flush = () => {
+    arranged.push(...arrange(stretch, asks));
+    stretch = [];
+  };
   for (const item of kept) {
     if (item === null) continue;
-    const label = at(item) ? dayLabel(at(item), now) : "";
+    if (item.kind === "turn") {
+      flush();
+      arranged.push(item);
+    } else stretch.push(item);
+  }
+  flush();
+  const out = [];
+  let day = "";
+  // A turn that waited for days and stands last is not a label back in time.
+  let latest = 0;
+  for (const item of arranged) {
+    latest = Math.max(latest, at(item));
+    const label = latest ? dayLabel(latest, now) : "";
     if (label && label !== day) out.push({kind: "day", label});
     day = label || day;
     out.push(item);
@@ -208,7 +267,7 @@ export function timeline(turns, cards, now, echoes = []) {
  */
 export function drawnUpTo(items, held = []) {
   const ids = (list) => list.map(Number).filter(Number.isInteger);
-  const drawn = ids(items.map((item) => (item.kind === "card" ? item.card.id : item.kind === "echo" ? item.echo.id : NaN)));
+  const drawn = ids(items.map((item) => (item.kind === "card" ? item.card.id : item.kind === "fold" ? Math.max(...item.fold.cards.map((card) => card.id)) : item.kind === "echo" ? item.echo.id : NaN)));
   const waiting = ids(held.map((frame) => frame?.id));
   return Math.max(0, Math.min(Math.max(0, ...drawn), Math.min(Infinity, ...waiting) - 1));
 }
@@ -317,6 +376,52 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   }
   foot.append(action, el("span", "main-card-time", card.at ? clock(card.at) : ""));
   node.append(mark, text, foot);
+  return node;
+}
+
+// The folds the person opened: a redraw of the chat keeps them open.
+const openFolds = new Set();
+
+/**
+ * One fold's node (`timeline`'s `fold`): the finished runs of one request as one row, with its newest run's mark and
+ * words and how many times it ran, opened by a click to a line for each run: what it said, its Open task and its time.
+ * `open(card)` is a card's Open task. The number in the row is the length of the list it opens.
+ */
+export function foldNode({doc, fold, open}) {
+  const {node: el} = maker(doc);
+  const newest = fold.cards.at(-1);
+  const words = cardWords(newest);
+  const heading = t("mainChat.fold", {heading: words.heading, n: fold.cards.length});
+  const node = el("article", "main-card main-fold");
+  node.dataset.state = newest.state;
+  if (newest.ending) node.dataset.ending = newest.ending.state;
+  node.setAttribute("aria-label", heading);
+  const mark = el("span", "main-card-mark", words.mark);
+  mark.setAttribute("aria-hidden", "true");
+  const details = el("details", "main-fold-details");
+  details.open = openFolds.has(fold.key);
+  details.addEventListener("toggle", () => {
+    if (details.open) openFolds.add(fold.key);
+    else openFolds.delete(fold.key);
+  });
+  const summary = el("summary", "main-card-title", heading);
+  summary.append(el("span", "main-card-time", newest.at ? clock(newest.at) : ""));
+  const list = el("ul", "main-fold-list");
+  for (const card of fold.cards) {
+    const run = el("li", "main-fold-run");
+    if (card.line) run.append(el("span", "main-card-line", card.line));
+    const action = el("button", "link-button", cardWords(card).action);
+    action.type = "button";
+    // The panel returns focus here when a task opened from this run is closed.
+    action.dataset.focusKey = `card:${card.id}`;
+    action.addEventListener("click", () => open(card));
+    run.append(action, el("span", "main-card-time", card.at ? clock(card.at) : ""));
+    list.append(run);
+  }
+  details.append(summary, list);
+  const text = el("div", "main-card-text");
+  text.append(details);
+  node.append(mark, text);
   return node;
 }
 
