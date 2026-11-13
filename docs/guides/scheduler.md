@@ -42,7 +42,7 @@ gate (`support/gateway/chat_gate.py`). A web console session's calls pass
 through the same gate, which the gateway builds once from that table: both
 surfaces share one `n_srv` budget and write one `calls.jsonl`. The gate submits the call to the
 policy and either sends it at once or holds it until the policy admits it.
-The page polls its chats every 2.5 seconds, so a held chat shows
+The page reads its chats every 4 seconds while a chat runs (a held one does), so a held chat shows
 `Waiting: <reason>` in the header's status pill and the status label, and
 `● Waiting` in the sidebar; the reason is one of the policy's codes
 (`Resources` for the first blocked call, `Priority` for later ones). A hold

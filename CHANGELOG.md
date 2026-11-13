@@ -114,6 +114,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The app's window has no title band, and the menu-bar item is Melo's head drawn in the bar's own colour.
 - The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 - The app at rest no longer uses a full CPU core: the menu-bar item stops redrawing itself without pause.
+- The app and the console ask less often while nothing changes and at once when something does, a refresh with nothing new redraws nothing, and Melo holds a still when resting on battery or in Low Power Mode.
 - A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
 - Calmer task pages, Settings and details: short times, a task's facts on one line, plain words for each tool, and a failed task's card saying why in your language.
 - A blocked step reads the same on its chat card and its task page, also after a reload; a run whose work went on in a newer task says so instead of Needs you everywhere; the Scheduled tab says how each last run really ended.

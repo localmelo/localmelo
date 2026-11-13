@@ -1,8 +1,10 @@
 import AppKit
+import IOKit.ps
 
-/// What stops a loop on one view: Reduce Motion, Low Power Mode, heat, its window covered or hidden, the screen
-/// asleep or the session switched out (`PetEnvironment`; `shouldAnimate` decides). `changed` hears each change of the
-/// environment; `refresh()` reads everything again, so a notification that never came cannot leave a loop stuck.
+/// What stops a loop on one view: Reduce Motion, Low Power Mode, the power source, heat, its window covered or hidden,
+/// the screen asleep or the session switched out (`PetEnvironment`; `shouldAnimate` and `petRestHeld` decide).
+/// `changed` hears each change of the environment; `refresh()` reads everything again, so a notification that never
+/// came cannot leave a loop stuck.
 final class MotionGate {
     private(set) var environment = PetEnvironment()
     var changed: (PetEnvironment) -> Void = { _ in }
@@ -11,6 +13,8 @@ final class MotionGate {
     private var screenOn = true
     private var sessionActive = true
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    // The system tells when the Mac moves between mains power and its battery; nothing here polls for it.
+    private var powerSource: CFRunLoopSource?
 
     /// `window` is the window the view is in (for its occlusion) and `visible` whether the view can be seen at all:
     /// the window is ordered in and uncovered and the view is not hidden.
@@ -40,10 +44,19 @@ final class MotionGate {
                 self.refresh()
             }
         }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        powerSource = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context = context else { return }
+            Unmanaged<MotionGate>.fromOpaque(context).takeUnretainedValue().refresh()
+        }, context)?.takeRetainedValue()
+        if let source = powerSource { CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes) }
         refresh()
     }
 
-    deinit { observers.forEach { $0.0.removeObserver($0.1) } }
+    deinit {
+        observers.forEach { $0.0.removeObserver($0.1) }
+        if let source = powerSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+    }
 
     private func watch(_ center: NotificationCenter, _ name: Notification.Name, _ body: @escaping (Notification) -> Void) {
         observers.append((center, center.addObserver(forName: name, object: nil, queue: .main, using: body)))
@@ -53,6 +66,7 @@ final class MotionGate {
         var now = PetEnvironment()
         now.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         now.lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        now.onBattery = runsOnBattery()
         now.thermal = ProcessInfo.processInfo.thermalState
         now.visible = visible()
         now.screenAwake = screenOn && sessionActive
@@ -60,4 +74,11 @@ final class MotionGate {
         environment = now
         changed(now)
     }
+}
+
+/// Whether the Mac's power comes from its battery now. A Mac with no battery, or whose source cannot be read, is on
+/// mains power.
+func runsOnBattery() -> Bool {
+    guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return false }
+    return IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? == kIOPSBatteryPowerValue
 }

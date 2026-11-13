@@ -44,7 +44,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var startAttempt = 0
     private var quitItems: [NSMenuItem] = []
     private var timer: Timer?
+    // The health check runs on one timer that is set again after each check, so its interval can change
+    // (`nextHealthInterval`); `lastHealth` is what the last reply said without its clocks.
     private var healthTimer: Timer?
+    private var healthInterval = healthBaseSeconds
+    private var lastHealth: Data?
     private var deadline = Date()
     private var stopping = false
     private var quitPending = false
@@ -198,6 +202,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         // The pet hears first when the window comes back and last when it goes away, so neither flashes.
         let hear: [(Bool) -> Void] = [{ self.pet?.windowShown($0) }, { self.pill?.windowShown($0) }]
         (shown ? hear : hear.reversed()).forEach { $0(shown) }
+        wakeHealth()
+    }
+
+    // The window was put away or brought back, and what the pet and the pill show is the last check's: read it now, and
+    // at the base interval again.
+    private func wakeHealth() {
+        guard ready else { return }
+        setHealthInterval(healthBaseSeconds)
+        pollHealth()
     }
 
     @objc private func showPet() { pet.setHidden(false) }
@@ -721,6 +734,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         nextLoginAttempt = Date().addingTimeInterval(0.5)
         signInFailures += 1
         updateSignInItems()
+        setHealthInterval(healthBaseSeconds)
     }
 
     private func fetchHealth(child: GatewayChild, reload: Bool) {
@@ -740,9 +754,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     self.nextLoginAttempt = Date().addingTimeInterval(0.5)
                     self.signInFailures += 1
                     self.updateSignInItems()
+                    self.setHealthInterval(healthBaseSeconds)
                     return
                 }
-                guard status == 200, let data = data, let health = gatewayHealth(data) else { return }
+                guard status == 200, let data = data, let health = gatewayHealth(data) else {
+                    self.setHealthInterval(healthBaseSeconds)
+                    return
+                }
                 self.healthAuthenticated = true
                 self.signInFailures = 0
                 self.menuBar.show(menuBarState(data))
@@ -751,6 +769,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.pill.update(health: data, stopped: false)
                 self.pendingRoute = waitingRoute(data)
                 self.refreshPageState()
+                if self.ready { self.healthChecked(data) }
                 guard health.store == "ok" else {
                     if !self.ready {
                         self.timer?.invalidate()
@@ -824,10 +843,35 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func startHealthPolling() {
+        healthInterval = healthBaseSeconds
+        lastHealth = nil
+        armHealthTimer()
+    }
+
+    // One check, then the timer is set again at the interval then in force; a reply that changes the interval sets it
+    // once more.
+    private func armHealthTimer() {
+        guard ready, !stopping else { return }
         healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        healthTimer = Timer.scheduledTimer(withTimeInterval: healthInterval, repeats: false) { [weak self] _ in
             self?.pollHealth()
+            self?.armHealthTimer()
         }
+    }
+
+    private func setHealthInterval(_ seconds: TimeInterval) {
+        guard seconds != healthInterval else { return }
+        healthInterval = seconds
+        armHealthTimer()
+    }
+
+    // A reply the server gave: the next check is at the base interval if it brings something new or anything runs or
+    // waits, and later while nothing changes.
+    private func healthChecked(_ data: Data) {
+        let signature = healthSignature(data)
+        let changed = signature != lastHealth
+        lastHealth = signature
+        setHealthInterval(nextHealthInterval(current: healthInterval, failed: false, changed: changed, busy: healthBusy(data)))
     }
 
     private func pollHealth() {

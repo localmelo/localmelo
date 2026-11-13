@@ -250,6 +250,8 @@ func runtimeMovesFolder(resources: URL) -> URL? {
 struct PetEnvironment: Equatable {
     var reduceMotion = false
     var lowPower = false
+    /// The Mac runs on its battery (not on mains power).
+    var onBattery = false
     var thermal: ProcessInfo.ThermalState = .nominal
     /// The pet's panel can be seen: not hidden by the person, not covered or off the screen.
     var visible = true
@@ -265,11 +267,16 @@ func shouldAnimate(_ environment: PetEnvironment) -> Bool {
         && environment.visible && environment.screenAwake
 }
 
-/// Whether the moves play (else each shows its poster): only Reduce Motion stills them. Low Power Mode and heat leave
-/// them playing: a frame is a swap of the part of a decoded sheet that shows, done by Core Animation, so the pet stays
-/// alive in every state that has moves. A pet that cannot be seen (`petMovesRun`) stops instead, where it is, and
-/// goes on from there.
+/// Whether the moves play (else each shows its poster): only Reduce Motion stills them. Low Power Mode, battery and heat
+/// leave a move for a reason playing (work, a wait, the wake-up): the pet stays alive in every state that has one. Only
+/// its rest loop is held on battery and in Low Power Mode (`petRestHeld`). A pet that cannot be seen (`petMovesRun`)
+/// stops instead, where it is, and goes on from there.
 func petMovesMayMove(_ environment: PetEnvironment) -> Bool { !environment.reduceMotion }
+
+/// Whether the rest loop (Melo lying down, and playing now and then, with nothing to do) holds its still: on battery
+/// and in Low Power Mode. On mains power it plays as it did. The pet follows the setting and the power source while the
+/// app runs.
+func petRestHeld(_ environment: PetEnvironment) -> Bool { environment.onBattery || environment.lowPower }
 
 /// Whether the moves' clock runs: the panel can be seen and the screen is on.
 func petMovesRun(_ environment: PetEnvironment) -> Bool { environment.visible && environment.screenAwake }

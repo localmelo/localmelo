@@ -167,8 +167,8 @@ env = PetEnvironment(); env.visible = false
 precondition(!shouldAnimate(env))
 env = PetEnvironment(); env.screenAwake = false
 precondition(!shouldAnimate(env))
-// The pet's moves stop being moves only under Reduce Motion: Low Power Mode and heat leave them playing; a hidden
-// panel or a sleeping screen stops their clock where it is.
+// The pet's moves stop being moves only under Reduce Motion: Low Power Mode, battery and heat leave them playing (only
+// the rest loop is held, see petRestHeld); a hidden panel or a sleeping screen stops their clock where it is.
 env = PetEnvironment()
 precondition(petMovesMayMove(env) && petMovesRun(env))
 env.reduceMotion = true

@@ -108,7 +108,7 @@ for you to send or change, and step aside once there is text.
    hidden at 0 and stays on a narrow screen. Select it for a short list, each
    row naming the kind and the title and opening that chat, the task's card or
    the Workers detail; Esc or a click elsewhere closes it. The numbers come
-   from `status` of `GET /api/health`, read with the page's 4-second poll; the
+   from `status` of `GET /api/health`, read with the page's list refresh (every 4 seconds while anything runs or changes); the
    list shows 20 rows at most and says how many more run.
 
 The sidebar pins the main chat on top and lists its side chats under it, newest
@@ -124,7 +124,9 @@ without moving the current view. A stream the browser gives up on reopens
 after 1, 2, 4, 8, 16 and then 30 seconds from the page's own cursor, and only
 after the chat is read again: one that is gone leaves the page on a new chat
 rather than retrying for ever. The list is re-read every 4 seconds while the
-tab is visible, for changes from another browser. **Reconnect now** checks the
+tab is visible and anything runs or changes, for changes from another browser;
+with nothing new it backs off to every 16 seconds, and it is read at once when
+you come back to the tab or act on the page. A tab nobody sees asks nothing. **Reconnect now** checks the
 chat before reopening its stream. Independent banners show store, model and
 connection problems without replacing other notices.
 

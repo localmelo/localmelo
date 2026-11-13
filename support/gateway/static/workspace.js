@@ -32,6 +32,7 @@ import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { setupWindowBar } from "./window-bar.mjs";
+import { fingerprint, LIST_BASE_MS, listBusy, nextListDelay } from "./rest.mjs";
 import { activeSwitch, setupServe } from "./serve.mjs";
 import { allowState, answerLine, blockCard, blockFacts, taskBlock } from "./blocked.mjs";
 import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
@@ -94,7 +95,6 @@ const KEY = "localmelo-console";
 const PRESENCE_MS = 2500;
 // A reply's live text redraws at most this often (the gateway sends a frame every 40 ms at most).
 const LIVE_DRAW_MS = 40;
-const LIST_POLL_MS = 4000;
 const BROWSER_HIDDEN_MS = 20000;
 
 const S = {
@@ -772,26 +772,50 @@ function sessionRow(session, active) {
   return row;
 }
 
-async function refreshList() {
+// What the page shows of the lists, as `fingerprint`s: the chats' (`OFFLINE` while the server does not answer) and the
+// health's. A refresh whose bodies read the same writes nothing to the page.
+const OFFLINE = "offline";
+const drawn = { list: null, health: null };
+
+/**
+ * Read the chats (and with `withHealth` the health) and draw what differs from what is shown. The one comparison is
+ * here, before any list is touched: bodies equal to the ones shown leave the page as it is. Says whether anything
+ * differed, whether the server did not answer and whether anything runs or waits for the person; the poll's pace
+ * follows the three.
+ */
+async function refreshList({ withHealth = false } = {}) {
+  let list = null;
+  let health = null;
   try {
-    const body = await api("/sessions");
-    S.online = true;
-    panel.offline(false);
-    S.machine = body.machine ?? null;
-    S.sessions = body.sessions ?? [];
-    S.main = body.main ?? null;
-    const heldChanged = adoptSummary();
-    renderSessions();
-    syncUI();
-    // The work group's summary carries the hold (`Waiting: <held>`); the
-    // header and the live row move every second, so redraw the messages
-    // when the 4 s poll is the first to learn a hold began or ended.
-    if (heldChanged) renderMessages(false);
+    [list, health] = await Promise.all([api("/sessions"), withHealth ? api("/health").catch(() => null) : null]);
   } catch {
-    S.online = false;
-    panel.offline(true);
-    syncUI();
+    list = null;
   }
+  const failed = list === null;
+  const busy = listBusy(list, health ?? S.health);
+  const listKey = failed ? OFFLINE : fingerprint(list);
+  const healthKey = health === null ? drawn.health : fingerprint(health);
+  if (listKey === drawn.list && healthKey === drawn.health) return { changed: false, failed, busy };
+  let heldChanged = false;
+  if (listKey !== drawn.list) {
+    drawn.list = listKey;
+    S.online = !failed;
+    panel.offline(failed);
+    if (!failed) {
+      S.machine = list.machine ?? null;
+      S.sessions = list.sessions ?? [];
+      S.main = list.main ?? null;
+      heldChanged = adoptSummary();
+      renderSessions();
+    }
+  }
+  if (healthKey !== drawn.health) setHealth(health);
+  syncUI();
+  // The work group's summary carries the hold (`Waiting: <held>`); the
+  // header and the live row move every second, so redraw the messages
+  // when the poll is the first to learn a hold began or ended.
+  if (heldChanged) renderMessages(false);
+  return { changed: true, failed, busy };
 }
 
 /** Copy the list's live facts onto the open session's copy; held changed. */
@@ -2977,6 +3001,7 @@ const sections = { tasks: false };
 
 function setHealth(body) {
   S.health = body;
+  drawn.health = fingerprint(body);
   renderSessions();
   running.update(body?.status);
   panel.update(body);
@@ -3862,6 +3887,56 @@ function tick() {
   refreshStreamNotice();
 }
 
+// ── The list refresh ──
+
+// One timer, set again after every refresh, so the time to the next one can change (`rest.mjs` says how). A page
+// nobody can see has none: coming back refreshes at once.
+let listTimer = null;
+let listDelay = LIST_BASE_MS;
+let listReading = false;
+// The person acted on the page, or came back to it, while a refresh was under way: it ends at the base interval.
+let listActed = false;
+
+function armLists() {
+  clearTimeout(listTimer);
+  listTimer = null;
+  if (S.authenticated && !document.hidden) listTimer = setTimeout(pollLists, listDelay);
+}
+
+async function pollLists() {
+  listTimer = null;
+  if (!S.authenticated || document.hidden || listReading) return;
+  listReading = true;
+  // A refresh that throws is a failed one: the next is at the base interval, and the timer goes on.
+  let outcome = { failed: true };
+  try {
+    outcome = await refreshList({ withHealth: true });
+    chatStatus.bump();
+  } finally {
+    listReading = false;
+    listDelay = nextListDelay(listDelay, { ...outcome, acted: listActed });
+    listActed = false;
+    armLists();
+  }
+}
+
+/** The person acted on the page: the next refresh is at the base interval again. */
+function actedOnLists() {
+  if (listReading) listActed = true;
+  else if (listDelay > LIST_BASE_MS) {
+    listDelay = LIST_BASE_MS;
+    armLists();
+  }
+}
+
+/** The person came back to the page (it shows again, the window has focus): read now; the next refresh is at the base interval. */
+function returnedToLists() {
+  listActed = true;
+  listDelay = LIST_BASE_MS;
+  clearTimeout(listTimer);
+  pollLists();
+}
+
 // ── Starting up ──
 
 async function init() {
@@ -3970,13 +4045,7 @@ async function init() {
     if (!S.authenticated) return;
   }
   setInterval(tick, 1000);
-  setInterval(() => {
-    if (S.authenticated && !document.hidden) {
-      refreshList();
-      chatStatus.bump();
-      api("/health").then((body) => { setHealth(body); syncUI(); }).catch(() => {});
-    }
-  }, LIST_POLL_MS);
+  armLists();
   S.ready = true;
   syncUI();
   if (!developerMode) {
@@ -4179,8 +4248,18 @@ document.addEventListener("keydown", (event) => {
   if (composerTurn() !== null && document.activeElement === input) stop();
 });
 document.addEventListener("visibilitychange", () => {
-  if (S.authenticated && !document.hidden) refreshList();
+  if (!S.authenticated) return;
+  if (document.hidden) {
+    clearTimeout(listTimer);
+    listTimer = null;
+  } else returnedToLists();
 });
+// The window gains focus, or the person presses, types or taps anywhere on the page: the lists are read at the base
+// interval again (a return reads at once).
+globalThis.addEventListener?.("focus", () => {
+  if (S.authenticated && !document.hidden) returnedToLists();
+});
+for (const type of ["pointerdown", "keydown"]) document.addEventListener(type, actedOnLists, { capture: true, passive: true });
 // The Browser panel's picture stream stops while a page is hidden for a while or kept for Back, and starts when
 // it returns. The chat's event stream does not: a hidden page still shows its chat, so a card Auto shows can be
 // answered when the person comes back within its wait.

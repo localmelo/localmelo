@@ -42,6 +42,35 @@ test('draws the segments the server sends, in order, and hides an empty row', as
   assert.equal(t.root.hidden, true);
 });
 
+test('the same segments again write nothing; changed ones, or another session, draw again', async () => {
+  const t = rig([{segments: ['ctx 1.0k/8.0k']}, {segments: ['ctx 1.0k/8.0k']}, {segments: ['ctx 2.0k/8.0k']}, {segments: ['ctx 2.0k/8.0k']}]);
+  let writes = 0;
+  const replace = t.root.replaceChildren;
+  t.root.replaceChildren = function (...items) { writes += 1; replace.apply(this, items); };
+  t.row.follow('a');
+  writes = 0;  // following a session empties the row first
+  await t.tick();
+  assert.equal(writes, 1);
+  t.advance(1000);
+  t.row.bump();
+  await t.tick();
+  assert.equal(t.calls.length, 2, 'it asked again');
+  assert.equal(writes, 1, 'and wrote nothing');
+  t.advance(1000);
+  t.row.bump();
+  await t.tick();
+  assert.deepEqual(t.text(), ['ctx 2.0k/8.0k']);
+  assert.equal(writes, 2);
+  // Another session starts from an empty row: its first answer is drawn even when it reads the same.
+  t.advance(1000);
+  t.row.follow('b');
+  writes = 0;
+  await t.tick();
+  assert.equal(t.calls.length, 4);
+  assert.deepEqual(t.text(), ['ctx 2.0k/8.0k']);
+  assert.equal(writes, 1);
+});
+
 test('frames within a second collapse into one fetch at the end of the gap', async () => {
   const t = rig([{segments: ['one']}, {segments: ['two']}]);
   t.row.follow('a');
