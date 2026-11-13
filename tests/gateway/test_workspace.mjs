@@ -850,7 +850,7 @@ function makeElement(tag, id = '') {
     close() { element.open = false; },
     showModal() { element.open = true; },
     querySelector(selector) {
-      if (selector === 'h1') return findNode(element, (node) => node.tag === 'h1');
+      if (selector === '.worker-title') return findNode(element, (node) => node.classList.contains('worker-title'));
       if (selector === '[data-approval-once]') return findNode(element, (node) => 'approvalOnce' in node.dataset);
       if (selector === '[data-approval-deny]') return findNode(element, (node) => 'approvalDeny' in node.dataset);
       const focus = selector.match(/^\[data-approval-focus="(\w+)"\]$/);
@@ -3925,7 +3925,7 @@ test('worker title and answer use safe rendering', async () => {
   }));
   await h.run('init()'); h.run('showWorkers("w")');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'h1').textContent, hostile);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('worker-title')).textContent, hostile);
   assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'img'), null);
   assert.doesNotMatch(findNode(h.element('worker-panel'), (node) => node.classList.contains('answer')).innerHTML, /<img/i);
 });
@@ -7304,4 +7304,40 @@ test('the Browser view covers the work area, and the whole screen on a phone, an
   assert.ok(css.includes('.app:has(> .browser-panel:not([hidden])) > :is(.chat, .panel) { visibility: hidden; }'), 'what it covers is out of reach, and still there');
   assert.ok(css.includes(':root:not([data-view="live"]) .browser-panel { position: fixed; inset: 0;'), 'a phone: the whole screen');
   assert.ok(!/\.browser-panel[^{]*\{[^}]*grid-template-columns/.test(css) && !css.includes(':has(> .browser-panel:not([hidden])) { grid-template-columns'), 'no column is made for it, so the chat is not squeezed beside it');
+});
+
+test('a tool call\'s section headings are one level under the page\'s title, and a worker\'s title is no second top heading', async () => {
+  const h = harness(withCommands({'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+  await h.run('init()');
+  const turn = h.state().view.turns[0];
+  turn.items = [{kind: 'tool', name: 'shell', status: 'success', arguments: {command: 'ls'}, preview: 'ls', output: 'a.txt'}];
+  turn.finishedAt = 30;
+  turn.status = 'completed';
+  await h.run('renderMessages(false)');
+  h.element('input').value = '/expand 1.1';
+  await h.run('send()');
+  const headings = findNodes(h.element('messages'), (node) => node.classList?.contains('tool-heading'));
+  assert.deepEqual(headings.map((node) => [node.tag, node.textContent]), [['h3', 'Arguments'], ['h3', 'Output']]);
+  h.run('showWorkers()');
+  await new Promise((resolve) => setImmediate(resolve));
+  const title = findNode(h.element('worker-panel'), (node) => node.classList.contains('worker-title'));
+  assert.equal(title.tag, 'h2', 'the header\'s title is the h1 and says the same words');
+});
+
+test('the skip link takes the keyboard to the message box, and in a worker\'s history to its title', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Nightly run'})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns: [turnRow({answer: 'done', events: []})]},
+  }));
+  await h.run('init()');
+  let prevented = 0;
+  const skip = () => h.element('skip-link').listeners.click[0]({preventDefault() { prevented += 1; }});
+  skip();
+  assert.equal(h.context.document.activeElement, h.element('input'));
+  h.run('showWorkers("w")');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.element('input').focus();
+  skip();
+  assert.equal(h.context.document.activeElement.textContent, 'Nightly run');
+  assert.equal(prevented, 2, 'the link\'s own address is never followed: the page\'s router would read it as a route');
 });

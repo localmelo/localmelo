@@ -113,6 +113,20 @@ summary:focus-visible,
 .session-info:focus-visible, .work-summary:focus-visible, .tool-summary:focus-visible, .st-tab:focus-visible { outline-offset: -2px; }
 /* A scrolling box a keyboard can reach (dom.mjs reachable) shows the same ring, inside its edge, where the scroll cuts nothing. */
 [role="group"][tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The first stop of the page: out of sight and out of the layout until the keyboard reaches it. */
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--layer-sheet);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-float);
+  transform: translateY(-300%);
+}
+.skip-link:focus { transform: none; }
 button {
   transition: background var(--motion);
 }
@@ -518,7 +532,8 @@ button:hover:not(:disabled) {
   flex-direction: column;
   gap: 1px;
 }
-.header-titles strong {
+.header-titles h1 {
+  margin: 0;
   font-size: var(--text-small);
   font-weight: 600;
   overflow: hidden;
@@ -725,7 +740,7 @@ button:hover:not(:disabled) {
   color: var(--ink-3);
   margin: 0 0 12px;
 }
-.welcome h1 {
+.welcome > h2 {
   font-size: var(--text-display);
   line-height: 1.25;
   font-weight: 500;
@@ -752,7 +767,7 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
 }
-.welcome.needs-model > h1, .welcome.needs-model > #welcome-description { display: none; }
+.welcome.needs-model > h2, .welcome.needs-model > #welcome-description { display: none; }
 .setup-card { display: grid; gap: var(--space-3); max-width: 440px; margin: var(--space-2) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
 .setup-card h2 { margin: 0; font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
 .setup-card p { margin: 0; font-size: var(--text-small); line-height: 18px; color: var(--ink-2); }
@@ -890,7 +905,7 @@ button:hover:not(:disabled) {
 /* While the import card is offered (import-card.mjs), the hero shrinks to the portrait alone, so the card and its buttons fit above the composer. */
 .welcome.compact { padding: var(--space-5) 0 0; }
 .welcome.compact .welcome-mascot { width: 64px; height: 64px; margin-bottom: 0; }
-.welcome.compact > h1, .welcome.compact > p { display: none; }
+.welcome.compact > h2, .welcome.compact > p { display: none; }
 .assistant-label {
   font-size: var(--text-caption);
   font-weight: 600;
@@ -1512,7 +1527,7 @@ dialog::backdrop {
     height: 104px;
     margin-bottom: 16px;
   }
-  .welcome h1 {
+  .welcome > h2 {
     max-width: 340px;
     margin-left: auto;
     margin-right: auto;
@@ -1710,8 +1725,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   padding: var(--space-1) var(--space-3) var(--space-3);
   font-size: var(--text-caption);
 }
-.tool-section h4,
-.tool-section > h4 {
+.tool-section > .tool-heading {
   margin: var(--space-3) 0 var(--space-1);
   font-size: var(--text-caption);
   font-weight: 600;
@@ -2050,7 +2064,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   cursor: default;
 }
 .task-panel h1,
-.worker-panel h1 {
+.worker-title {
   font-size: var(--text-heading);
 }
 .task-panel h2,
@@ -2161,7 +2175,7 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
   padding: 32px;
   overflow-wrap: anywhere;
 }
-.worker-panel h1 {
+.worker-title {
   margin: 0 0 8px;
 }
 .worker-kinds {
@@ -2480,7 +2494,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
 .panel .task-panel .worker-meta dd[data-ending="failed"] { color: var(--error); }
 .panel .task-panel .worker-meta dd[data-ending="dropped"] { color: var(--ink-3); }
 .panel .task-panel .worker-meta dd[data-awaited="person"] { font-weight: 600; color: var(--warn); }
-.panel .task-panel :is(h2, h3):not(.task-title) { margin: var(--space-6) 0 var(--space-2); font-size: var(--text-body); font-weight: 600; }
+.panel .task-panel :is(h2, h3):not(.task-title, .tool-heading) { margin: var(--space-6) 0 var(--space-2); font-size: var(--text-body); font-weight: 600; }
 .panel .task-panel .task-steps { margin: var(--space-5) 0 var(--space-2); }
 .panel .task-panel .task-steps > summary { font-size: var(--text-body); }
 .panel .task-panel .task-answer { margin: 12px 0 0; padding-bottom: 0; }

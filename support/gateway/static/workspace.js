@@ -2380,7 +2380,7 @@ function toolBody(item, context = {}) {
   const entries = Object.entries(item.arguments ?? {});
   if (entries.length > 0) {
     const section = el("div", "tool-section");
-    section.append(el("h4", "", t("tool.arguments")));
+    section.append(el("h3", "tool-heading", t("tool.arguments")));
     const pre = el("pre", "tool-arguments");
     pre.textContent = entries
       .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
@@ -2410,7 +2410,7 @@ function toolBody(item, context = {}) {
 
 function outputBlock(item, context = {}) {
   const section = el("div", "tool-section");
-  section.append(el("h4", "", t("tool.output")));
+  section.append(el("h3", "tool-heading", t("tool.output")));
   const text = cleanOutput(item.output);
   const lines = text.split("\n");
   const shown =
@@ -3161,7 +3161,7 @@ function showWorkers(id) {
   else if (workers.state.loaded && !workers.state.error) { workers.state.epoch++; workers.state.mode = "list"; workers.state.session = null; workers.state.view = null; workers.state.loading = false; renderWorkers(); }
   else workers.list();
   const previousRow = !id && previousWorker && Array.from($("worker-panel").children).find((node) => node.dataset?.workerId === previousWorker);
-  (previousRow || $("worker-panel").querySelector("h1"))?.focus();
+  (previousRow || $("worker-panel").querySelector(".worker-title"))?.focus();
 }
 
 function leaveWorkers() {
@@ -3241,10 +3241,11 @@ function taskResultNodes(view, render) {
 function renderWorkers() {
   const state = workers.state;
   const root = $("worker-panel");
-  const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.tagName === "H1";
+  const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.className === "worker-title";
   const terminal = state.mode === "detail" ? state.session?.kind === "terminal" : state.kind === "terminal";
   const w = (key, params) => t(`workersView.${key}`, params);
-  const title = el("h1", "", state.mode === "list" ? w("title") : state.session?.title || w(terminal ? "terminalChat" : "workerRun"));
+  // The page's one h1 is the header's title, which says the same words in this view: this one is the next level.
+  const title = el("h2", "worker-title", state.mode === "list" ? w("title") : state.session?.title || w(terminal ? "terminalChat" : "workerRun"));
   title.tabIndex = -1;
   const nodes = [title, el("p", "muted", w(state.mode === "list" ? "readOnly" : terminal ? "readOnlyTerminal" : "readOnlyRun"))];
   if (state.mode === "detail") {
@@ -4171,6 +4172,11 @@ $("sidebar-toggle").addEventListener("click", () =>
   sidebar(!$("app").classList.contains("sidebar-open")),
 );
 $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
+// The first Tab stop takes the keyboard past the list of chats: to the message box, or in a worker's history (which has none) to its title.
+$("skip-link").addEventListener("click", (event) => {
+  event.preventDefault();
+  (workerMode ? $("worker-panel").querySelector(".worker-title") : $("input"))?.focus();
+});
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async (event) => {
