@@ -717,21 +717,14 @@ class MachineMonitor:
 
     def _raise_alarms(self) -> None:
         if not self._lock.readable:
-            key = f"lock_unreadable:{self._lock.error}"
-            if key not in self._warned:
-                self._warned.add(key)
-                logger.warning("scheduler alarm: %s", key)
+            self._alarm(f"lock_unreadable:{self._lock.error}")
         for alarm in self._lock.alarms:
-            if alarm not in self._warned:
-                self._warned.add(alarm)
-                logger.warning("scheduler alarm: %s", alarm)
+            self._alarm(alarm)
         if self._lock.stale and self._lock.holder:
-            key = f"lock_stale:{self._lock.holder}"
-            if key not in self._warned:
-                self._warned.add(key)
-                logger.warning("scheduler alarm: %s", key)
+            self._alarm(f"lock_stale:{self._lock.holder}")
 
     def _alarm(self, alarm: str) -> None:
+        """Warn once per process for each distinct *alarm*."""
         if alarm in self._warned:
             return
         self._warned.add(alarm)
