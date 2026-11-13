@@ -51,6 +51,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
+- The check-in's line always says what finished or waits, in plain words from the facts, with `and N more` when the list is long; it no longer asks the model, so it never wakes the model server.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
 - One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
 - After a restart, a task cut off in the middle of writing a file in its folder goes on and looks at that file first; any other half-done step waits for you.
@@ -115,6 +116,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 - The app at rest no longer uses a full CPU core: the menu-bar item stops redrawing itself without pause.
 - The app and the console ask less often while nothing changes and at once when something does, a refresh with nothing new redraws nothing, and Melo holds a still when resting on battery or in Low Power Mode.
+- Finished runs of one request fold into one row in the chat, and what waits for you (an approval, a question) stands nearest the message box instead of under rows about finished tasks.
 - A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
 - Calmer task pages, Settings and details: short times, a task's facts on one line, plain words for each tool, and a failed task's card saying why in your language.
 - A blocked step reads the same on its chat card and its task page, also after a reload; a run whose work went on in a newer task says so instead of Needs you everywhere; the Scheduled tab says how each last run really ended.

@@ -756,11 +756,7 @@ async def test_a_chore_made_in_a_side_chat_belongs_to_it_and_reports_there(
 async def test_the_main_chats_chores_still_report_in_the_check_in(
     tmp_path: Path,
 ) -> None:
-    async with chats_console(tmp_path, chores=ChoreOptions(summarize=_join)) as (
-        console,
-        client,
-        _,
-    ):
+    async with chats_console(tmp_path) as (console, client, _):
         proposed = await console.front.propose_chore(
             "Brief me on the news every weekday at 8:30"
         )
@@ -771,10 +767,6 @@ async def test_the_main_chats_chores_still_report_in_the_check_in(
         task = await console.chore_runner.run_now(chore)
         await _finished(console, task["task_id"], "Three headlines.")
         assert await console.chore_runner.checkin() is not None
-
-
-async def _join(facts: list[str]) -> str:
-    return " ".join(facts)
 
 
 # ── Activity names the owner ──
