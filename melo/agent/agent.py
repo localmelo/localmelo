@@ -421,8 +421,8 @@ def _read_notes(
 ) -> tuple[list[tuple[int, str]], list[ImagePart]]:
     """The notes a step reads, and the pictures that go with them.
 
-    An inbox that can name the pictures of a note (``pictures(offset)``, see
-    :class:`~localmelo.melo.contracts.inbox.PictureInbox`) has them sent with
+    An inbox that can name the pictures of a note (a ``pictures(offset)``
+    method returning the message's ``ImagePart`` values) has them sent with
     its words. A step reads whole notes while their pictures stay within what
     the store keeps (:data:`USER_KEEP`): the first note is always read, and any
     after it that would pass the limit wait, unread, for the next step. A
@@ -1320,7 +1320,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         if refusal is not None:
             raise ValueError(refusal)
         self._retrievers = {}
-        self._recall_tool_registered = False
         self._effective_kinds = frozenset(
             default_kinds()
             if self.options.recall_kinds is None
@@ -1397,7 +1396,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 timeout_ms=RECALL_TOOL_TIMEOUT_S * 1000,
             )
             self._builtin_names = self._builtin_names | {"recall"}
-            self._recall_tool_registered = True
 
     # ── Workspace, tools and conversation ──
 

@@ -99,13 +99,6 @@ class ResumeTokens:
             del self._grants[token]
         return len(tokens)
 
-    def pending(self, task_id: str) -> int:
-        """Count unexpired grants for *task_id*; a test may assert invalidation."""
-        self._prune()
-        return sum(
-            1 for grant in self._grants.values() if grant.binding.task_id == task_id
-        )
-
     def _prune(self) -> None:
         now = self._clock()
         stale = [

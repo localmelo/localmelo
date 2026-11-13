@@ -15,8 +15,9 @@ from localmelo.melo.executor.preview import call_preview
 from localmelo.support import config, settings
 from localmelo.support.gateway.console import registry
 from localmelo.support.sessions import agents as session_agents
-from localmelo.support.sessions.display import activity_text, request_words
+from localmelo.support.sessions.display import activity_text, request_said
 from localmelo.support.web.search_tool import NOTE
+from localmelo.support.words import said_in
 
 
 @pytest.fixture(autouse=True)
@@ -277,7 +278,7 @@ def test_the_call_preview_is_the_words() -> None:
         call_preview("web_search", {"query": "  tomato blight \n"}) == "tomato blight"
     )
     assert call_preview("web_search", {}) == "{}"  # the generic fallback
-    assert request_words("web_search", {"query": "tomato blight"}) == (
+    assert said_in("en", request_said("web_search", {"query": "tomato blight"})) == (
         "Search the web for “tomato blight”"
     )
 

@@ -10,7 +10,7 @@ end: :data:`STATUS_TEXT`, looked up by status and cause through
 :func:`status_text`, and :func:`approval_tag` for how a call's approval
 ended, and :func:`activity_text` for what a running session is doing, in
 plain words (:func:`event_activity` reads it from the session's newest
-events; :func:`request_words` puts a call as a request), and
+events; :func:`request_said` puts a call as a request), and
 :func:`short_title` for a title cut from a request. Nothing here
 imports the UI's libraries or the gateway.
 """
@@ -742,13 +742,6 @@ def request_said(
     if asked is not None:
         return asked
     return step_said(tool, arguments, tense="ask", root=root)
-
-
-def request_words(
-    tool: str, arguments: object = None, *, root: str | None = None
-) -> str:
-    """:func:`request_said` in English: ``Write slides.md``, ``Run a command``, ``Read example.com``."""
-    return said_in("en", request_said(tool, arguments, root=root))
 
 
 def _on_hold(newest_first: Iterable[Mapping[str, Any]]) -> bool:

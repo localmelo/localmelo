@@ -14,8 +14,9 @@ from localmelo.melo.executor.preview import call_preview
 from localmelo.support import config, settings
 from localmelo.support.gateway.console import registry
 from localmelo.support.sessions import agents as session_agents
-from localmelo.support.sessions.display import activity_text, request_words
+from localmelo.support.sessions.display import activity_text, request_said
 from localmelo.support.web import NOTE
+from localmelo.support.words import said_in
 
 
 @pytest.fixture(autouse=True)
@@ -204,6 +205,6 @@ def test_the_call_preview_is_the_address() -> None:
         == "https://e.com/"
     )
     assert (
-        request_words("web_fetch", {"url": "https://example.com/"})
+        said_in("en", request_said("web_fetch", {"url": "https://example.com/"}))
         == "Read example.com"
     )

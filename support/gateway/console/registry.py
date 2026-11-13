@@ -392,10 +392,6 @@ class ConsoleSessions:
         """The names chat *session_id* holds a grant of now, open or not (the main chat's too)."""
         return self.book.allowed_for(session_id)
 
-    def folder_grants(self, session_id: str) -> tuple[str, ...]:
-        """The folders outside the workspace chat *session_id* allowed for reading (#405)."""
-        return self.book.folders_for(session_id)
-
     def grants_view(self, info: SessionInfo) -> SessionGrants:
         """The grants of the session *info*: the main chat's count in every chat.
 
