@@ -156,7 +156,7 @@ def _redact_pem(text: str) -> tuple[str, int]:
     """Pass 1 of :func:`redact_secrets`: the PEM private key blocks."""
     blocks = _pem_blocks(text)
     pieces = [(start, end, _pem_body(closed)) for start, end, closed in blocks]
-    return _splice(text, pieces), len(blocks)
+    return splice(text, pieces), len(blocks)
 
 
 def _pem_body(closed: bool) -> str:
@@ -200,8 +200,12 @@ def _pem_blocks(text: str) -> list[tuple[int, int, bool]]:
     ]
 
 
-def _splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
-    """*text* with each ``(start, end, replacement)`` of *pieces*, in order, put in."""
+def splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
+    """*text* with each ``(start, end, replacement)`` of *pieces*, in order, put in.
+
+    One join, not a copy of the text per piece. The pieces are used as given, not
+    sorted or merged: a caller whose places can overlap joins them first.
+    """
     parts: list[str] = []
     kept_from = 0
     for start, end, replacement in pieces:
@@ -214,7 +218,7 @@ def _splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
 def _redact_codes(text: str) -> tuple[str, int]:
     """Pass 4 of :func:`redact_secrets`: the codes next to a keyword."""
     spans = _code_spans(text)
-    return _splice(text, [(start, end, REDACTED) for start, end in spans]), len(spans)
+    return splice(text, [(start, end, REDACTED) for start, end in spans]), len(spans)
 
 
 def _code_spans(text: str) -> list[tuple[int, int]]:
