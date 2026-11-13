@@ -14,18 +14,14 @@ from __future__ import annotations
 import copy
 import dataclasses
 import logging
-import re
 import time
 from collections.abc import Callable, Iterable, Sequence
 
 from localmelo.melo.memory.notes import (
-    RECALL_END,
-    RECALL_START,
     Draft,
     ReasoningNote,
     same_path,
 )
-from localmelo.melo.schema import Message
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +31,6 @@ NOTE_STORE_MAX_CHARS = 300_000
 
 # The alias prefix of each entry kind.
 _ALIAS_PREFIX = {"note": "n", "draft": "d", "digest": "g", "thought": "t"}
-
-_RECALL_SPAN_RE = re.compile(
-    re.escape(RECALL_START) + r".*?" + re.escape(RECALL_END), re.DOTALL
-)
-_NOTE_BLOCK_RE = re.compile(r"<note>.*?(?:</note>|\Z)", re.IGNORECASE | re.DOTALL)
 
 
 @dataclasses.dataclass
@@ -393,35 +384,3 @@ class NoteStore:
     @staticmethod
     def _lru_key(entry: NoteStoreEntry) -> tuple[float, float]:
         return (entry.last_used_at or entry.created_at, entry.created_at)
-
-
-def strip_note_spans(
-    messages: Sequence[Message], notes: Iterable[str]
-) -> list[Message]:
-    """*messages* with stored notes and recall spans removed, for tool hints.
-
-    In a compress-mode step the tool-hint scan must not read the harness's
-    own note text as a hint: a note that names a tool would otherwise
-    offer it. Each stored note's checked text and every raw ``<note>``
-    block are removed from an assistant message's content, and a tool
-    message loses the text between
-    :data:`~localmelo.melo.memory.notes.RECALL_START` and
-    :data:`~localmelo.melo.memory.notes.RECALL_END`. Messages the scan
-    would not change are returned as they are.
-    """
-    note_texts = [text for text in notes if text]
-    stripped: list[Message] = []
-    for message in messages:
-        content = message.content
-        if message.role == "assistant":
-            content = _NOTE_BLOCK_RE.sub("", content)
-            for text in note_texts:
-                content = content.replace(text, "")
-            content = content.strip()
-        elif message.role == "tool":
-            content = _RECALL_SPAN_RE.sub("", content).strip()
-        if content == message.content:
-            stripped.append(message)
-        else:
-            stripped.append(dataclasses.replace(message, content=content))
-    return stripped

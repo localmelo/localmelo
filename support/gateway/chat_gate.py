@@ -639,15 +639,6 @@ class ChatGate:
             "gate": self.lock_gate,
         }
 
-    @property
-    def hold_wake_s(self) -> float:
-        """The focus window, which bounds the run's wake while a call is held."""
-        return (
-            self._params.tau_focus_s
-            if self._params is not None
-            else Params().tau_focus_s
-        )
-
     def client(self, session_id: str) -> SessionClient:
         """A handle that tags this chat's calls with its session id."""
         return SessionClient(self, session_id)

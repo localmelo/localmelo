@@ -1,4 +1,4 @@
-"""Dormant, durable primitives for scheduler restart recovery.
+"""Durable primitives for scheduler restart recovery, called by the workers and the startup scan.
 
 Creation writes the never-started proof in its own transaction, and every
 launch path fences its execution. Missing provenance is unknown, not never

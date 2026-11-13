@@ -1,4 +1,7 @@
-"""Transactional worker holds and park cards, independent of priority policy."""
+"""Transactional worker holds and park cards.
+
+An interruption also writes the task's priority: level 5 and a pause snapshot.
+"""
 
 from __future__ import annotations
 

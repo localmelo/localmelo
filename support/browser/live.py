@@ -354,10 +354,6 @@ class LiveView:
         with contextlib.suppress(RuntimeError):
             self._syncing = asyncio.ensure_future(self._run_sync())
 
-    def watchers(self, short: str) -> int:
-        """How many viewers watch the chat's tab *short* now."""
-        return sum(1 for v in self._viewers if v.target[0] == short)
-
     # ── Take over ──
 
     def can_take(self) -> bool:
