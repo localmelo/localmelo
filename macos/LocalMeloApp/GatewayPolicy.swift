@@ -162,6 +162,52 @@ func menuBarState(_ data: Data) -> MenuBarState {
     return counts.total > 0 ? .running(counts.total) : .idle
 }
 
+/// Seconds between two health checks while the server starts, after a failed check, while anything runs or waits for
+/// the person (or ended so lately that the pet still shows how: `petShowsEnd`) and after anything changed; and the most
+/// it grows to while the server keeps answering with nothing new.
+///
+/// What reads the check, and how late each may show at the ceiling: the menu-bar mark and its menu (work that starts
+/// somewhere else, an approval that waits), the pill and the pet on the desktop (the same, with the window put away),
+/// the Model submenu (a switch or a change of the served model) and the "Sign In Again" item: 8 s each, and work that
+/// is running or waiting is read every 2 s. A person's own move reads the check at once, and at 2 s again: the window
+/// put away or brought back, Done on the pill, Sign In Again. The server the app started is seen to end through its
+/// process, not through the check; one the terminal started is seen to end at the next check.
+let healthBaseSeconds: TimeInterval = 2
+let healthCeilingSeconds: TimeInterval = 8
+
+/// The seconds to the next check, from the interval the last one ran at and what it found: a check that failed, found
+/// something new or found anything running or waiting asks again at the base interval; otherwise the interval doubles,
+/// up to the ceiling.
+func nextHealthInterval(current: TimeInterval, failed: Bool, changed: Bool, busy: Bool) -> TimeInterval {
+    if failed || changed || busy { return healthBaseSeconds }
+    return min(max(current, healthBaseSeconds) * 2, healthCeilingSeconds)
+}
+
+/// What a health reply says without the fields that tick by themselves (the server's uptime, the age of the newest
+/// finished run, the age of the model server's last check): equal data is nothing new. Nil for a body that is not JSON.
+func healthSignature(_ data: Data) -> Data? {
+    guard var body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    body["uptime_s"] = nil
+    if var server = body["model_server"] as? [String: Any] {
+        server["checked_s_ago"] = nil
+        body["model_server"] = server
+    }
+    if var status = body["status"] as? [String: Any], var recent = status["recent"] as? [String: Any] {
+        recent["ended_s_ago"] = nil
+        status["recent"] = recent
+        body["status"] = status
+    }
+    return try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+}
+
+/// Whether anything runs or waits for the person in a health reply.
+func healthBusy(_ data: Data) -> Bool {
+    switch menuBarState(data) {
+    case .running, .waiting: return true
+    case .idle, .unknown: return false
+    }
+}
+
 /// The count beside the mark: what the console's header chip counts as running, and nothing at 0.
 func menuTitle(_ state: MenuBarState) -> String {
     switch state {

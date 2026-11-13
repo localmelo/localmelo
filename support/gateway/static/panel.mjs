@@ -24,9 +24,9 @@ import {REST_STILL_AFTER_MS, SIT_MS, idleMove, startMoves} from './moves.mjs';
  * check-in and the chores that run on a schedule; Memory
  * (memory-tab.mjs) lists the notes melo keeps. Melo's portrait moves (moves.mjs, `portraitMove`): it wakes up on
  * the first load, works, thinks, raises a paw when something waits for the person and rests; a run that just ended,
- * an error and the time before the first health reply keep a still poster of the moves. `update(health)` is called on every health poll: the
- * header follows it, and the list is read again when what runs changed, the
- * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
+ * an error and the time before the first health reply keep a still poster of the moves. `update(health)` is called on every health poll
+ * that brings something new to draw (`keep(health)` on the others): the header follows it, and the list is read again when what
+ * runs changed, the chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
  * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
  * down on its handle. `api` takes paths relative to /api.
  */
@@ -64,6 +64,12 @@ const chatOfAddress = () => /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.locatio
 // A task's address does not name a chat: the panel keeps the chat it was following.
 const onTaskAddress = () => /^#\/tasks(?:\/|$)/.test(globalThis.location?.hash ?? '');
 
+// Seconds after a run ends that the header still shows how it ended (done, or an error) before it rests again.
+export const MOOD_WINDOW_S = 8;
+
+/** Whether the header still shows how the newest finished run (`status.recent` of the health) ended. */
+export const showsEnd = (recent) => !!recent && recent.ended_s_ago < MOOD_WINDOW_S && recent.outcome !== 'stopped';
+
 /**
  * What the header says, and the link it offers: the model's state first, then what runs. For a side chat,
  * `scoped` is that chat's rows and what runs is read from them instead of the whole console. `plain` (the default mode)
@@ -81,7 +87,7 @@ export function headline(health, scoped = null, {plain = false, stopping = 0} = 
   if (count > 0 && stopping >= count) return {text: t('panel.head.stopping'), mood: 'working', fix: false, count};
   if (count > 0) return {text: t('panel.head.working', {n: count}), mood: 'working', fix: false, count};
   const recent = scoped && !scoped.some((row) => row.id === status.recent?.id) ? null : status.recent;
-  const mood = recent && recent.ended_s_ago < 8 && recent.outcome !== 'stopped' ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
+  const mood = showsEnd(recent) ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
   const model = health.model?.name;
   const server = plain ? '' : health.model?.backend_label;
   const text = !model ? t('panel.head.connected') : server ? t('panel.head.connectedModelOn', {model, server}) : t('panel.head.connectedModel', {model});
@@ -620,6 +626,20 @@ export function setupPanel({
     drawHeader();
     // The mode may have changed since the tabs were drawn (Settings): the strip follows it.
     if (drawTabs()) drawBody();
+    return reread(health);
+  }
+
+  /**
+   * A health reply that brings nothing new to draw (the page compares them): kept as the newest, nothing drawn. The
+   * day's list still goes by its own clock, and a read that failed is tried again.
+   */
+  function keep(health) {
+    state.health = health;
+    return reread(health);
+  }
+
+  // The day's list is read again when what runs changed, a read failed, REFRESH_MS passed or the day changed.
+  function reread(health) {
     const status = health?.status ?? {};
     const seen = JSON.stringify([status.running, status.tasks, status.items, status.waiting, status.recent?.id, status.recent?.outcome]);
     if (seen !== state.seen || clock() - state.fetchedAt > REFRESH_MS || midnight() !== state.day) {
@@ -748,5 +768,5 @@ export function setupPanel({
     drawHeader();
   }
 
-  return {update, refresh, redraw: () => drawBody(), follow, select, state, offline, stopping, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  return {update, keep, refresh, redraw: () => drawBody(), follow, select, state, offline, stopping, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

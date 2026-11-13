@@ -70,7 +70,7 @@ The pinned Python and uv archives and the wheels are checked against their hashe
 - The menu lists what runs, **Waiting for your approval** (it opens that chat or task), **Open localmelo**, **Settings…** and **Quit localmelo**.
 - With melo_serve, a **Model** submenu lists its chat models, the current one checked; picking one switches every chat ([Switch the model](model-servers.md#switch-the-model)). While a switch waits, **Cancel Switch** ends the wait. A switch that failed says why at the top of the submenu until the next one.
 - **Sign In Again** appears only when it can help: after four failed sign-ins, on the Locked screen, and always in developer mode.
-- The app checks every 2 seconds, so an approval shows within one poll; VoiceOver and the tooltip say the same in words.
+- The app checks every 2 seconds while anything runs or waits, and for a few seconds after a run ends, so an approval shows within one check. With nothing running it checks less often, every 8 seconds at most, and every 2 seconds again as soon as something changes or you put the window away or bring it back. VoiceOver and the tooltip say the same in words.
 
 ## Melo on your desktop
 
@@ -94,7 +94,7 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 - It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
 - Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
 - Melo plays once, about 20 seconds into a rest, and at most once every 5 minutes.
-- Melo moves in every state that has moves, in Low Power Mode and when the Mac runs hot too, while the activity pill rests then. Under Reduce Motion each state is a still picture. While Melo is covered or hidden it stops where it is.
+- Melo moves in every state that has moves, when the Mac runs hot too, while the activity pill rests then. Lying down and playing, with nothing to do, hold a still picture on battery and in Low Power Mode and play on mains power; work, a wait and a result move on any power. Under Reduce Motion each state is a still picture. While Melo is covered or hidden it stops where it is.
 
 ## The activity pill
 

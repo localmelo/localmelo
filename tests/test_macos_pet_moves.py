@@ -70,15 +70,28 @@ precondition(frame == CGRect(x: 16, y: 3 - 100.0 * 12 / 256, width: 100, height:
 precondition(frame.maxY - 97 < 100.0 * 22 / 512 && -frame.minY < 100.0 * 22 / 512)
 precondition(petMoveSide == 100)
 
-// What may move: the moves show posters under Reduce Motion only, keep playing in Low Power Mode and heat, and stop
-// while unseen.
+// What may move: the moves show posters under Reduce Motion only, keep playing in Low Power Mode, on battery and in
+// heat, and stop while unseen.
 var env = PetEnvironment()
 precondition(petMovesMayMove(env) && petMovesRun(env))
 env.reduceMotion = true; precondition(!petMovesMayMove(env) && petMovesRun(env))
 env = PetEnvironment(); env.lowPower = true; precondition(petMovesMayMove(env))
+env = PetEnvironment(); env.onBattery = true; precondition(petMovesMayMove(env))
 env = PetEnvironment(); env.thermal = .serious; precondition(petMovesMayMove(env))
 env = PetEnvironment(); env.visible = false; precondition(petMovesMayMove(env) && !petMovesRun(env))
 env = PetEnvironment(); env.screenAwake = false; precondition(!petMovesRun(env))
+
+// The rest loop holds its still on battery and in Low Power Mode and plays on mains power; the answer follows the
+// environment as it changes, and heat, Reduce Motion, a covered pet and a sleeping screen are not power.
+env = PetEnvironment(); precondition(!petRestHeld(env))
+env.onBattery = true; precondition(petRestHeld(env))
+env.onBattery = false; precondition(!petRestHeld(env))
+env.lowPower = true; precondition(petRestHeld(env))
+env.onBattery = true; precondition(petRestHeld(env))
+env.lowPower = false; precondition(petRestHeld(env))
+env.onBattery = false; precondition(!petRestHeld(env))
+env.thermal = .critical; env.reduceMotion = true; env.visible = false; env.screenAwake = false
+precondition(!petRestHeld(env))
 """,
     )
 
@@ -141,6 +154,20 @@ var still = PetMovePicker()
 still.ended(.startup, now: at(-100))
 precondition(still.pick(.resting, thinking: false, still: true, now: at(0))! == (.idleRest, false))
 precondition(still.pick(.resting, thinking: false, still: true, now: at(1000))! == (.idleRest, false))
+// On battery the rest holds (the player shows its poster), and work, a wait and the wake-up are what they are on mains
+// power; back on mains power the play comes after 20 s of rest.
+var power = PetEnvironment()
+power.onBattery = true
+var held = PetMovePicker()
+precondition(held.pick(.resting, thinking: false, still: petRestHeld(power), now: at(0))! == (.startup, false))
+held.ended(.startup, now: at(3))
+precondition(held.pick(.resting, thinking: false, still: petRestHeld(power), now: at(12))! == (.idleRest, false))
+precondition(held.pick(.resting, thinking: false, still: petRestHeld(power), now: at(2000))! == (.idleRest, false))
+precondition(held.pick(.working(1), thinking: true, still: petRestHeld(power), now: at(2001))! == (.thinking, false))
+precondition(held.pick(.waiting, thinking: false, still: petRestHeld(power), now: at(2002))! == (.attention, false))
+power.onBattery = false
+precondition(held.pick(.resting, thinking: false, still: petRestHeld(power), now: at(2003))! == (.idleRest, false))
+precondition(held.pick(.resting, thinking: false, still: petRestHeld(power), now: at(2023))! == (.idlePlay, true))
 """,
     )
 

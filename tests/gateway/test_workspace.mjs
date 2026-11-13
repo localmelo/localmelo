@@ -15,7 +15,7 @@ import {maker} from '../../support/gateway/static/dom.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
-import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
+import {headline, setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
 import {liveRoute, liveUrl} from '../../support/gateway/static/browser-live.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
@@ -33,6 +33,7 @@ import {ACTIVE as BROWSING, mergeBrowsers, setupBrowserCards, sourceOf as browse
 import {stepWords} from '../../support/gateway/static/step-words.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
+import * as rest from '../../support/gateway/static/rest.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -773,6 +774,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/endings\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/window-bar\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/rest\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/serve\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
@@ -789,6 +791,8 @@ function storage() {
 
 // The harness's document, for the element double made outside its closure.
 let documentDouble = null;
+// Every write to an element the page made, counted (the same value again included).
+const domWrites = {count: 0};
 
 function makeElement(tag, id = '') {
   const classes = new Set();
@@ -862,6 +866,18 @@ function makeElement(tag, id = '') {
       for (const name of String(value || '').split(/\s+/)) if (name) classes.add(name);
     },
   });
+  for (const key of ['textContent', 'innerHTML', 'hidden', 'disabled', 'title']) {
+    let current = element[key];
+    Object.defineProperty(element, key, {get: () => current, set(value) { domWrites.count += 1; current = value; }, enumerable: true, configurable: true});
+  }
+  for (const name of ['replaceChildren', 'append', 'prepend', 'setAttribute', 'removeAttribute']) {
+    const method = element[name];
+    element[name] = (...args) => { domWrites.count += 1; return method(...args); };
+  }
+  for (const name of ['add', 'remove', 'toggle']) {
+    const method = element.classList[name];
+    element.classList[name] = (...args) => { domWrites.count += 1; return method(...args); };
+  }
   return element;
 }
 
@@ -1012,6 +1028,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     ...modeChip,
     ...serve,
     ...blocked,
+    ...rest,
     reportText,
     parseCommand,
     setupSlash,
@@ -1057,7 +1074,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
-    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], kept: [], state: {task: null}, update(body) { this.health.push(body); }, keep(body) { this.kept.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
       lost: [], offline(value) { this.lost.push(value); }, stopped: [], stopping(count) { this.stopped.push(count); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {}, redraw() {},
       remember(key) { this.remembered.push(key); },
@@ -1262,7 +1279,7 @@ test('a 401 locks, preserves the draft, closes the stream and suppresses retries
   assert.equal(h.element('app').hidden, true);
   assert.equal(JSON.parse(h.session.getItem('localmelo-console-drafts')).a, 'unfinished draft');
   const count = h.net.calls.length;
-  for (const timer of h.timers.filter((item) => item.interval)) await timer.handler();
+  for (const timer of h.timers.filter((item) => !item.cleared)) await timer.handler();
   source.fail();
   assert.equal(h.net.calls.length, count);
   assert.equal(h.state().stream, null);
@@ -2412,10 +2429,163 @@ test('the header chip shows what runs now and follows the health poll', async ()
   const links = h.element('running-menu').children.map((row) => row.href);
   assert.deepEqual(links, ['#/tasks/t1', '#/tasks/t2', '#/workers/k1']);
   answer = {running: {chats: 0, tasks: 0, runs: 0, terminal: 0}, items: []};
-  const poll = h.timers.findLast((timer) => timer.interval && !timer.cleared && timer.handler.toString().includes('refreshList'));
+  const poll = h.timers.findLast((timer) => !timer.interval && !timer.cleared && timer.ms === 4000);
   await poll.handler();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(h.element('running-root').hidden, true);
+});
+
+// ── The list refresh at rest ──
+
+/** The refresh timer that waits, and what it does when it fires (a timer that fired is gone, as in a browser). */
+function listPoll(h) {
+  const pending = () => h.timers.findLast((timer) => !timer.interval && !timer.cleared && [4000, 8000, 16000].includes(timer.ms));
+  const start = () => { const timer = pending(); timer.cleared = true; return timer.handler(); };
+  const fire = async () => { await start(); await settle(); return pending()?.ms; };
+  return {pending, start, fire};
+}
+const listOf = (...rows) => ({sessions: rows, machine: null, has_more: false});
+
+test('the list refresh backs off while nothing changes and is back at 4 s when something does', async () => {
+  const routes = baseRoutes();
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {pending, fire} = listPoll(h);
+  assert.equal(pending().ms, 4000, 'it starts at the base interval');
+  assert.deepEqual([await fire(), await fire(), await fire(), await fire()], [8000, 16000, 16000, 16000]);
+  // A refresh that brings something new: 4 s again, then it backs off again.
+  routes['GET /sessions'] = listOf(session('a', {title: 'Renamed'}));
+  assert.deepEqual([await fire(), await fire()], [4000, 8000]);
+  // The person acts on the page: the waiting timer is replaced by one at 4 s; at 4 s already, nothing is touched.
+  const waiting = pending();
+  h.documentListeners.pointerdown.forEach((handler) => handler({}));
+  assert.equal(waiting.cleared, true);
+  assert.equal(pending().ms, 4000);
+  const again = pending();
+  h.documentListeners.keydown.forEach((handler) => handler({key: 'a'}));
+  assert.equal(pending(), again);
+  // Anything that runs or waits for the person keeps it at 4 s; when it is over it backs off again.
+  routes['GET /health'] = {body: {...health, status: {running: {chats: 0, tasks: 1, runs: 0, terminal: 0}, tasks: {}, items: [], waiting: [], control: []}}};
+  assert.deepEqual([await fire(), await fire(), await fire()], [4000, 4000, 4000]);
+  routes['GET /health'] = health;
+  assert.deepEqual([await fire(), await fire()], [4000, 8000]);
+  // While the server does not answer it asks at 4 s, so the notice goes soon after the server is back.
+  routes['GET /sessions'] = {status: 500, body: {error: {code: 'down', message: 'down'}}};
+  assert.deepEqual([await fire(), await fire()], [4000, 4000]);
+  routes['GET /sessions'] = listOf(session('a', {title: 'Renamed'}));
+  assert.deepEqual([await fire(), await fire()], [4000, 8000]);
+});
+
+test('a page nobody sees asks nothing, and coming back (or the window gaining focus) reads at once at 4 s', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()'); await settle();
+  const {pending, fire} = listPoll(h);
+  assert.equal(await fire(), 8000);
+  const asked = () => h.net.callsTo('/sessions').length;
+  h.context.document.hidden = true;
+  for (const handler of h.documentListeners.visibilitychange) handler();
+  assert.equal(pending(), undefined, 'no timer waits while the page is hidden');
+  const before = asked();
+  h.windowListeners.focus.forEach((handler) => handler());
+  assert.equal(asked(), before, 'a hidden page does not read on focus');
+  h.context.document.hidden = false;
+  h.documentListeners.visibilitychange[0](); await settle();
+  assert.equal(asked(), before + 1, 'it reads at once on return');
+  assert.equal(pending().ms, 4000);
+  assert.equal(await fire(), 8000);
+  h.windowListeners.focus.forEach((handler) => handler()); await settle();
+  assert.equal(asked(), before + 3, 'and again when the window gains focus');
+  assert.equal(pending().ms, 4000);
+});
+
+test('an action while a refresh is under way is not undone by it', async () => {
+  const routes = baseRoutes();
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {pending, start, fire} = listPoll(h);
+  await fire();
+  let release;
+  routes['GET /sessions'] = () => new Promise((resolve) => { release = () => resolve(listOf(session('a'))); });
+  const running = start();
+  await settle();
+  h.documentListeners.pointerdown.forEach((handler) => handler({}));
+  release(); await running; await settle();
+  assert.equal(pending().ms, 4000);
+});
+
+test('a refresh that brings nothing new writes nothing to the page', async () => {
+  let seconds = 100;
+  const routes = baseRoutes({'GET /health': () => ({body: {
+    ...health, uptime_s: (seconds += 4),
+    model_server: {url_label: 'http://127.0.0.1:1/', reachable: true, error: '', checked_s_ago: seconds % 30},
+    status: {running: {chats: 0, tasks: 0, runs: 0, terminal: 0}, tasks: {}, items: [], waiting: [], control: [],
+      recent: {kind: 'chat', id: 'a', title: 'Done', outcome: 'done', ended_s_ago: seconds}},
+  }})});
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  await fire();
+  const calls = h.net.calls.length;
+  const writes = domWrites.count;
+  await fire(); await fire();
+  assert.ok(h.net.calls.length >= calls + 4, 'it asked for the chats and the health each time');
+  assert.equal(domWrites.count, writes, 'the same chats and health, with their clocks moved on, wrote nothing');
+  routes['GET /sessions'] = listOf(session('a', {title: 'Renamed'}));
+  await fire();
+  assert.ok(domWrites.count > writes, 'a changed title is drawn');
+  assert.match(h.text('session-list'), /Renamed/);
+});
+
+const idle = {running: {chats: 0, tasks: 0, runs: 0, terminal: 0}, tasks: {}, items: [], waiting: [], control: []};
+const endedAgo = (seconds) => ({body: {...health, status: {...idle, recent: {kind: 'chat', id: 'a', title: 'Done', outcome: 'done', ended_s_ago: seconds}}}});
+
+test('the header\'s done mood ends with its window, with the data otherwise unchanged, and the page asks at 4 s until then', async () => {
+  const routes = baseRoutes({'GET /health': endedAgo(2)});
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const mood = () => headline(h.run('panel').health.at(-1)).mood;
+  assert.equal(mood(), 'done');
+  routes['GET /health'] = endedAgo(6);
+  assert.equal(await fire(), 4000, 'inside the window it does not back off');
+  assert.equal(mood(), 'done');
+  routes['GET /health'] = endedAgo(10);
+  assert.equal(await fire(), 4000, 'the window closing is a change');
+  assert.equal(mood(), 'idle', 'the header is told, so it rests again');
+  routes['GET /health'] = endedAgo(14);
+  assert.equal(await fire(), 8000, 'and from then on nothing new backs off');
+});
+
+test('a new day draws the sidebar\'s day groups and times again, with the chats unchanged', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const old = mainChat.dayLabel(NOW - 3 * 86400, NOW);
+  assert.deepEqual(rowsOf(h), ['day:Today', 'a', `day:${old}`, 'b']);
+  await fire();
+  assert.deepEqual(rowsOf(h), ['day:Today', 'a', `day:${old}`, 'b']);
+  // Midnight passes with the page left open: the clock inside the page moves a day on, the gateway says the same.
+  const RealDate = Date;
+  const later = 86400 * 1000;
+  h.context.Date = class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [RealDate.now() + later])); }
+    static now() { return RealDate.now() + later; }
+  };
+  await fire();
+  assert.deepEqual(rowsOf(h), ['day:Yesterday', 'a', `day:${old}`, 'b']);
+});
+
+test('what reads the health on demand (the status command, Settings) sees the newest reading, drawn or not', async () => {
+  let uptime = 100;
+  const routes = baseRoutes({'GET /health': () => ({body: {...health, uptime_s: (uptime += 4), model_server: {url_label: 'http://127.0.0.1:1/', reachable: true, error: '', checked_s_ago: uptime % 30}}})});
+  const h = harness(routes);
+  await h.run('init()'); await settle();
+  const {fire} = listPoll(h);
+  const first = h.state().health.uptime_s;
+  await fire(); await fire();
+  assert.ok(uptime > first, 'the gateway counted on');
+  assert.equal(h.state().health.uptime_s, uptime, 'the page kept the newest reading although nothing new was drawn');
+  assert.equal(h.run('panel').kept.at(-1).uptime_s, uptime, 'and told the panel, which draws nothing for it');
 });
 
 test('the chat shows the server\'s status segments and refreshes them on a frame', async () => {

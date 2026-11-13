@@ -249,6 +249,31 @@ test('calm: nothing running, and today newest first with each kind and result', 
   assert.equal(h.calls.filter(([, path]) => path.startsWith('/activity')).length, 2);
 });
 
+test('a reply with nothing new to draw is kept, and the day\'s list still reads again after its time, on a new day and after a failed read', async () => {
+  const midnight = new Date(86400 * 1000 * 400);
+  midnight.setHours(24, 0, 0, 0);
+  let now = midnight.getTime() - 10000;
+  const h = harness({rows: [row()], clock: () => now});
+  await h.panel.update(health());
+  const reads = () => h.activityCalls().length;
+  assert.equal(reads(), 1);
+  await h.panel.keep(health());
+  assert.equal(reads(), 1, 'nothing new, nothing read');
+  now += 20000;
+  await h.panel.keep(health());
+  assert.equal(reads(), 2, 'a new day, 20 s on');
+  now += 31000;
+  await h.panel.keep(health());
+  assert.equal(reads(), 3, 'its own 30 s');
+  const newest = health({recent: {outcome: 'done', ended_s_ago: 20}});
+  await h.panel.keep(newest);
+  assert.equal(h.panel.state.health, newest, 'the header\'s next draw reads the newest reply');
+  const down = harness({failActivity: true});
+  await down.panel.update(health());
+  await down.panel.keep(health());
+  assert.equal(down.activityCalls().length, 2, 'a failed read is tried at the next reply, drawn or not');
+});
+
 test('a long day folds behind "Earlier today", and an unreadable day says so and asks again', async () => {
   const many = Array.from({length: 11}, (_, n) => row({id: `t${n}`, title: `Task ${n}`, at: 1000 - n}));
   const h = harness({rows: many});

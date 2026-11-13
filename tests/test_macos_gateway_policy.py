@@ -255,6 +255,56 @@ precondition(waitingItems(health(none, waiting: odd)) == [WaitingItem(kind: "cha
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_health_check_backs_off_while_nothing_changes_and_is_back_at_2_s_when_something_does() -> (
+    None
+):
+    run_policy(
+        r"""
+func health(_ running: String, waiting: String = "[]", up: Double = 10, ago: Double = 3, model: String = "true") -> Data {
+    Data((#"{"api":2,"uptime_s":"# + String(up) + #","model_server":{"reachable":"# + model + #","checked_s_ago":"# + String(Int(up) % 30)
+        + #"},"status":{"running":"# + running + #","items":[],"waiting":"# + waiting
+        + #","recent":{"kind":"chat","id":"a","outcome":"done","ended_s_ago":"# + String(ago) + #"}}}"#).utf8)
+}
+let none = #"{"chats":0,"tasks":0,"runs":0,"terminal":0}"#
+let one = #"{"chats":1,"tasks":0,"runs":0,"terminal":0}"#
+let chat = #"[{"kind":"chat","id":"3f9c0d2a"}]"#
+
+// The intervals: 2 s while anything runs, waits or changed and after a failed check; 4, 8 and no more while nothing
+// does.
+precondition(healthBaseSeconds == 2 && healthCeilingSeconds == 8)
+let cases: [(String, TimeInterval, Bool, Bool, Bool, TimeInterval)] = [
+    // (what the check found, the interval it ran at, failed, changed, busy, the next interval)
+    ("nothing new", 2, false, false, false, 4),
+    ("nothing new, second time", 4, false, false, false, 8),
+    ("nothing new at the ceiling", 8, false, false, false, 8),
+    ("failed", 8, true, false, false, 2),
+    ("something new", 8, false, true, false, 2),
+    ("something runs or waits", 8, false, false, true, 2),
+    ("everything at once", 4, true, true, true, 2),
+]
+for (name, current, failed, changed, busy, next) in cases {
+    precondition(nextHealthInterval(current: current, failed: failed, changed: changed, busy: busy) == next, name)
+}
+
+// Anything running or waiting is busy; a quiet server and a damaged reply are not.
+precondition(healthBusy(health(one)) && healthBusy(health(none, waiting: chat)))
+precondition(!healthBusy(health(none)) && !healthBusy(Data("not json".utf8)) && !healthBusy(Data(#"{"api":2}"#.utf8)))
+
+// What a reply says leaves out its clocks: the same server a few seconds later is nothing new, and any other
+// difference is.
+let before = healthSignature(health(none))!
+precondition(healthSignature(health(none, up: 400.5, ago: 97.1)) == before)
+precondition(healthSignature(health(none, up: 11, ago: 4)) == before)
+precondition(healthSignature(health(one)) != before)
+precondition(healthSignature(health(none, waiting: chat)) != before)
+precondition(healthSignature(health(none, model: "false")) != before)
+precondition(healthSignature(Data(#"{"api":2,"uptime_s":1,"status":{"recent":null}}"#.utf8)) != nil)
+precondition(healthSignature(Data("not json".utf8)) == nil)
+""",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_the_menu_bar_button_is_written_only_for_a_face_that_differs() -> None:
     # Writing the button lays the item out, and a layout announces the button's appearance again. The observer of
     # that announcement and the health poll both ask `show` for a face; one equal to the shown face writes nothing,

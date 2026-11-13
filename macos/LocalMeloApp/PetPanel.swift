@@ -172,7 +172,8 @@ final class PetController: NSObject {
         })
         gate.changed = { [weak self] _ in
             guard let self = self, self.isShown else { return }
-            self.applyMoves()
+            // A change of power source or of Low Power Mode holds or frees the rest loop now.
+            self.showMoves()
         }
         moves?.onEnded = { [weak self] move in
             self?.picker.ended(move, now: Date())
@@ -285,13 +286,15 @@ final class PetController: NSObject {
     private func showMoves() {
         guard let moves = moves else { return }
         let still = !petMovesMayMove(environment)
+        // On battery and in Low Power Mode the rest loop holds its poster and plays nothing; any other move plays.
+        let restHeld = petRestHeld(environment)
         moves.setStill(still)  // before the state, so it starts as it should show
-        let pick = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still, now: Date())
+        let pick = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still || restHeld, now: Date())
         if let picture = petStill(mood) {
             // A folder made before the stills: the moves' own poster stands in.
             if !moves.hold(picture) { moves.set(picture.standIn, poster: true) }
         } else if let (move, once) = pick {
-            moves.set(move, once: once)
+            moves.set(move, once: once, poster: restHeld && move == .idleRest)
         }
         applyMoves()
     }

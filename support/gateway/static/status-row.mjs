@@ -40,8 +40,13 @@ export function setupStatusRow({api, root, schedule = setTimeout, cancel = clear
   let timer = null;
   let inflight = false;
   let dirty = false;
+  // The segments on show, as text: the same ones again write nothing.
+  let shown = null;
 
   function draw(segments) {
+    const key = JSON.stringify(segments);
+    if (key === shown) return;
+    shown = key;
     root.replaceChildren(...segments.map((segment) => {
       const span = doc.createElement('span');
       span.className = 'status-seg';
@@ -100,6 +105,7 @@ export function setupStatusRow({api, root, schedule = setTimeout, cancel = clear
     lastFetch = -Infinity;
     if (timer !== null) cancel(timer);
     timer = null;
+    shown = null;
     root.replaceChildren();
     root.hidden = true;
   }

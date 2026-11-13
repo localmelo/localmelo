@@ -88,6 +88,11 @@ precondition(mood(health(recent: ended("done", "7.9"))) == .done)
 precondition(mood(health(recent: ended("done", "8.0"))) == .resting)
 precondition(mood(health(recent: ended("failed", "7.9", kind: "task"))) == .failed)
 precondition(mood(health(recent: ended("failed", "8.0"))) == .resting)
+// The app asks at its base interval while the pet shows how a run ended (it reads the age from each reply): done or
+// failed inside the window, not a stopped run, not work or a wait (those keep the base interval on their own).
+precondition(petShowsEnd(health(recent: ended("done", "7.9"))) && petShowsEnd(health(recent: ended("failed", "0.0"))))
+precondition(!petShowsEnd(health(recent: ended("done", "8.0"))) && !petShowsEnd(health(recent: ended("failed", "30"))))
+precondition(!petShowsEnd(health(recent: ended("stopped", "1.0"))) && !petShowsEnd(health()) && !petShowsEnd(Data("not json".utf8)))
 // No model set up, or a model server that does not answer: as the console's header says, before a wait or work.
 func model(_ fields: String, running: Int = 0, waiting: String = "[]") -> Data {
     Data(#"{"api":2,\#(fields),"status":{"running":{"chats":\#(running),"tasks":0,"runs":0,"terminal":0},"waiting":\#(waiting),"recent":null}}"#.utf8)
@@ -167,8 +172,8 @@ env = PetEnvironment(); env.visible = false
 precondition(!shouldAnimate(env))
 env = PetEnvironment(); env.screenAwake = false
 precondition(!shouldAnimate(env))
-// The pet's moves stop being moves only under Reduce Motion: Low Power Mode and heat leave them playing; a hidden
-// panel or a sleeping screen stops their clock where it is.
+// The pet's moves stop being moves only under Reduce Motion: Low Power Mode, battery and heat leave them playing (only
+// the rest loop is held, see petRestHeld); a hidden panel or a sleeping screen stops their clock where it is.
 env = PetEnvironment()
 precondition(petMovesMayMove(env) && petMovesRun(env))
 env.reduceMotion = true
