@@ -492,11 +492,6 @@ def kept_check(request: ApprovalRequest) -> bool:
     return request.tool_name.startswith(HUMAN_CHECK) and person_grant(request)
 
 
-def window_question(request: ApprovalRequest) -> bool:
-    """Whether *request* is the question whether melo may see another app's window."""
-    return request.tool_name.startswith(WINDOW_READ) and request.outside is None
-
-
 def person_grant(request: ApprovalRequest) -> bool:
     """Whether a chat's kept answer to a question only the person answers covers *request*.
 

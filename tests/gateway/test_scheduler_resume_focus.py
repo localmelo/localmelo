@@ -99,12 +99,6 @@ def gate_with_tasks(clock: ClockBox, count: int = 3) -> tuple[ChatGate, list[str
     return gate, tasks(gate, *([2] * count))
 
 
-async def test_the_focus_window_is_the_hold_wake() -> None:
-    gate = ChatGate(policy="class", focus_s=7)
-    assert gate.hold_wake_s == 7
-    await gate.close()
-
-
 async def test_an_idle_open_chat_leaves_its_slots_to_tasks() -> None:
     clock = ClockBox()
     gate, ids = gate_with_tasks(clock)

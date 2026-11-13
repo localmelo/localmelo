@@ -221,7 +221,7 @@ async def test_a_main_chat_folder_taken_back_in_a_side_chat_goes_everywhere(
         main = console.main_id
         assert main is not None
         await console.sessions.book.view(main, "main").grant(str(folder), kind="folder")
-        assert console.sessions.folder_grants(side) == (str(folder),)
+        assert console.sessions.book.folders_for(side) == (str(folder),)
 
         gone = await client.delete(
             f"/api/sessions/{side}/folders", params={"path": str(folder)}
@@ -232,7 +232,7 @@ async def test_a_main_chat_folder_taken_back_in_a_side_chat_goes_everywhere(
             "revoked": [{"key": str(folder), "scope": "global"}],
             "everywhere": True,
         }
-        assert console.sessions.folder_grants(main) == ()
+        assert console.sessions.book.folders_for(main) == ()
 
 
 async def test_a_revoke_the_store_cannot_save_is_503_and_holds_here(

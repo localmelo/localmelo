@@ -32,7 +32,6 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_grant,
     wait_words,
-    window_question,
 )
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
@@ -773,7 +772,6 @@ def test_a_chat_may_keep_a_question_only_the_person_answers(
 ) -> None:
     assert person_grant(request_) is kept
     assert grant_offered(request_) is kept
-    assert window_question(request_) is request_.tool_name.startswith("window-read:")
 
 
 @pytest.mark.parametrize(
@@ -810,7 +808,7 @@ def test_the_window_question_outside_the_workspace_is_never_kept() -> None:
     outside = dataclasses.replace(
         _window(), outside=OutsideAccess("/x/a.txt", "/x", "read", True)
     )
-    assert not window_question(outside) and not person_grant(outside)
+    assert not person_grant(outside)
 
 
 def test_a_site_question_without_a_site_or_outside_the_workspace_is_never_kept() -> (
