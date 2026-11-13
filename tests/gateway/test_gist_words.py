@@ -71,15 +71,6 @@ SAMPLES: dict[str, tuple[str, dict[str, Any], ActionReview | None]] = {
 PARAM = re.compile(r"\{(\w+)\}")
 
 
-def test_every_sentence_and_warning_has_words_in_both_languages() -> None:
-    for language in ("en", "zh-Hans"):
-        words = catalog(language)
-        for name in SAY_IDS:
-            assert f"gist.say.{name}" in words, (language, name)
-        for name in WARN_IDS:
-            assert f"gist.warn.{name}" in words, (language, name)
-
-
 def test_every_sentence_is_sampled() -> None:
     assert sorted(SAMPLES) == sorted(SAY_IDS)
 

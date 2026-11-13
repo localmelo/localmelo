@@ -154,7 +154,7 @@ SCHEMA_VERSION: Final = 3
 # started that stopped (#411) (``turns.origin``; ``""`` the person).
 TURN_ORIGINS: Final = frozenset({"", "ask_owner", "followup"})
 
-# The statuses a RunResult can have (docs/run-results.md, "Statuses").
+# The statuses a RunResult can have (docs/reference/run-results.md, "Statuses").
 RUN_STATUSES: Final = frozenset(
     {
         "completed",
