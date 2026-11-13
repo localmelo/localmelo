@@ -113,11 +113,6 @@ def parse_battery(text: str) -> BatterySnapshot:
     )
 
 
-def _battery_usable(snapshot: BatterySnapshot) -> bool:
-    """A reading that names a power source or a percentage; else unparseable."""
-    return snapshot.known and (snapshot.on_ac is not None or snapshot.pct is not None)
-
-
 def read_pmset() -> str:
     """Run the read-only ``pmset -g batt``; raise when it cannot be read."""
     result = subprocess.run(
@@ -132,6 +127,15 @@ def read_pmset() -> str:
     if not result.stdout.strip():
         raise OSError("pmset printed nothing")
     return result.stdout
+
+
+async def read_battery(runner: Callable[[], str]) -> BatterySnapshot:
+    """One reading from *runner*, or raise; a reading that names neither a power
+    source nor a percentage is unparseable. The callers log the failure."""
+    parsed = parse_battery(await asyncio.to_thread(runner))
+    if not (parsed.known and (parsed.on_ac is not None or parsed.pct is not None)):
+        raise ValueError("pmset output was not parseable")
+    return parsed
 
 
 class BatteryReader:
@@ -169,10 +173,7 @@ class BatteryReader:
     async def poll_once(self) -> BatterySnapshot:
         """Read once, keep the last good state on a failure, return the state."""
         try:
-            text = await asyncio.to_thread(self._runner)
-            parsed = parse_battery(text)
-            if not _battery_usable(parsed):
-                raise ValueError("pmset output was not parseable")
+            parsed = await read_battery(self._runner)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -643,11 +644,7 @@ class MachineMonitor:
         if runner is None:
             return BatterySnapshot()
         try:
-            text = await asyncio.to_thread(runner)
-            parsed = parse_battery(text)
-            if not _battery_usable(parsed):
-                raise ValueError("pmset output was not parseable")
-            return parsed
+            return await read_battery(runner)
         except asyncio.CancelledError:
             raise
         except Exception:
