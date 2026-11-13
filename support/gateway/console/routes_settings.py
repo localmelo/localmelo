@@ -198,11 +198,6 @@ def _file_revision() -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def _redact(text: str) -> str:
-    """Return *text* with any secret shapes replaced by ``[redacted]``."""
-    return redact_secrets(text)[0]
-
-
 def _kind_words(label: str) -> str:
     """*label* in the request's language when the page asks for one.
 
@@ -275,7 +270,7 @@ async def health_json(
         "events_schema": EVENT_SCHEMA_VERSION,
         "version": display.localmelo_version(),
         "configured": console.cfg.is_configured,
-        "config_errors": [_redact(err) for err in console.cfg.validate()],
+        "config_errors": [redact_secrets(err)[0] for err in console.cfg.validate()],
         "model": model_json(console.cfg),
         "model_server": console.probe.snapshot(),
         # A switch of melo_serve's chat model: null before the first one.
@@ -331,7 +326,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     if found is None:
         return body
     body["url"] = url_label(found.url)
-    body["problem"] = _redact(redact_userinfo(found.problem))
+    body["problem"] = redact_secrets(redact_userinfo(found.problem))[0]
     if discovery.NO_API_KEY_HINT in found.problem:
         return {**body, "state": "needs_key"}
     ollama = await discovery.is_ollama(
@@ -386,7 +381,7 @@ def _advanced_options() -> list[dict[str, str]]:
 def _shown(value: Any) -> str:
     """A setting's value as ``melo -h all`` prints it: text bare, the rest as JSON."""
     text = value if isinstance(value, str) and value else setting_keys.show(value)
-    return _redact(text)
+    return redact_secrets(text)[0]
 
 
 def _developer_settings(cfg: config.Config) -> list[dict[str, Any]]:
@@ -464,7 +459,7 @@ def settings_json() -> dict[str, Any]:
         "workspace": ws or DEFAULT_WORKSPACE,
         "sections": sections,
         "defaults": onboard.backend_defaults(),
-        "errors": [_redact(err) for err in cfg.validate()],
+        "errors": [redact_secrets(err)[0] for err in cfg.validate()],
         "choices": {
             "chat_backends": [
                 {
@@ -704,7 +699,7 @@ def _build_candidate(
             setattr(target, field_name, field_val if named or not is_model else "")
         config.trim_text(target)
 
-    errors = [_redact(err) for err in candidate.validate()]
+    errors = [redact_secrets(err)[0] for err in candidate.validate()]
     if errors:
         raise ApiError(
             400,
@@ -873,11 +868,11 @@ async def _test_hosted(candidate: config.Config) -> JSONResponse:
             async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
                 await onboard_probe.probe_embedding(candidate)
         except Exception as exc:
-            err = _redact(redact_userinfo(str(exc) or type(exc).__name__))
+            err = redact_secrets(redact_userinfo(str(exc) or type(exc).__name__))[0]
             return JSONResponse(
                 content={"ok": False, "error": err, "failed": "embedding"}
             )
-    message = _redact(_hosted_message(found, model))
+    message = redact_secrets(_hosted_message(found, model))[0]
     return JSONResponse(
         content={
             "ok": found.ok,
@@ -993,7 +988,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            err = _redact(redact_userinfo(str(exc) or type(exc).__name__))
+            err = redact_secrets(redact_userinfo(str(exc) or type(exc).__name__))[0]
             # Which model did not answer: the embedding probe's errors say so.
             part = (
                 "embedding"
@@ -1047,7 +1042,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         try:
             models = await _call_list_models(resolved_backend, resolved_url)
         except DiscoveryError as exc:
-            reason = _redact(redact_userinfo(str(exc)))
+            reason = redact_secrets(redact_userinfo(str(exc)))[0]
             raise ApiError(
                 502,
                 "backend_unreachable",

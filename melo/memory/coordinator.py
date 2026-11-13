@@ -40,11 +40,6 @@ def _exception_text(exc: BaseException) -> str:
     return str(exc) or type(exc).__name__
 
 
-def _redacted_text(text: str) -> str:
-    """*text* with the secrets of :func:`redact_secrets` replaced."""
-    return redact_secrets(text)[0]
-
-
 # Provenance is stored beside the entry, so every text it carries is bounded
 # and redacted like the entry text (P4, review finding 2).
 PROVENANCE_TEXT_CHARS = 300
@@ -85,7 +80,7 @@ def _redacted_value(value: Any) -> Any:
     ``RecursionError``.
     """
     if isinstance(value, str):
-        return _redacted_text(value)
+        return redact_secrets(value)[0]
     if not isinstance(value, (dict, list)):
         return value
     root: Any = {} if isinstance(value, dict) else []
@@ -95,7 +90,7 @@ def _redacted_value(value: Any) -> Any:
         pairs = source.items() if isinstance(source, dict) else enumerate(source)
         for name, item in pairs:
             if isinstance(item, str):
-                redacted: Any = _redacted_text(item)
+                redacted: Any = redact_secrets(item)[0]
             elif isinstance(item, (dict, list)):
                 redacted = {} if isinstance(item, dict) else []
                 todo.append((item, redacted))
@@ -117,12 +112,12 @@ def _redacted_step(step: StepRecord) -> StepRecord:
     if result is not None:
         result = replace(
             result,
-            output=_redacted_text(result.output),
-            error=_redacted_text(result.error),
+            output=redact_secrets(result.output)[0],
+            error=redact_secrets(result.error)[0],
         )
     return replace(
         step,
-        thought=_redacted_text(step.thought),
+        thought=redact_secrets(step.thought)[0],
         tool_call=call,
         tool_result=result,
     )
@@ -136,8 +131,8 @@ def _redacted_task(task: TaskRecord) -> TaskRecord:
     """
     return replace(
         task,
-        query=_redacted_text(task.query),
-        result=_redacted_text(task.result),
+        query=redact_secrets(task.query)[0],
+        result=redact_secrets(task.result)[0],
     )
 
 

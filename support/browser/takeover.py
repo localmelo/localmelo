@@ -46,6 +46,7 @@ from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.pause import Resumed
+from localmelo.melo.contracts.redaction import REDACTED
 
 Owner = Literal["melo", "you"]
 MELO: Final = "melo"
@@ -509,7 +510,6 @@ _HEADER_LINES: Final = ("< %s: %s", "> %s: %s")
 CREDENTIAL_HEADERS: Final = frozenset(
     {"authorization", "proxy-authorization", "cookie", "set-cookie"}
 )
-REDACTED: Final = "[redacted]"
 
 
 def _credential(name: object) -> bool:
