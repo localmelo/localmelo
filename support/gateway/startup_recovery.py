@@ -35,6 +35,7 @@ from localmelo.support.sessions.store import (
     SessionStoreError,
     StoredEvent,
     TurnInfo,
+    iter_events,
 )
 from localmelo.support.task_stage import (
     CALL_REASON,
@@ -179,15 +180,7 @@ class StartupRecovery:
             await self._classify(task)
 
     async def _events(self, task_id: str) -> list[StoredEvent]:
-        events: list[StoredEvent] = []
-        after = 0
-        while True:
-            page = await self.store.list_events(task_id, after_id=after)
-            events.extend(page)
-            if len(page) < 1000:
-                return events
-            assert page[-1].id is not None
-            after = page[-1].id
+        return [stored async for stored in iter_events(self.store, task_id)]
 
     async def _evidence(self, task: TaskRecord) -> ResumeEvidence | None:
         """The task's evidence; ``None`` when its identity contradicts itself (unknown)."""

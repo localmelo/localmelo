@@ -187,7 +187,11 @@ from localmelo.support.sessions.identity import (
     LANGUAGE_RULE,
 )
 from localmelo.support.sessions.runner import SessionRunner, settle
-from localmelo.support.sessions.store import SessionStore, SessionStoreError
+from localmelo.support.sessions.store import (
+    SessionStore,
+    SessionStoreError,
+    iter_events,
+)
 from localmelo.support.task_cli import ending_words
 
 log = logging.getLogger(__name__)
@@ -2397,15 +2401,7 @@ class TaskWorkers:
         if self.store.failed is not None:
             raise RuntimeError("Event store is not writable")
         record = await self.tasks.get_task(task_id)
-        after = 0
-        events = []
-        while True:
-            page = await self.store.list_events(task_id, after_id=after)
-            events.extend(page)
-            if len(page) < 1000:
-                break
-            assert page[-1].id is not None
-            after = page[-1].id
+        events = [stored async for stored in iter_events(self.store, task_id)]
         return build_park_card(record.spec, events)
 
     async def _finalize_park(
