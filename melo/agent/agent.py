@@ -3746,7 +3746,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         belongs on a queue. The ``thinking`` and ``content`` of
         ``assistant.message`` events, and the ``rationale``, ``summary``
         and ``best_effort_result`` of ``reflection`` events, pass
-        :func:`~localmelo.melo.checker.redaction.redact_secrets`, while
+        :func:`~localmelo.melo.contracts.redaction.redact_secrets`, while
         working memory, history's tasks and steps and the RunResult keep
         the text as it is; history's model calls store it redacted too.
         Without a sink, no event is built.

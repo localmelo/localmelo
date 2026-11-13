@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.cli.attachments import MAX_FILE_BYTES, Attachment, _clean
 
 # The tail of the output kept for a snapshot: what one attachment may hold.

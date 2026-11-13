@@ -15,8 +15,8 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import ImagePart
 
 # ── Constants ──
@@ -321,7 +321,7 @@ def validate_memory_candidate(payload: MemoryCandidatePayload) -> ValidationResu
     Refusals: empty or whitespace-only text, an unknown ``source`` or
     ``target``, and a ``profile`` entry for the ``long`` target whose
     source is not ``user`` (R6-lite's rule, declared now). Otherwise
-    :func:`~localmelo.melo.checker.redaction.redact_secrets` runs first,
+    :func:`~localmelo.melo.contracts.redaction.redact_secrets` runs first,
     then :func:`~localmelo.melo.checker.sanitize.sanitize_assistant_text`,
     then the text is cut to its source's limit with
     :data:`CANDIDATE_TRUNCATION_SUFFIX`. The sanitized payload's metadata

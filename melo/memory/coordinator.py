@@ -7,8 +7,8 @@ from typing import Any
 
 from localmelo.melo.checker.checker import Checker
 from localmelo.melo.checker.payloads import MemoryCandidatePayload
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.memory.hippo import (
     SIGNALS,
     CandidateItem,

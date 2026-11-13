@@ -19,7 +19,7 @@ What the JSON keeps of each message, and what it leaves out:
   memory keeps tool images already.
 
 An assistant message's ``content`` and ``thinking`` pass
-:func:`~localmelo.melo.checker.redaction.redact_secrets`, because the live
+:func:`~localmelo.melo.contracts.redaction.redact_secrets`, because the live
 window keeps them as the model wrote them; tool-call arguments pass
 :func:`~localmelo.melo.contracts.events.json_safe_payload`. A version bump
 keeps the decoders of older versions.
@@ -33,8 +33,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import json_safe_payload
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import (
     ImagePart,
     Message,

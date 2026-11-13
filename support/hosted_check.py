@@ -22,8 +22,8 @@ from typing import Final
 
 import httpx
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support import config, hosted, keychain
 from localmelo.support.backends import discovery

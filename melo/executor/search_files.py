@@ -24,7 +24,7 @@ from collections.abc import Callable, Coroutine
 from pathlib import PurePosixPath
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import ToolDef
 
 SEARCH_HITS: Final = 50

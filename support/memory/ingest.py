@@ -69,8 +69,8 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from localmelo.melo import clock
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import without_passwords
 from localmelo.support.memory import ChatMemory, hippo_encode, hippo_judge
 from localmelo.support.memory.hippo_route import Router

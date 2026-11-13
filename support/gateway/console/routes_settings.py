@@ -29,9 +29,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.events import EVENT_SCHEMA_VERSION
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import SESSION_TEXT_CHARS
 from localmelo.support import (
     config,

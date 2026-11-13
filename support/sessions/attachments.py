@@ -10,8 +10,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.attachments import FILE_CLOSER, FILE_OPENER
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import SPENT, VAULT
 
 _BLOCK = re.compile(

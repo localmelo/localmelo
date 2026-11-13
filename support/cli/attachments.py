@@ -12,7 +12,7 @@ import stat
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.sessions.attachments import (
     MAX_ATTACHMENTS,
     MAX_FILE_BYTES,

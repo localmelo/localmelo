@@ -39,8 +39,7 @@ from typing import Any, Final, NamedTuple
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.checker.redaction import redact_secrets, secret_spans
-from localmelo.melo.contracts.redaction import splice
+from localmelo.melo.contracts.redaction import redact_secrets, secret_spans, splice
 from localmelo.melo.contracts.sign_in import password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,

@@ -38,12 +38,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
 from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another

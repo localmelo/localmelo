@@ -22,8 +22,8 @@ from localmelo.melo.agent._chat import Chat
 from localmelo.melo.agent._notes_loop import _NotesLoop
 from localmelo.melo.agent.options import retrieval_refusal
 from localmelo.melo.checker.payloads import MemoryCandidatePayload
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.memory.notes import thought_chunks
 from localmelo.melo.memory.recall import (
     LONG_POOL,

@@ -7,7 +7,7 @@ import math
 import os
 from collections.abc import Sequence
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.memory.notes import _task_line
 from localmelo.melo.memory.retrieval.base import Doc
 

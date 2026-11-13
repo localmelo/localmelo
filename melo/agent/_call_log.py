@@ -14,7 +14,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import LLMCallRecord, Message, exception_text
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class CallLog:
 
         ``step`` and ``attempt`` are the run's counters now, when the
         response has arrived. ``content`` and ``thinking`` pass
-        :func:`~localmelo.melo.checker.redaction.redact_secrets`, and
+        :func:`~localmelo.melo.contracts.redaction.redact_secrets`, and
         ``redactions`` counts both. *reasoning_key* is kept only when the
         response has thinking. A ``plan`` response becomes the latest
         planning row before it is written, whether or not the write

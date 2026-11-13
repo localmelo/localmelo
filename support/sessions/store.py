@@ -54,7 +54,6 @@ from typing import Any, Final, Literal, get_args
 
 import aiosqlite
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.attachments import words_before_files
 from localmelo.melo.contracts.events import (
@@ -63,6 +62,7 @@ from localmelo.melo.contracts.events import (
     OPTIONAL_EVENT_FIELDS,
     json_safe_payload,
 )
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.memory._sqlite import (
     THINKING_RETENTION_DAYS as THINKING_RETENTION_DAYS,
 )

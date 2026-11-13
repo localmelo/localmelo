@@ -24,7 +24,7 @@ Only files in the project count, and they are only read:
   where other assistants keep their personal files (``~/.claude``,
   ``~/.codex``, ``~/.gemini``, ...) belong to the person, not to a project:
   the importer brings what those say in as notes, so they are never read here.
-* Secrets are removed (:func:`~localmelo.melo.checker.redaction.redact_secrets`)
+* Secrets are removed (:func:`~localmelo.melo.contracts.redaction.redact_secrets`)
   and every line :func:`~localmelo.support.memory.records.sensitive` flags is
   dropped.
 
@@ -38,7 +38,7 @@ import re
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.memory import records
 from localmelo.support.memory.importer import sources
 

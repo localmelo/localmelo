@@ -2,7 +2,7 @@
 
 ``procedures.db`` keeps each routine's query text and each tool call's
 label. Both go through :func:`redact_and_mask`:
-:func:`~localmelo.melo.checker.redaction.redact_secrets` (key shapes, bearer
+:func:`~localmelo.melo.contracts.redaction.redact_secrets` (key shapes, bearer
 tokens, one-time codes), then :func:`mask_credentials`, which also replaces
 with :data:`MASK`:
 

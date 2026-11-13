@@ -11,8 +11,8 @@ import sys
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets, redacted
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.redaction import redact_secrets, redacted
 
 if TYPE_CHECKING:
     from localmelo.melo.agent import Agent

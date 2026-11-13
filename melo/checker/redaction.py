@@ -1,7 +1,9 @@
-"""The redaction of secrets, under the name the checker's importers use.
+"""The redaction of secrets, under its older path.
 
 The code is in :mod:`localmelo.melo.contracts.redaction`, below the checker, where
-the password door reads it. This module gives the names that are imported from here.
+the password door reads it, and the package's own modules import it from there.
+This module keeps the names that ``docs/reference/python-api.md`` gives under
+this path.
 """
 
 from __future__ import annotations

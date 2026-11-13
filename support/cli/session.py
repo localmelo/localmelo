@@ -31,9 +31,9 @@ from rich.text import Text
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.attachments import words_before_files
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.streaming import StreamDisplay
 from localmelo.melo.schema import WINDOW_MESSAGES_MAX, RunResult
 from localmelo.support import config
@@ -1690,7 +1690,7 @@ class CliSession:
                 )
             )
             return
-        from localmelo.melo.checker.redaction import redact_secrets
+        from localmelo.melo.contracts.redaction import redact_secrets
 
         path = home_label(os.path.expanduser(factory.mcp_config))
         self.out.print(

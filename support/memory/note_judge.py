@@ -20,8 +20,8 @@ import unicodedata
 from collections.abc import Sequence
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.memory.retrieval.llm import send_from_provider
 from localmelo.melo.schema import split_thinking
 from localmelo.support.memory import hippo_encode, note_gate, records

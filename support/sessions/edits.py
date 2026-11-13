@@ -18,7 +18,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.executor.builtins import edited_text
 from localmelo.support.sessions.display import file_facts
 

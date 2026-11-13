@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from localmelo.melo.checker._stream_redaction import LineRedactor
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import (
     ReasoningTags,
     split_leading_thinking,
