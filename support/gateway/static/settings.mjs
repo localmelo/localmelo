@@ -11,7 +11,7 @@ const terminalAdvice = (message) => /\brun 'melo /i.test(message);
 
 // The dialog's words for a model server: plain ones by default (`settings.plain.*`), and the technical ones a
 // developer reads today (`settings.developer.*`: backend, API URL, adapter). `layout()` writes the set of the mode.
-const WORD_NAMES = ["description", "adapter", "url", "urlHint", "discover", "needUrl"];
+const WORD_NAMES = ["adapter", "url", "discover", "needUrl"];
 const wordsOf = (set) => Object.fromEntries(WORD_NAMES.map((name) => [name, t(`settings.${set}.${name}`)]));
 
 /** The sections, in the order of the list; each is named `settings.section.<id>`. Developer is listed in developer mode only. */
@@ -198,10 +198,8 @@ export function setupSettings({
   function layout(developerMode) {
     isDeveloper = developerMode;
     words = wordsOf(developerMode ? "developer" : "plain");
-    $("settings-description").textContent = words.description;
     $("s-adapter-label").textContent = words.adapter;
     $("s-chat-url-label").textContent = words.url;
-    $("s-chat-url-hint").textContent = words.urlHint;
     dialog.dataset.layout = developerMode ? "developer" : "default";
     $("settings-tab-developer").hidden = !developerMode;
     $("s-recall-key").hidden = !developerMode;
@@ -995,6 +993,7 @@ export function setupSettings({
     if (open) {
       $("s-workspace").value = settings?.workspace || "";
       $("s-workspace").removeAttribute?.("aria-invalid");
+      folderSays("");
       $("s-workspace").focus?.();
     }
   }
@@ -1006,14 +1005,19 @@ export function setupSettings({
     return undefined;
   });
   $("s-folder-cancel").addEventListener("click", () => folderEdit(false));
+  // The line under the path field says only what is wrong with it.
+  function folderSays(message) {
+    $("s-folder-hint").textContent = message;
+    $("s-folder-hint").hidden = !message;
+  }
   async function usePath() {
     const text = $("s-workspace").value.trim();
     if (!/^(\/|~\/)\S/.test(text)) {
       $("s-workspace").setAttribute("aria-invalid", "true");
-      $("s-folder-hint").textContent = t("settings.folder.notFull");
+      folderSays(t("settings.folder.notFull"));
       return;
     }
-    $("s-folder-hint").textContent = t("settings.folder.hint");
+    folderSays("");
     await setFolder(text);
   }
   $("s-folder-use").addEventListener("click", usePath);
@@ -1029,6 +1033,8 @@ export function setupSettings({
       const page = await api("/chores");
       if (currentGeneration !== generation) return;
       checkin = page.checkin ?? false;
+      // The example of a request shows only while there is no chore to look at.
+      $("s-chores-hint").hidden = (page.chores?.length ?? 0) > 0;
     } catch {
       if (currentGeneration !== generation) return;
       checkin = checkin || false;
