@@ -115,7 +115,8 @@ async def test_every_request_tells_the_chat_to_act(tmp_path: Path) -> None:
         await _wait_turn(client, str(console.main_id))
         assert FRONT_TEXT in llm.requests[0][0].content
         # The choice is asked for with the person's message too: on a real model the
-        # rule in the identity alone moved nothing (0 of 32 long requests, 26 with it).
+        # rule in the identity alone moved no long request to a task (0 of 16), and
+        # with this note 26 of 32 went.
         said = str(llm.requests[0][-1].content)
         assert said.startswith("tidy my notes") and WHO_NOTE in said
         assert "first call is task_create" in WHO_NOTE
