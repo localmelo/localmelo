@@ -369,6 +369,33 @@ def test_a_switch_changes_the_model_for_the_next_message_and_keeps_the_rest(
     }
 
 
+def test_the_switch_list_sends_a_key_only_to_the_address_it_belongs_to(
+    client: TestClient, stub: Stub, fake_keychain: FakeSecurity
+) -> None:
+    save_local()
+    keychain.write("localmelo.openai", KEY)
+    saved = client.put(
+        "/api/settings/key",
+        json={"preset": "other", "key": KEY + "2", "address": GATEWAY_A},
+    )
+    assert saved.status_code == 200
+    # A file that names another address for a built-in service, and for "Other" an
+    # address its key was not saved for.
+    with open(config.config_path(), "a", encoding="utf-8") as handle:
+        handle.write(
+            f'\n[services.openai]\nchat_model = "gpt-4o"\nbase_url = "{EVIL}"\n'
+            f'\n[services.other]\nchat_model = "m1"\nbase_url = "{GATEWAY_B}"\n'
+        )
+    stub.answers[OPENAI] = (["gpt-4o"], None)
+
+    body = client.get("/api/chat-models").json()
+    refused = switch(client, "other", "m1")
+
+    assert [group["id"] for group in body["groups"]] == ["local", "openai"]
+    assert refused.status_code == 409
+    assert stub.calls == [(OPENAI, KEY)]  # nothing went to EVIL or to GATEWAY_B
+
+
 def test_a_switch_that_cannot_be_made_changes_nothing(
     client: TestClient, console: Console, stub: Stub, fake_keychain: FakeSecurity
 ) -> None:
