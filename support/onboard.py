@@ -112,21 +112,61 @@ def _onboard_local(cfg: config.Config, key: str) -> bool:
     return _confirm()
 
 
-def _pick_hosted_model(preset: hosted.Preset, current: str) -> str:
-    """The model of a hosted service: one of its suggestions, or a name typed."""
-    if not preset.models:
+# The most models the setup list shows; the rest can be typed.
+_MAX_LISTED = 30
+_CHOOSE = "Choose a model below"
+
+
+def _listed_models(
+    preset: hosted.Preset, section: config.CloudVendorConfig
+) -> list[str]:
+    """The models the service lists once its key exists: one GET, no chat; [] when none is known."""
+    address = hosted.address_of(preset.backend, section)
+    try:
+        found = asyncio.run(hosted_check.service_models(preset, address))
+    except (
+        Exception
+    ):  # offline, a locked keychain: the setup goes on with the suggestions
+        return []
+    return list(found.models)
+
+
+def _pick_hosted_model(
+    preset: hosted.Preset, current: str, listed: list[str] | None = None
+) -> str:
+    """The model of a hosted service: one the service lists, one of its suggestions, or a name typed.
+
+    With the service's list known, the model offered first is the first suggestion it
+    has (or the one in use); when it has none, no model is offered and one is chosen.
+    """
+    if not preset.models and not listed:
         while True:
             name = _ask("Model name", current)
             if name:
                 return name
             print("    Enter the model's name.")
-    names = list(dict.fromkeys([current, *preset.models])) if current else []
-    names = names or list(preset.models)
-    rows = [*names, "Type another model name"]
-    choice = _ask_choice("Chat model", rows, default=1)
-    if choice <= len(names):
-        return names[choice - 1]
+    if listed:
+        offered = (
+            current
+            if current in listed
+            else next((name for name in preset.models if name in listed), "")
+        )
+        names = [offered] if offered else []
+        names += [name for name in listed if name != offered][:_MAX_LISTED]
+        rows = [*([] if offered else [_CHOOSE]), *names, "Type another model name"]
+        default = 1
+    else:
+        names = list(dict.fromkeys([current, *preset.models])) if current else []
+        names = names or list(preset.models)
+        rows = [*names, "Type another model name"]
+        default = 1
     while True:
+        choice = _ask_choice("Chat model", rows, default=default)
+        if rows[choice - 1] == _CHOOSE:
+            print("    Choose one of the models the service lists.")
+            continue
+        if rows[choice - 1] != "Type another model name":
+            return rows[choice - 1]
         name = _ask("Model name")
         if name:
             return name
@@ -139,19 +179,20 @@ def _paste_hosted_key(preset: hosted.Preset, section: config.CloudVendorConfig) 
     The section then holds only the keychain reference. A key that does not look
     like one is asked for again; a keychain that cannot be used says why.
     """
+    service = hosted.service_for(preset, section.base_url or preset.base_url)
     while True:
         key = _ask_secret("API key (typed hidden, saved in the keychain)")
         if not key:
             print("    Paste the key, or press Ctrl-C to cancel.")
             continue
         try:
-            keychain.write(preset.service, key)
+            keychain.write(service, key)
         except keychain.KeychainError as exc:
             print(f"    {exc}")
             if exc.kind == "bad":
                 continue
             return False
-        section.api_key = keychain.ref_for(preset.service)
+        section.api_key = keychain.ref_for(service)
         section.api_key_env = ""
         print("    Saved in the keychain.")
         return True
@@ -161,7 +202,10 @@ def _hosted_key(
     preset: hosted.Preset, section: config.CloudVendorConfig, *, same_service: bool
 ) -> None:
     """Settle where the service's key comes from: kept, pasted, or an environment variable."""
-    have = same_service and hosted.key_state(section) in (hosted.ENV, hosted.KEYCHAIN)
+    have = same_service and hosted.key_state(preset.backend, section) in (
+        hosted.ENV,
+        hosted.KEYCHAIN,
+    )
     named = same_service and bool(section.api_key_env)
     rows: list[tuple[str, str]] = []
     if have:
@@ -216,7 +260,9 @@ def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
         section.base_url = preset.stored_url
     _hosted_key(preset, section, same_service=same_service)
     section.chat_model = _pick_hosted_model(
-        preset, section.chat_model if same_service else ""
+        preset,
+        section.chat_model if same_service else "",
+        _listed_models(preset, section),
     )
     if not same_service:
         section.thinking = ""

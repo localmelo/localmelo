@@ -21,7 +21,7 @@ import pytest
 
 import localmelo.support.onboard as onboard
 from localmelo.melo.contracts.providers import ProviderError
-from localmelo.support import config
+from localmelo.support import config, hosted
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DiscoveryError, FoundServer
 from localmelo.support.config import Config, LocalBackendConfig
@@ -1952,6 +1952,12 @@ HOSTED_ROWS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _no_service_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setup asks a service for its models once a key exists; no test reaches one."""
+    monkeypatch.setattr(onboard, "_listed_models", lambda preset, section: [])
+
+
 def _typed_secret(*keys: str) -> mock.Mock:
     """``_ask_secret`` answering from *keys*; the real one reads without echo."""
     return mock.Mock(side_effect=list(keys))
@@ -2026,8 +2032,11 @@ def test_the_setup_picker_asks_the_address_of_other_and_the_model_by_name(
         "https://llm.example.com/v1",
         "some-model",
     )
-    assert cfg.openai.api_key == "keychain:localmelo.other"
-    assert fake_keychain.items == {("localmelo.other", "localmelo"): SECRET}
+    service = hosted.service_for(
+        hosted.BY_ID["other"], "https://llm.example.com/v1"
+    )  # one key per address
+    assert cfg.openai.api_key == f"keychain:{service}"
+    assert fake_keychain.items == {(service, "localmelo"): SECRET}
 
 
 def test_a_key_that_is_not_one_is_asked_for_again_and_never_saved(
@@ -2506,3 +2515,28 @@ def test_without_a_plan_the_screen_shows_the_manual_way(
     assert t_in("en", how.note) in out and discovery.GUIDE_URL in out
     assert ("This Mac is an Intel Mac." in out) is not raising
     assert "Try a hosted service." in out or raising
+
+
+def test_the_setup_offers_a_model_the_service_lists_first() -> None:
+    preset = hosted.get("deepseek")
+    assert preset is not None
+    answers = _Answers("")  # Enter takes the row offered first
+    with mock.patch("builtins.input", answers), mock.patch("builtins.print"):
+        picked = onboard._pick_hosted_model(preset, "", ["a-model", "deepseek-v4-pro"])
+    assert (
+        picked == "deepseek-v4-pro"
+    )  # the first suggestion the service has, not "a-model"
+
+
+def test_with_none_of_the_suggestions_listed_no_model_is_offered_first() -> None:
+    preset = hosted.get("deepseek")
+    assert preset is not None
+    answers = _Answers(
+        "", "2"
+    )  # Enter on the first row asks again; row 2 is a listed model
+    with mock.patch("builtins.input", answers), mock.patch("builtins.print") as out:
+        picked = onboard._pick_hosted_model(preset, "", ["a-model", "b-model"])
+    assert picked == "a-model"
+    assert len(answers.prompts) == 2
+    shown = " ".join(str(call.args[0]) for call in out.call_args_list if call.args)
+    assert "Choose a model below" in shown and "deepseek-flash" not in shown

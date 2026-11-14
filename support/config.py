@@ -610,6 +610,10 @@ class Config:
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
     pricing: dict[str, dict[str, float]] = field(default_factory=dict)
+    # [services.<id>]: what each hosted service remembers while another is in use, its
+    # last chat model (and "Other"'s address), and [services.local] the last local
+    # server (see support.hosted.last_models). Written by save(); no key is in it.
+    services: dict[str, dict[str, str]] = field(default_factory=dict)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
     _overridden: dict[str, tuple[Any, Any]] = field(
@@ -1588,6 +1592,9 @@ def _load_file() -> Config:
     cfg.mcp_config = str(data.get("mcp_config") or "")
     if "pricing" in data:  # a bad table is kept for Config.pricing_errors
         cfg.pricing = data["pricing"]
+    from localmelo.support import hosted
+
+    cfg.services = hosted.clean_services(data.get("services"))
 
     return cfg
 
@@ -1670,7 +1677,7 @@ def save(cfg: Config) -> None:
     tables: dict[str, list[str]] = {}
     for key, value in changed(cfg).items():
         section, _, name = key.rpartition(".")
-        if key not in ("chat_backend", "embedding_backend", "pricing"):
+        if key not in ("chat_backend", "embedding_backend", "pricing", "services"):
             line = f"{name} = {_toml_value(value)}"
             (tables.setdefault(section, []) if section else top).append(line)
     lines = [
@@ -1681,6 +1688,13 @@ def save(cfg: Config) -> None:
     ]
     for section, body in tables.items():
         lines.extend([f"[{section}]", *body, ""])
+
+    from localmelo.support import hosted
+
+    for ident, entry in hosted.stored_services(cfg).items():
+        lines.append(f"[services.{ident}]")
+        lines += [f"{name} = {_toml_string(value)}" for name, value in entry.items()]
+        lines.append("")
 
     # Kept as written, even when invalid (it only warns), so a save loses nothing.
     for model, price in (cfg.pricing if isinstance(cfg.pricing, dict) else {}).items():

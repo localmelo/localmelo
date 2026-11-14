@@ -170,7 +170,10 @@ def test_every_setting_is_saved_alone_and_loaded_back(config_path: Path) -> None
     settings_by_key = config.flat(Config())
     bad = []
     for key, default in settings_by_key.items():
-        if key == "pricing":  # tables of its own, tested with the prices
+        if key in (
+            "pricing",
+            "services",
+        ):  # tables of their own, tested with the prices and the hosted services
             continue
         new = _changed(default)
         cfg = Config()
