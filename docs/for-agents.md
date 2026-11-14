@@ -238,6 +238,8 @@ Every route the gateway serves:
 | `POST /api/auth/login` | [api-v2](reference/api-v2.md) |
 | `POST /api/auth/logout` | [api-v2](reference/api-v2.md) |
 | `POST /api/auth/rotate` | [api-v2](reference/api-v2.md) |
+| `GET /api/chat-models` | [api-v2](reference/api-v2.md#get-apichat-models) |
+| `POST /api/chat-models/switch` | [api-v2](reference/api-v2.md#post-apichat-modelsswitch) |
 | `PUT /api/checkin` | [api-v2](reference/api-v2.md) |
 | `GET /api/chores` | [api-v2](reference/api-v2.md) |
 | `POST /api/chores` | [api-v2](reference/api-v2.md) |
@@ -250,6 +252,7 @@ Every route the gateway serves:
 | `GET /api/grants` | [api-v2](reference/api-v2.md#get-apigrants) |
 | `DELETE /api/grants/{grant_id}` | [api-v2](reference/api-v2.md#delete-apigrantsid) |
 | `GET /api/health` | [api-v2](reference/api-v2.md#get-apihealth) |
+| `GET /api/hosted/models` | [api-v2](reference/api-v2.md#get-apihostedmodels) |
 | `PUT /api/memory` | [api-v2](reference/api-v2.md) |
 | `POST /api/memory/import` | [api-v2](reference/api-v2.md) |
 | `DELETE /api/memory/import/offer` | [api-v2](reference/api-v2.md) |

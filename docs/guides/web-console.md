@@ -264,7 +264,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | Command | On this page |
 |---|---|
 | `/help [command]` | The everyday commands; `/help all` lists every one and `/help NAME` gives one command's details. |
-| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. With melo_serve: alone, the list of its chat models; with a name, a switch every chat follows. |
+| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. With melo_serve: alone, the list of its chat models; with a name, a switch every chat follows. With a key for a hosted service: alone, the list of every model you can use now; with a name or `service:name`, a switch from the next message ([Hosted models](hosted-models.md#switch-between-models)). |
 | `/backend [url]` | With a URL: switch the model server and save it. Alone: open Settings at the model server. |
 | `/new`, `/clear`, `/side [title]` | A new chat, made by its first message and a side chat under the main chat; `/side` names it, and `/clear` also removes the rows shown. |
 | `/chats`, `/sessions [filter]` | Open the chat list, filtered by the word. |
@@ -754,8 +754,12 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   DeepSeek and Other (OpenAI format): the form then has an **API key** field with
   **Save key** (kept in your Mac's keychain, shown only as **Saved in the keychain**, with
   **Replace** and **Remove**) and, for a service with a switch for it, **Let the model think
-  before it answers**. **Test connection** then lists the service's models and tries one
-  short chat with a tool. See [Hosted models](hosted-models.md).
+  before it answers**. Once a key is saved the service lists its models by itself, when
+  Settings opens, when you choose the service and after you save the key (one request,
+  no chat); the first model it suggests is offered first, and a saved model it no longer
+  offers is said at once, never changed for you. Each service you used keeps its last
+  model, and a key goes only to its own service. **Test connection** tries one short chat
+  with a tool. See [Hosted models](hosted-models.md).
 - **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
