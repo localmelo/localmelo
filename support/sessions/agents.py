@@ -400,6 +400,10 @@ async def build_session_agent(
     :class:`~localmelo.support.gateway.console.front.FrontAgent`); every other
     caller passes neither.
 
+    The Agent keeps the record of repeated tasks on disk, so that it outlives a
+    restart, and the record holds no task text (``Agent``'s
+    *persist_procedures*): every chat and task is built here, so each does.
+
     *chat_id* is the chat this Agent is for: its browser keeps the files its
     pages hand over in the chat's work folder, which the Agent may read (see
     :mod:`localmelo.melo.contracts.work_folder`). Without one the folder is
@@ -559,6 +563,7 @@ async def build_session_agent(
             embedding=embedding,
             options=agent_options,
             tool_providers=providers,
+            persist_procedures=True,
         )
     except BaseException:
         # No Agent exists to own these if a wrapper or constructor refused.

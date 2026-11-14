@@ -174,6 +174,7 @@ from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
     key_for_query,
     key_for_routine,
+    key_for_words,
     length_options,
     run_place,
 )
@@ -669,19 +670,24 @@ class _Exit:
         return max(self.deadline - keep - now, 0.0)
 
 
+def _default_memory_dir() -> str:
+    """``LOCALMELO_MEMORY_DIR`` (used as given) or :data:`DEFAULT_MEMORY_DIR`."""
+    return os.environ.get(
+        "LOCALMELO_MEMORY_DIR", os.path.expanduser(DEFAULT_MEMORY_DIR)
+    )
+
+
 def _resolve_memory_dir(options: AgentOptions) -> str | None:
     """Directory for SQLite-backed memory, or ``None`` for in-memory backends.
 
     ``options.memory_dir`` comes first, with ``~`` expanded. Otherwise any
     non-empty ``LOCALMELO_PERSIST_MEMORY`` turns persistence on, in
-    ``LOCALMELO_MEMORY_DIR`` (used as given) or :data:`DEFAULT_MEMORY_DIR`.
+    :func:`_default_memory_dir`.
     """
     if options.memory_dir is not None:
         return os.path.expanduser(options.memory_dir)
     if os.environ.get("LOCALMELO_PERSIST_MEMORY"):
-        return os.environ.get(
-            "LOCALMELO_MEMORY_DIR", os.path.expanduser(DEFAULT_MEMORY_DIR)
-        )
+        return _default_memory_dir()
     return None
 
 
@@ -920,6 +926,10 @@ class _RunState:
     routine: str | None = None
     place: str | None = None
     key: RoutineKey | None = None
+    # For a run whose record holds no text (Agent's persist_procedures): the
+    # person's own part of the query, "" when the caller gave none, that the
+    # key is made of. None keeps the key and the text of the whole query.
+    key_words: str | None = None
     # What the run-start lookup found: the template the run's progress
     # rests on, at the level its gate gives, before the level cap of
     # shown_view. None for level 0.
@@ -1137,6 +1147,18 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     tools, :meth:`run_tool` runs one tool call outside a run, and
     :meth:`conversation` and :meth:`load_conversation` read and replace the
     working-memory window between runs.
+
+    *persist_procedures* is for the builders of chats and tasks, never an
+    option a person or script sets. Without a memory directory from
+    ``options.memory_dir`` or ``LOCALMELO_PERSIST_MEMORY`` it keeps the record
+    of repeated tasks in ``procedures.db`` of the default memory directory
+    (nothing else goes to disk) and makes that record hold no task text: a
+    record written without being asked must not hold the person's words, so a
+    routine's key is made of the person's own part of the query only (see
+    *own_chars* of :meth:`run_task`) and its ``query_text`` stays empty. A run
+    without such a part gets no routine. The two are one switch, so the file
+    never holds text it was not asked to hold. With a memory directory the
+    argument changes nothing: everything is kept as that opt-in says.
     """
 
     def __init__(
@@ -1146,6 +1168,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         embedding: BaseEmbeddingProvider | None = None,
         options: AgentOptions | None = None,
         tool_providers: Sequence[BaseToolProvider] = (),
+        persist_procedures: bool = False,
     ) -> None:
         self._llm = llm
         self._embedding = embedding
@@ -1228,10 +1251,14 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         # long-term only when memory is on and the reasoning mode is not
         # legacy.
         self._memory_dir = _resolve_memory_dir(self.options)
+        # Without that opt-in, *persist_procedures* keeps only the record of
+        # repeated tasks, in the default directory, and with no task text.
+        self._own_words_only = persist_procedures and self._memory_dir is None
+        directory = _default_memory_dir() if self._own_words_only else self._memory_dir
         history_backend = None
         long_backend: LongTerm | None = None
         procedures_backend = None
-        if self._memory_dir is not None:
+        if directory is not None:
             from localmelo.melo.memory._sqlite import (
                 make_private_dir,
                 thinking_retention_days,
@@ -1242,29 +1269,32 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             from localmelo.melo.memory.procedures.store import SqliteProcedures
 
             # Read first, so that a bad value raises before the directory is
-            # created.
-            retention_days = thinking_retention_days()
-            make_private_dir(self._memory_dir)
+            # created. Only the history store has it.
+            retention_days = (
+                thinking_retention_days() if self._memory_dir is not None else 0.0
+            )
+            make_private_dir(directory)
             if (
                 self.options.memory_dir is None
                 and "LOCALMELO_MEMORY_DIR" not in os.environ
             ):
                 # The default directory, localmelo's own: one that an older
                 # version made with the umask's mode is closed to others.
-                tighten_private_dir(self._memory_dir)
-            history_backend = SqliteHistory(
-                os.path.join(self._memory_dir, "history.db"),
-                thinking_retention_days=retention_days,
-            )
-            # A legacy run opens no long-term store; an existing file is left
-            # as it is. The explicit modes keep a text-only store.
-            if self.options.memory and self.options.reasoning != "legacy":
-                long_backend = SqliteLongTerm(
-                    os.path.join(self._memory_dir, "long_term.db")
+                tighten_private_dir(directory)
+            if self._memory_dir is not None:
+                history_backend = SqliteHistory(
+                    os.path.join(directory, "history.db"),
+                    thinking_retention_days=retention_days,
                 )
+                # A legacy run opens no long-term store; an existing file is
+                # left as it is. The explicit modes keep a text-only store.
+                if self.options.memory and self.options.reasoning != "legacy":
+                    long_backend = SqliteLongTerm(
+                        os.path.join(directory, "long_term.db")
+                    )
             # Opened, and created, at its first use: a run's end.
             procedures_backend = SqliteProcedures(
-                os.path.join(self._memory_dir, "procedures.db")
+                os.path.join(directory, "procedures.db")
             )
 
         # memory=False runs Hippo in its no-embedding mode, which is exactly
@@ -3937,6 +3967,11 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                 raise ValueError(f"picture refused: {problem}")
         earlier = earlier_block(turns_before)
         place = self._run_place()
+        # A record without text is keyed by the person's part alone; with no
+        # part given, the run gets no routine (see Agent._routine_key).
+        key_words = (
+            (own if own_chars is not None else "") if self._own_words_only else None
+        )
         started = time.perf_counter()
         task = TaskRecord(query=query)
         run = _RunState(
@@ -3953,6 +3988,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             from_person=from_person,
             acts=acts,
             routine=routine,
+            key_words=key_words,
             inbox=inbox,
             brief=self.options.brief_probe is not None,
             place=place,
@@ -4192,12 +4228,21 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             return None
 
     def _routine_key(self, run: _RunState, query: str) -> RoutineKey | None:
-        """The key of *run*'s routine, made at its first use; ``None`` without one."""
+        """The key of *run*'s routine, made at its first use; ``None`` without one.
+
+        A run whose record holds no text (``run.key_words``) is keyed by the
+        person's own words, never by *query*; no words, no routine of its own.
+        """
         if run.key is None:
+            words = run.key_words
             if run.routine is not None:
-                run.key = key_for_routine(run.routine, query)
+                run.key = key_for_routine(run.routine, query if words is None else "")
             elif run.place is not None:
-                run.key = key_for_query(query, run.place)
+                run.key = (
+                    key_for_query(query, run.place)
+                    if words is None
+                    else key_for_words(words, run.place)
+                )
         return run.key
 
     def _model_id(self) -> str:

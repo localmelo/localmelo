@@ -147,6 +147,22 @@ def key_for_query(query: str, place: str) -> RoutineKey:
     )
 
 
+def key_for_words(words: str, place: str) -> RoutineKey | None:
+    """The routine of *words* run in *place*, with no text kept; ``None`` for no words.
+
+    The key is the one :func:`key_for_query` makes for the same text, but the
+    routine keeps no text (``query_text`` is empty), so a file with it holds
+    only the SHA-256 of what the person said. *words* that normalize to
+    nothing make no routine.
+    """
+    text = normalize_query(words)
+    if not text:
+        return None
+    return RoutineKey(
+        key=routine_key(text, place), place=place, name=None, query_text=""
+    )
+
+
 def key_for_routine(name: str, query: str = "") -> RoutineKey:
     """The named routine *name*: one routine in any folder.
 
