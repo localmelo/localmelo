@@ -1538,16 +1538,16 @@ class CliSession:
         ):
             self._row(row[:11], row[11:])
         files = [getattr(self.store, "path", ""), LOG_PATH]
+        memory_dir = os.environ.get("LOCALMELO_MEMORY_DIR") or os.path.join(
+            os.path.expanduser("~"), ".cache", "localmelo", "memory"
+        )
+        # The chat's record of repeated tasks is always on disk; history only
+        # with the memory opt-in.
+        files.append(os.path.join(memory_dir, "procedures.db"))
         if os.environ.get("LOCALMELO_PERSIST_MEMORY") == "1" or getattr(
             self.agent.options, "memory_dir", None
         ):
-            memory_dir = os.environ.get("LOCALMELO_MEMORY_DIR") or os.path.join(
-                os.path.expanduser("~"), ".cache", "localmelo", "memory"
-            )
-            files += [
-                os.path.join(memory_dir, "procedures.db"),
-                os.path.join(memory_dir, "history.db"),
-            ]
+            files.append(os.path.join(memory_dir, "history.db"))
         files = [home_label(str(path)) for path in files if path]
         self._row("files", " · ".join(files))
         self._row("version", f"melo {display_version()}")

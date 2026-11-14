@@ -462,7 +462,7 @@ Where things live:
 - Sessions are kept in `~/.cache/localmelo/cli/sessions.db`: every turn, with your message, the answer and each tool call with its output, and the grants of the terminal's own chat; `~/.cache/localmelo/cli_history` keeps your messages. Both are plain text (mode 0600), not encrypted.
 - The web console's Workers view shows your chats read-only under **Terminal chats**, redacted as it reads them; it cannot change or send to them.
 - The UI writes its log to `~/.cache/localmelo/logs/cli.log` and never prints a traceback; a config file that is not valid TOML stops `melo` with one `melo: …` line and exit code 1.
-- Procedural memory follows [memory persistence](memory.md#keep-memory-between-runs), as for a task.
+- The chat keeps the steps of its turns in `procedures.db` of the memory directory with no turn text, whether or not [memory persistence](memory.md#keep-memory-between-runs) is on; `/memory` does not remove it (see [Procedural memory](../concepts/procedures.md#the-store)).
 
 ### First run
 

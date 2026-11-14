@@ -122,6 +122,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A blocked step reads the same on its chat card and its task page, also after a reload; a run whose work went on in a newer task says so instead of Needs you everywhere; the Scheduled tab says how each last run really ended.
 - The live steps beside a chat mark a failed, blocked or waiting step as the chat does, a stopped turn's card says its cause once and names Continue when it offers it, and a narrow window hides the empty side-chat note.
 - Keyboard use of the console: a skip link passes the chat list, scrolling code, tables and tool output take focus, and the app's window stops at 720 by 480; a short window fits its message box and setup card.
+- A task you did before a restart of the app shows again how many steps it took last time.
 
 ### Terminal
 

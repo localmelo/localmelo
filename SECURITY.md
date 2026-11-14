@@ -406,10 +406,17 @@ those tools can do.
   cleared, while tasks and steps keep the text as typed. A new memory
   directory is created with mode 0700, the default one is set to 0700 when
   it is open to group or others, and a new `history.db` is created with
-  mode 0600. `procedures.db`, also mode 0600, keeps each task's normalized
-  query and its tool calls' labels (file and program names), with key
-  shapes, bearer tokens, one-time codes, URL passwords and the values of
-  `NAME=value` secrets masked; see [Privacy](docs/guides/memory.md#privacy).
+  mode 0600. `procedures.db`, also mode 0600, keeps the steps of each
+  recurring task: the class, label and target of its tool calls (file and
+  program names, never their content), counts and times. A chat or task of
+  the app, the web console or the terminal writes it without any opt-in and
+  keeps no task text in it, only a fingerprint (a SHA-256 of the words you
+  wrote and the folder; it cannot be read back, but exact words that are
+  guessed can be checked against it). A run with persistence on also keeps
+  the task's normalized query there, with key shapes, bearer tokens,
+  one-time codes, URL passwords and the values of `NAME=value` secrets
+  masked. "Forget everything" does not remove this file; see
+  [Privacy](docs/guides/memory.md#privacy).
 - **Sessions.** The session store ([Sessions](docs/reference/sessions.md)),
   which the interactive UI uses for every turn in
   `~/.cache/localmelo/cli/sessions.db` (its messages also go to
