@@ -135,7 +135,9 @@ def test_only_an_idle_gateway_of_another_build_is_replaceable() -> None:
     assert not replaceable({build: "new", busy: "0"}, "new")  # the same build
     assert not replaceable({build: "old", busy: "1"}, "new")  # something runs in it
     assert not replaceable({build: "old"}, "new")  # it does not say it is idle
-    assert not replaceable({build: "old", busy: "0"}, "")  # a source checkout replaces nothing
+    assert not replaceable(
+        {build: "old", busy: "0"}, ""
+    )  # a source checkout replaces nothing
 
 
 @pytest.mark.parametrize(("busy", "ended"), [("0", True), ("1", False)])
