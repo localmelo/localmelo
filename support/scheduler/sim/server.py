@@ -5,8 +5,8 @@ it (design 8.1): at most ``n_srv`` calls run, more wait in the server's
 own first-come queue (as oMLX does, design 1.2), and the running calls
 share Θ(n) = n^α of throughput evenly. Prefill and decode share that rate
 until a later probe models prefill apart (spec Requirement 46; the known
-gap is in docs/scheduler.md). Completions are events tagged with a
-generation, so a rate change makes earlier end events stale instead of
+gap is in docs/reference/scheduler.md). Completions are events tagged with
+a generation, so a rate change makes earlier end events stale instead of
 moving them.
 """
 

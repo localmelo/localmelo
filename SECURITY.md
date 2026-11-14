@@ -409,20 +409,20 @@ those tools can do.
   mode 0600. `procedures.db`, also mode 0600, keeps each task's normalized
   query and its tool calls' labels (file and program names), with key
   shapes, bearer tokens, one-time codes, URL passwords and the values of
-  `NAME=value` secrets masked; see [Privacy](docs/memory.md#privacy).
-- **Sessions.** The session store ([Sessions](docs/sessions.md)), which the
-  interactive UI uses for every turn in `~/.cache/localmelo/cli/sessions.db`
-  (its messages also go to `cli_history`), keeps transcripts and tool
-  output in `sessions.db` as plain text, its window checkpoints included, in
-  `0600`
-  files inside `0700` directories. The stored answers and checkpoints pass
-  only the minimal redaction of events: well-known key shapes, bearer tokens
-  and one-time codes; anything else stays as written. A withdrawn message
-  keeps only the SHA-256 digest of its text. A browser's drafts, a queued
-  message and its outbox of messages not yet confirmed stay in the browser.
+  `NAME=value` secrets masked; see [Privacy](docs/guides/memory.md#privacy).
+- **Sessions.** The session store ([Sessions](docs/reference/sessions.md)),
+  which the interactive UI uses for every turn in
+  `~/.cache/localmelo/cli/sessions.db` (its messages also go to
+  `cli_history`), keeps transcripts and tool output in `sessions.db` as
+  plain text, its window checkpoints included, in `0600` files inside `0700`
+  directories. The stored answers and checkpoints pass only the minimal
+  redaction of events: well-known key shapes, bearer tokens and one-time
+  codes; anything else stays as written. A withdrawn message keeps only the
+  SHA-256 digest of its text. A browser's drafts, a queued message and its
+  outbox of messages not yet confirmed stay in the browser.
 
-[What the checks do](docs/tools.md#what-the-checks-do) describes the checks
-in more detail.
+[What the checks do](docs/guides/tools-mcp.md#what-the-checks-do) describes
+the checks in more detail.
 
 ## Scope
 

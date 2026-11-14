@@ -213,7 +213,7 @@ async def test_unverifiable_process_requires_single_use_confirmation(
     accepted = await _resume(workers, task_id, "resume-1", token)
     assert accepted["state"] == "queued"
     assert len(await _events(store, task_id, "sched.resume_confirmed")) == 1
-    assert workers._resume_tokens.pending(task_id) == 0
+    assert workers._resume_tokens.binding_for(token) is None
     with pytest.raises(StaleConfirmationError):
         await _resume(workers, task_id, "resume-2", token)
 
@@ -626,9 +626,9 @@ async def test_stop_invalidates_a_pending_token(
     task_id = await _started(workers, workspace)
     await _open_and_freeze(workers, monkeypatch)
     token = await _preview(workers, task_id, "resume-1")
-    assert workers._resume_tokens.pending(task_id) == 1
+    assert workers._resume_tokens.binding_for(token) is not None
     await workers.update(task_id, state="stop")
-    assert workers._resume_tokens.pending(task_id) == 0
+    assert workers._resume_tokens.binding_for(token) is None
     with pytest.raises(StaleConfirmationError):
         await _resume(workers, task_id, "resume-2", token)
 

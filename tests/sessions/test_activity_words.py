@@ -13,7 +13,6 @@ from localmelo.support.sessions.display import (
     drop_leading_ack,
     event_activity,
     request_said,
-    request_words,
     step_said,
 )
 from localmelo.support.words import said_in
@@ -297,7 +296,7 @@ def test_only_a_model_call_under_way_is_the_model_answering() -> None:
 def test_an_approval_puts_the_call_as_a_request_without_its_command_or_text(
     tool: str, arguments: Any, words: str
 ) -> None:
-    assert request_words(tool, arguments, root="/w") == words
+    assert said_in("en", request_said(tool, arguments, root="/w")) == words
 
 
 @pytest.mark.parametrize(
@@ -486,5 +485,5 @@ def test_a_question_about_a_site_or_an_app_says_what_melo_wants_to_do(
 ) -> None:
     """The card's heading and the activity line never show ``browser-act:`` or ``takeover:`` (#576)."""
     said = request_said(tool, arguments)
-    assert said_in("en", said) == words == request_words(tool, arguments)
+    assert said_in("en", said) == words
     assert said_in("zh-Hans", said) == chinese

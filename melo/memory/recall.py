@@ -8,8 +8,8 @@ the budgets and shape the record. It imports nothing from ``melo.agent``
 or ``support/``; the loop wiring lives in :mod:`localmelo.melo.agent`.
 
 The block's two delimiter lines are R4's (:data:`RECALL_START`,
-:data:`RECALL_END`), so :func:`~localmelo.melo.memory.short.note_store.strip_note_spans`
-and :func:`recall_span_chars` see every block, including R4's pinned draft.
+:data:`RECALL_END`), so :func:`recall_span_chars` sees every block, including
+R4's pinned draft.
 """
 
 from __future__ import annotations

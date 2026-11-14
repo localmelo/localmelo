@@ -429,11 +429,6 @@ def _context_part(measured: int, limit: int | None) -> dict[str, Any]:
     return _words("status.contextTokens", tokens=format_tokens(measured))
 
 
-def context_words(measured: int, limit: int | None = None) -> str:
-    """The status bar's context in words: ``context 8% used``, or the tokens."""
-    return _english(_context_part(measured, limit))
-
-
 @dataclass(frozen=True)
 class BarPart:
     """One piece of the terminal's status bar.

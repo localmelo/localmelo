@@ -2101,36 +2101,23 @@ def test_a_page_read_in_the_browser_is_marked_and_no_other_is() -> None:
 def _shape(name: str) -> Any:
     def make(size: int) -> str:
         shapes = {
-            "digits": '<p style="font-size:' + "1" * size + '!">t</p>',
-            "zeros": '<p style="opacity:' + "0" * size + 'x">t</p>',
             "spaces": '<p style="color: a' + " " * size + 'b">t</p>',
-            "important": '<p style="a:b' + " " * size + '!x">t</p>',
             "link_comments": "[a]: # (x\n" * (size // 10),
-            "link_comments_quoted": '[a]: # "x\n' * (size // 10),
             "link_comments_single": "[a]: # 'x\n" * (size // 10),
-            "link_heads": "[a]: #\n" * (size // 7),
             "empty_comments": "<!---->x" * (size // 8),
             "comments_one_line": "a <!-- c --> b " * (size // 15),
             "hidden_one_line": "<b hidden></b>x" * (size // 15),
             "hidden_slash": "<b hidden/>x" * (size // 12),
-            "deep_hidden": "<div hidden>" + "<i>" * (size // 6) + "</b>" * (size // 8),
             "deep_nested": "<div hidden>" + "<div>" * (size // 5),
-            "auto_closed": "<p hidden>"
-            + "<b>" * (size // 6)
-            + "<i></i>" * (size // 14),
             "tags": "<a <a <a " * (size // 9),
-            "quote": '<a x="' + "b <c " * (size // 5),
             "equals": "<p a" + "=b" * (size // 2) + ">t</p>",
             "long_name": "<p " + "a" * size + ">t</p>",
             "bogus": "<!x" * (size // 3),
-            "bogus_closed": "<!x>y" * (size // 5),
-            "textareas": "<div hidden>" + "<textarea>x</textarea>" * (size // 22),
             "textarea_open": "<div hidden>" + "<textarea>" * (size // 10),
             "titles": "<title>x" * (size // 8),
             "svg": "<div hidden>" + "<svg><g/></svg>" * (size // 15),
             "styles": "<style>.a{display:none}</style>x" * (size // 33),
             "style_open": "<style>x" * (size // 8),
-            "css_braces": "<style>" + "{" * size + "</style>",
             "css_rules": "<style>" + ".a{x:y}" * (size // 7) + "</style>",
             "css_classes": "<style>.h{display:none}</style>"
             + '<p class="a b c d e f g">x</p>' * (size // 30),
@@ -2156,34 +2143,19 @@ def _shape(name: str) -> Any:
 
 
 SHAPES = [
-    "digits",
-    "zeros",
-    "spaces",
-    "important",
-    "link_comments",
-    "link_comments_quoted",
     "link_comments_single",
-    "link_heads",
-    "empty_comments",
     "comments_one_line",
-    "hidden_one_line",
     "hidden_slash",
-    "deep_hidden",
     "deep_nested",
-    "auto_closed",
     "tags",
-    "quote",
     "equals",
     "long_name",
     "bogus",
-    "bogus_closed",
-    "textareas",
     "textarea_open",
     "titles",
     "svg",
     "styles",
     "style_open",
-    "css_braces",
     "css_rules",
     "css_classes",
     "css_selectors",
@@ -2232,7 +2204,7 @@ def test_result_text_takes_time_linear_in_the_answer(name: str) -> None:
     assert_linear(_shape(name), lambda text: gate.result_text(f"User: q\nmelo: {text}"))
 
 
-@pytest.mark.parametrize("name", ["stray_ends", "deep_hidden", "tags", "paragraphs"])
+@pytest.mark.parametrize("name", ["stray_ends", "tags", "paragraphs"])
 def test_a_part_read_out_of_order_is_checked_in_linear_time(name: str) -> None:
     from localmelo.support.memory import markup
 

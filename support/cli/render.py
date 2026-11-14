@@ -52,7 +52,6 @@ from localmelo.melo.schema import (
     RunResult,
     split_thinking,
 )
-from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.hanging import Hung
 from localmelo.support.cli.hanging import prefix as hung_prefix
@@ -75,6 +74,7 @@ from localmelo.support.progress_line import (
     tool_elapsed,
 )
 from localmelo.support.providers._http import UNREACHABLE_PREFIX
+from localmelo.support.sessions import edits
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.display import (
     Tense,

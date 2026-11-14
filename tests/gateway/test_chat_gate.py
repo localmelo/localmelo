@@ -24,7 +24,7 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     _trace_source,
 )
-from localmelo.support.scheduler import REASONS, Clock, Machine, Params
+from localmelo.support.scheduler import REASONS, Clock, Machine
 from localmelo.support.scheduler.sim.trace import SCHEMA, read_trace
 
 # ── Fakes ──
@@ -900,17 +900,6 @@ async def test_a_gate_transition_never_yields_to_the_loop(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        await gate.close()
-
-
-async def test_the_hold_wake_is_the_focus_window() -> None:
-    gate = ChatGate(policy="fcfs")
-    try:
-        assert gate.hold_wake_s == Params().tau_focus_s
-        assert gate._params is not None
-        gate._params = replace(gate._params, tau_focus_s=1.5)
-        assert gate.hold_wake_s == 1.5
-    finally:
         await gate.close()
 
 

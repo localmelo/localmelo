@@ -1190,10 +1190,6 @@ class Config:
         """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
         return self._validate_ui()
 
-    def console_errors(self) -> list[str]:
-        """The ``[console]`` errors alone: the language is display only, so a bad one warns."""
-        return self._validate_console()
-
     def pricing_errors(self) -> list[str]:
         """What is wrong in ``[pricing]``; display only, so a bad table warns.
 

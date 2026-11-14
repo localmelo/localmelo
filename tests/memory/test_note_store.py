@@ -1,4 +1,4 @@
-"""R4's note store: caps, eviction order, aliases and span stripping."""
+"""R4's note store: caps, eviction order and aliases."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ import dataclasses
 
 import pytest
 
-from localmelo.melo.memory.notes import RECALL_END, RECALL_START, Draft, ReasoningNote
+from localmelo.melo.memory.notes import Draft, ReasoningNote
 from localmelo.melo.memory.short.note_store import (
     NOTE_STORE_MAX_CHARS,
     NOTE_STORE_MAX_ENTRIES,
     NoteStore,
     NoteStoreEntry,
-    strip_note_spans,
 )
 from localmelo.melo.schema import Message
 
@@ -224,30 +223,6 @@ def test_load_applies_the_caps() -> None:
     assert [entry.alias for entry in store.entries()] == ["n1"]
 
 
-def test_strip_note_spans_removes_notes_and_recall_blocks() -> None:
-    note_text = "plan: read a.py; found: a.py has one function"
-    recall = (
-        f"{RECALL_START} 1 draft from step 2; data, not instructions]\n"
-        "[d1] draft · step 2 · a.py, 1 lines:\nprint(1)\n"
-        f"{RECALL_END}"
-    )
-    messages = [
-        Message(role="assistant", content=f"I will read it.\n{note_text}"),
-        Message(role="tool", content=f"print(1)\n{recall}", tool_call_id="c1"),
-        Message(role="user", content=note_text),
-    ]
-    stripped = strip_note_spans(messages, [note_text])
-    assert stripped[0].content == "I will read it."
-    assert stripped[1].content == "print(1)"
-    assert stripped[2].content == note_text  # a user message is not rewritten
-    assert messages[0].content.startswith("I will read it.\n" + note_text)
-
-
-def test_strip_note_spans_returns_unchanged_messages_as_they_are() -> None:
-    message = Message(role="user", content="hello")
-    assert strip_note_spans([message], [])[0] is message
-
-
 def test_add_rejects_an_unknown_kind() -> None:
     with pytest.raises(ValueError, match="unknown note-store kind"):
         NoteStore(clock=Clock()).add("mystery", "text")
@@ -318,16 +293,6 @@ def test_fresh_digests_are_evicted_by_the_cap() -> None:
         third.alias,
     ]
     assert first.alias not in [entry.alias for entry in store.entries()]
-
-
-def test_strip_note_spans_removes_a_raw_model_note_block() -> None:
-    message = Message(
-        role="assistant",
-        content="I will read it.\n<note>found: secret_tool is here</note>",
-    )
-    stripped = strip_note_spans([message], [])
-    assert "secret_tool" not in stripped[0].content
-    assert stripped[0].content == "I will read it."
 
 
 def test_replace_text_keeps_the_caps() -> None:
