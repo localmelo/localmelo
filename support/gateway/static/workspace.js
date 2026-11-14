@@ -1184,10 +1184,14 @@ function browserNodes(turn) {
     .filter(Boolean);
 }
 
-/** The nodes of the browser cards of task *id* (all tasks' with none), for where its line shows; each one once, by *placed*. */
+/**
+ * The nodes of the browser cards of task *id*, for where its line shows; each one once, by *placed*. With no *id*:
+ * of every task whose run is not over, for under the chat. A card of work that ended belongs at its line only, so
+ * ended work never piles up there.
+ */
 function taskBrowserNodes(view, placed, id = null) {
   return (view?.browsers ?? [])
-    .filter((card) => card.task && (id === null || card.session === id) && !placed.has(card.key))
+    .filter((card) => card.task && (id === null ? BROWSING.has(card.state) : card.session === id) && !placed.has(card.key))
     .map((card) => {
       placed.add(card.key);
       return browserCards.nodeOf(card.key);
@@ -1229,7 +1233,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   syncBrowser();
   const placed = new Set();
   const nodes = showsItems(view) ? mainNodes(view, turns, placed) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
-  // A task's card whose Started line is not on this page still says where the work stands.
+  // A task's card whose Started line is not on this page still says where the work stands, until its run is over.
   nodes.push(...taskBrowserNodes(view, placed));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);

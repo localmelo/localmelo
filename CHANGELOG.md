@@ -102,6 +102,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 ### App and web console
 
+- Finished tasks no longer pile up under the main chat: only work that is still going is kept in sight there.
 - After an update, the app and `melo` no longer keep using the gateway of the version before: an idle one is replaced when they start, and one with work in it is left until it is idle.
 - The web console and the macOS app speak 简体中文, with times and dates written the Chinese way.
 - Melo the Akita lives in the app, the console and on your desktop: it wakes, types, rests and plays, and raises a paw when something waits for you.

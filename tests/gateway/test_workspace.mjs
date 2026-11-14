@@ -7286,6 +7286,17 @@ for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
   });
 }
 
+test('a task\'s card whose Started line is not on the page stays under the chat only until its run is over', async () => {
+  const task = {source_kind: 'task', source_session_id: 't9', card_key: 't9:run-1', source_turn: 1, goal: 'Find ML jobs', owner_chat_id: 'm'};
+  const page = {turns: [turnRow()], has_earlier: false, replay_from: 7, echoes: [], cards: [], browser: [{id: 6, ts: 40, ...browserData('m', task)}]};
+  const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': page}));
+  await h.run('init()');
+  const cards = () => findNodes(h.element('messages'), (node) => node.className === 'bcard');
+  assert.equal(cards().length, 1, 'work that runs is kept in sight');
+  h.stream().emit(browserFrame('m', 21, {...task, state: 'done', action: ''}));
+  assert.equal(cards().length, 0, 'work that ended does not pile up under the chat');
+});
+
 test('while the person has the page, the turn box and the live row say so together', async () => {
   const running = turnRow({status: 'running', answer: '', finished_at: 0, result: null, running_here: true});
   const h = harness(baseRoutes({'GET /sessions/a/turns?limit=10': {turns: [running], has_earlier: false, replay_from: 7}}));
