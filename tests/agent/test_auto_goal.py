@@ -194,7 +194,6 @@ def _agent(llm: FakeModel, root: Path, tool: Steps) -> Agent:
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(root),
             steps_per_attempt=16,
         ),
@@ -794,9 +793,7 @@ async def test_a_buy_button_on_a_site_auto_used_does_nothing_in_ask_until_allowe
     root.mkdir()
     agent = Agent(
         llm=llm,
-        options=AgentOptions(
-            builtins=frozenset(), tool_exposure="all", workspace_root=str(root)
-        ),
+        options=AgentOptions(builtins=frozenset(), workspace_root=str(root)),
         tool_providers=[BrowserToolProvider(driver)],
     )
     agent.chat.sleep = _no_wait

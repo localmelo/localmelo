@@ -49,7 +49,6 @@ async def console_with(
             kwargs["options"],
             workspace_root=kwargs["workspace"],
             record_answers=True,
-            tool_exposure="all",
         )
         agent = Agent(llm=llm, options=options, tool_providers=[types])
         await agent.start()

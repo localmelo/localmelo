@@ -234,7 +234,6 @@ async def test_a_session_agent_works_in_its_workspace_with_session_limits(
             options,
             workspace_root=str(tmp_path),
             record_answers=True,
-            tool_exposure="all",
             tool_timeout_s=SESSION_TOOL_TIMEOUT_S,
             replay_scope="window",
         )
@@ -252,7 +251,6 @@ def test_session_options_keep_the_callers_mode() -> None:
             AgentOptions(mode=mode), "/tmp/workspace"  # type: ignore[arg-type]
         )
         assert options.mode == mode
-        assert options.tool_exposure == "all"
 
 
 async def test_a_url_without_a_model_asks_for_default_with_the_timeout_given(

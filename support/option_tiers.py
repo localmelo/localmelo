@@ -102,7 +102,6 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--reasoning": "#183",
     "--reasoning-field": "#183",
     "--note-writer": "#183",
-    "--tool-exposure": "#3",
     "--retriever": "#4",
     "--recall-at": "#4",
     "--recall-k": "#4",
@@ -151,7 +150,6 @@ SETTINGS = (
     Setting("agent.context_window", "--context-window"),
     Setting("agent.output_reserve", "--output-reserve"),
     Setting("agent.safety_margin", "--safety-margin"),
-    Setting("agent.tool_exposure", "--tool-exposure", False, "retrieve"),
     Setting("retrieval.retriever", "--retriever"),
     Setting("retrieval.recall_at", "--recall-at"),
     Setting("retrieval.k", "--recall-k"),
@@ -194,6 +192,7 @@ REMOVED_SETTINGS: dict[str, str] = {
     "agent.brief_items": "a brief run never lists the brief's numbered items",
     "agent.captured_history": "history keeps each tool result as the check left it",
     "agent.replay_turns": "a reply's reasoning is sent back for every turn in scope",
+    "agent.tool_exposure": "every run offers all the tools it has",
     "agent.tool_images_keep": "a request carries the newest 3 tool pictures, and 4 just before 2 retire",
     "agent.tool_images_retire": "the oldest 2 tool pictures lose their pixels together",
     "memory.recall_records": "recall holds at most 3 notes",
@@ -224,6 +223,11 @@ REMOVED_SETTINGS: dict[str, str] = {
         "match the message"
     ),
 }
+
+# The one value of a removed setting that is still accepted and does nothing, so a script
+# that passes it keeps working (``--tool-exposure all``, ``-X agent.tool_exposure=all``).
+# It stays out of the help, the docs and the option tables; any other value exits 2.
+NO_OP_VALUES: dict[str, str] = {"agent.tool_exposure": "all"}
 
 # Settings that stay with one of their values removed: (key, value) -> what holds now.
 # A config file that holds the value loads and reads it as the key's default (``melo

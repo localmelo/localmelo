@@ -112,7 +112,6 @@ def _agent(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
             workspace_root=str(root),
             steps_per_attempt=steps,
         ),
@@ -717,7 +716,6 @@ async def test_a_site_opens_when_named_and_is_reviewed_otherwise(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -819,7 +817,6 @@ async def test_a_click_is_reviewed_like_opening_the_site_and_a_form_by_itself(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -869,7 +866,6 @@ async def test_typing_is_reviewed_by_itself_and_so_is_a_click_or_choice(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -976,7 +972,6 @@ async def test_opening_another_app_for_a_page_is_always_the_persons_on_the_card(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1122,7 +1117,6 @@ async def test_a_question_only_the_person_answers_is_never_reviewed_and_always_a
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1160,7 +1154,6 @@ async def test_a_question_only_the_person_answers_is_denied_in_auto_with_nobody_
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1194,7 +1187,6 @@ async def test_a_task_that_asks_nobody_tells_the_truth_about_a_human_check(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1231,7 +1223,6 @@ async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1273,7 +1264,6 @@ async def test_typing_on_a_site_the_person_named_is_judged_by_the_rules(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1305,7 +1295,6 @@ async def test_sending_twice_is_two_reviews_and_the_review_sees_what_goes(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1352,7 +1341,6 @@ async def test_a_tasks_question_to_the_chat_is_never_the_persons_go_ahead(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
             record_answers=True,
         ),
@@ -1568,7 +1556,6 @@ async def test_auto_reviews_a_tool_the_rules_do_not_read(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1599,7 +1586,6 @@ async def test_a_tool_the_person_allowed_for_the_chat_skips_the_forced_review(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],
@@ -1799,7 +1785,6 @@ async def test_a_site_refused_in_this_run_is_told_to_a_later_review(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -1880,7 +1865,6 @@ async def _read_pages(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
             steps_per_attempt=12,
         ),
@@ -2142,7 +2126,6 @@ async def test_one_site_verdict_serves_at_most_ten_pages_a_turn(tmp_path: Path) 
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[reader],

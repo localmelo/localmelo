@@ -8,7 +8,11 @@ import pytest
 
 from localmelo import __main__ as cli
 from localmelo.support import config, config_cli
-from localmelo.support.option_tiers import REMOVED_SETTINGS, REMOVED_VALUES
+from localmelo.support.option_tiers import (
+    NO_OP_VALUES,
+    REMOVED_SETTINGS,
+    REMOVED_VALUES,
+)
 
 OLD_FILE = """\
 [agent]
@@ -25,6 +29,7 @@ captured_history = true
 replay_turns = 3
 tool_images_keep = 4
 tool_images_retire = 1
+tool_exposure = "retrieve"
 
 [memory]
 admit_on_outcome = true
@@ -101,6 +106,43 @@ def test_the_option_of_a_removed_setting_exits_2_and_says_so(
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert f"{flag} was removed: {REMOVED_SETTINGS[name]}." in err
+
+
+@pytest.mark.parametrize("name", NO_OP_VALUES)
+def test_the_one_value_that_is_still_accepted_does_nothing(name: str) -> None:
+    value = NO_OP_VALUES[name]
+    flag = "--" + name.rpartition(".")[2].replace("_", "-")
+    plain = vars(cli._parse(["list files"])[1])
+    for argv in (
+        [flag, value, "list files"],
+        [f"{flag}={value}", "list files"],
+        ["-X", f"{name}={value}", "list files"],
+        ["-X", f'{name}="{value}"', "list files"],
+        ["--max-steps", "5", flag, value, "list files"],
+    ):
+        _, args = cli._parse(argv)
+        # The same namespace as the run without it (bar what the others set).
+        assert vars(args) == {**plain, "max_steps": args.max_steps}, argv
+    # After "--" the words are the task's.
+    _, args = cli._parse(["--", flag, value])
+    assert args.query == [flag, value]
+
+
+@pytest.mark.parametrize(("name", "value"), [("agent.tool_exposure", "retrieve")])
+def test_any_other_value_of_the_option_and_the_setter_exits_2(
+    name: str, value: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    flag = "--" + name.rpartition(".")[2].replace("_", "-")
+    for argv in (
+        [flag, value, "list files"],
+        [f"{flag}={value}", "list files"],
+        ["-X", f"{name}={value}", "list files"],
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli._parse(argv)
+        assert exc.value.code == 2, argv
+        err = capsys.readouterr().err
+        assert f"was removed: {REMOVED_SETTINGS[name]}." in err, argv
 
 
 @pytest.mark.parametrize("name", REMOVED_SETTINGS)

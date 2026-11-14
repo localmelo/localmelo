@@ -196,7 +196,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 
 | Key | Meaning |
 |---|---|
-| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `tool_exposure`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
+| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |

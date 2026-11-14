@@ -191,4 +191,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
 - Three experimental settings are gone (`--brief-items`, `agent.lean_output`, `agent.thinking_steps`): runs behave as before, and a script that still sets one exits 2 and says so.
 - Four more experimental settings are gone (`agent.captured_history`, `agent.replay_turns`, `agent.tool_images_keep`, `agent.tool_images_retire`), and `--reasoning` takes `legacy` or `compress`: a script that sets a removed one exits 2.
+- `agent.tool_exposure` is gone: every run offers all its tools, so a direct run now offers every MCP or other provided tool at each step. `all` is still accepted and does nothing; any other value exits 2.
 - The MIT license.

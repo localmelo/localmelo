@@ -21,7 +21,7 @@ person, an event stream and a read-only change feed.
 
 `build_session_agent(...)` makes and starts the Agent a surface runs its
 turns on, and closes it when the start fails. It sets the session's rules on
-the options: the workspace, `record_answers=True`, `tool_exposure="all"`,
+the options: the workspace, `record_answers=True`,
 the 600 s tool limit and `replay_scope="window"`.
 
 The caller's tool `mode`

@@ -109,7 +109,7 @@ def shots(n: int, *, same: bool = False) -> list[Message]:
 def agent_for(llm: ScriptedLLM, *, text_only: bool = False, **options: Any) -> Agent:
     agent = Agent(
         llm=llm,
-        options=AgentOptions(attempt_policy="none", tool_exposure="all", **options),
+        options=AgentOptions(attempt_policy="none", **options),
     )
     agent.hippo.register_tool(
         ToolDef(name="shot", description="Capture the screen.", parameters={})

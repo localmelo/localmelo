@@ -107,7 +107,6 @@ class FakePython:
 def _agent(llm: ScriptedLLM, root: Path) -> tuple[Agent, FakePython]:
     options = AgentOptions(
         builtins=frozenset({"python_exec"}),
-        tool_exposure="all",
         workspace_root=str(root),
         steps_per_attempt=12,
     )

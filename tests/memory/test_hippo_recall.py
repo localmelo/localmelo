@@ -1942,7 +1942,6 @@ async def test_one_agent_keeps_working_as_its_chat_crosses_between_the_states(
     agent = Agent(
         llm=llm,
         options=AgentOptions(
-            tool_exposure="all",
             builtins=frozenset(),
             attempt_policy="none",
             max_steps=4,

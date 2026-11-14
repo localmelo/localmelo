@@ -470,7 +470,6 @@ async def type_on_named_site(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[tool],

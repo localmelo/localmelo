@@ -95,10 +95,8 @@ class ProvidedTool:
     ``requires_approval`` marks a tool whose calls ask the run's approval
     policy before they run, when the run has one (see
     ``Agent.run_task``); without a policy it has no effect. ``group``
-    names a set of tools that are offered together: with
-    ``tool_exposure="retrieve"``, every tool of a group is offered on every
-    step, as the built-ins are, instead of waiting for hints or BM25 to
-    pick it (``"all"`` offers every tool anyway). ``asks_itself`` is for
+    names a set of tools that belong together; nothing reads it now that every
+    step offers every tool. ``asks_itself`` is for
     melo's own browser tools, which ask their questions themselves: the agent
     honours it only for the few names melo lists
     (``contracts.approvals.SELF_ASKING_TOOLS``), so it does not let any other

@@ -52,7 +52,6 @@ DEFAULT_CONTEXT_CAP = 131072
 LOCAL_WINDOW_MESSAGES = 64
 WINDOW_MESSAGES_MIN = 8
 WINDOW_MESSAGES_MAX = 256
-TOOL_SEARCH_TOP_K = 3
 
 # A run has at most MAX_AGENT_STEPS planning calls. An attempt runs up to
 # STEPS_PER_ATTEMPT of them and, with reflection on, is followed by a reflection

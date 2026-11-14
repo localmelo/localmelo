@@ -118,7 +118,6 @@ async def auto_console(
                     record_answers=True,
                     mode="gateway",
                     builtins=frozenset({"python_exec"}),
-                    tool_exposure="all",
                 ),
                 tool_providers=list(providers),
             )
@@ -129,7 +128,6 @@ async def auto_console(
                 llm,
                 mode="gateway",
                 builtins=frozenset({"python_exec"}),
-                tool_exposure="all",
             )
         agent.executor.register("python_exec", ran.python_exec, requires_approval=True)
         return agent

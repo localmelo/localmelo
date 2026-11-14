@@ -103,7 +103,7 @@ def _mcp_agent(
     provider = SignallingProvider(servers, client_factory=make)
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all", **options),
+        options=AgentOptions(builtins=frozenset(), **options),
         tool_providers=[provider],
     )
     return agent, provider

@@ -153,7 +153,6 @@ def _reflection(action: str = "continue") -> dict[str, Any]:
 def _options(**kwargs: Any) -> AgentOptions:
     kwargs.setdefault("builtins", frozenset())
     kwargs.setdefault("retriever", "off")
-    kwargs.setdefault("tool_exposure", "all")
     return AgentOptions(**kwargs)
 
 

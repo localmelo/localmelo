@@ -55,7 +55,7 @@ each one contributes.
   in a seeded random order. That makes 180 scored runs, after one warm-up:
   repeated runs of 12 exercises, not 180 different tasks.
 - **Options:** `--max-steps 30 --timeout 900 --request-timeout 1800`, with
-  the default tool exposure.
+  every tool offered on every step.
 - **Model:** `Qwen3.8-27B-oQ5-mtp`, served by oMLX 0.7.1rc1 with a local
   patch. Multi-token prediction on, thinking off, a 131,072-token context,
   temperature 1.0, top-p 0.95 and top-k 20.

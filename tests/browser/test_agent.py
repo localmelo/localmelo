@@ -18,8 +18,6 @@ from localmelo.melo.contracts.approvals import (
     Withdrawal,
 )
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
-from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.browser import sites
 from localmelo.support.browser.driver import Element
@@ -71,9 +69,7 @@ def _driver() -> FakeDriver:
 def _agent(llm: ScriptedLLM, driver: FakeDriver, **options: Any) -> Agent:
     return Agent(
         llm=llm,
-        options=AgentOptions(
-            builtins=frozenset(), **{"tool_exposure": "all", **options}
-        ),
+        options=AgentOptions(builtins=frozenset(), **options),
         tool_providers=[BrowserToolProvider(driver)],
     )
 
@@ -584,49 +580,6 @@ async def test_stop_on_a_question_nobody_answered_takes_no_tab() -> None:
         await agent.close()
 
 
-class Grouped(BaseToolProvider):
-    """Two tools: one in a group, one that only hints or search can offer."""
-
-    async def start(self) -> list[ProvidedTool]:
-        async def run(**_: Any) -> ToolOutput:
-            return ToolOutput(text="ok")
-
-        def tool(name: str, text: str, group: str | None) -> ProvidedTool:
-            definition = ToolDef(name, text, {"type": "object", "properties": {}})
-            return ProvidedTool(definition, run, group=group)
-
-        return [
-            tool("zeta_grouped", "unrelated words alpha", "g"),
-            tool("alpha_loose", "sprocket wrench", None),
-        ]
-
-    async def close(self) -> None:
-        pass
-
-
-@pytest.mark.parametrize(
-    ("exposure", "offered"),
-    [
-        ("retrieve", ["zeta_grouped"]),
-        ("all", ["alpha_loose", "zeta_grouped"]),
-    ],
-)
-async def test_a_group_is_offered_on_every_step_in_retrieve_exposure(
-    exposure: str, offered: list[str]
-) -> None:
-    llm = ScriptedLLM([_say("hello")])
-    agent = Agent(
-        llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure=exposure),  # type: ignore[arg-type]
-        tool_providers=[Grouped()],
-    )
-    try:
-        await agent.run_task("say hello to me")
-    finally:
-        await agent.close()
-    assert [t.name for t in llm.calls[0]["tools"] or []] == offered
-
-
 async def test_without_a_provider_the_request_has_no_browser_text_or_tools() -> None:
     llm = ScriptedLLM([_say("hello")])
     agent = Agent(llm=llm, options=AgentOptions(mode="direct"))
@@ -688,7 +641,7 @@ async def test_a_run_with_no_authority_reaches_no_browser_through_a_search_with_
     search = ToolCall(tool_name="web_search", arguments={"query": "tomatoes"})
     agent = Agent(
         llm=ScriptedLLM([Message(role="assistant", tool_call=search), _say("Done.")]),
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[browser, WebSearchProvider(browser=browser, cfg=cfg)],
     )
     await agent.start()

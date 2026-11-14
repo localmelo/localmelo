@@ -207,9 +207,7 @@ async def test_a_timeout_kills_the_shell_command_it_interrupts(pid_file: Path) -
     )
     agent = Agent(
         llm=ScriptedLLM([call]),
-        options=AgentOptions(
-            builtins=frozenset({"shell_exec"}), tool_exposure="all", timeout_s=1.0
-        ),
+        options=AgentOptions(builtins=frozenset({"shell_exec"}), timeout_s=1.0),
     )
     result = await agent.run_task("wait in the shell")
     assert result.status == "timeout"
@@ -235,9 +233,7 @@ async def test_a_timeout_kills_the_python_child_it_interrupts(pid_file: Path) ->
     )
     agent = Agent(
         llm=ScriptedLLM([call]),
-        options=AgentOptions(
-            builtins=frozenset({"python_exec"}), tool_exposure="all", timeout_s=1.0
-        ),
+        options=AgentOptions(builtins=frozenset({"python_exec"}), timeout_s=1.0),
     )
     result = await agent.run_task("run python")
     assert (result.status, result.n_tool) == ("timeout", 1)

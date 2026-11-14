@@ -286,7 +286,6 @@ async def test_a_file_in_a_folder_the_person_wrote_is_read_with_no_card_in_auto(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"file_read"}),
-            tool_exposure="all",
             workspace_root=str(home / "ws"),
         ),
     )
@@ -344,7 +343,6 @@ async def test_a_write_in_a_named_folder_has_no_card_only_when_it_is_a_plain_wri
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"file_write"}),
-            tool_exposure="all",
             workspace_root=str(home / "ws"),
         ),
     )

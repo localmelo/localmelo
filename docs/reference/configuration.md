@@ -374,8 +374,7 @@ holds no name for the layout: `fixed-prefix-v2` is metadata, reported as
 
 The identity paragraph is `AgentOptions.identity` (default `None`: direct
 runs, workers and the gateway's v1 sessions send none).
-`all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
-as before.
+Every step offers the same sorted tool definitions for the run.
 
 The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional

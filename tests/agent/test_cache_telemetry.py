@@ -124,7 +124,7 @@ async def _run(
     )
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all", **options),
+        options=AgentOptions(builtins=frozenset(), **options),
     )
     agent.hippo.register_tool(ECHO)
 

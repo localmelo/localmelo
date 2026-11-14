@@ -1,7 +1,7 @@
 """Run events for an optional sink (Agent.run_task's on_event) — no real model.
 
 Every run is scripted. Most use the custom tools below, offered on every
-step (``tool_exposure="all"``), and in-memory history.
+step, and in-memory history.
 """
 
 from __future__ import annotations
@@ -228,7 +228,6 @@ def _agent(
 ) -> Agent:
     """An agent with the custom tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     agent = Agent(
         llm=llm,
         embedding=embedding,

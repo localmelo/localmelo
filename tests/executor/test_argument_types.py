@@ -199,7 +199,7 @@ async def test_the_run_goes_on_after_a_wrong_type() -> None:
     )
     agent = Agent(
         llm=llm,
-        options=AgentOptions(tool_exposure="all", builtins=frozenset({"shell_exec"})),
+        options=AgentOptions(builtins=frozenset({"shell_exec"})),
     )
     try:
         result = await agent.run_task("list the files")

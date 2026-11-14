@@ -30,7 +30,6 @@ from localmelo.melo.schema import (
 )
 
 AttemptPolicy = Literal["reflect", "none"]
-ToolExposure = Literal["retrieve", "all"]
 # "compress+replay" is not a choice: a provider that requires replay runs "compress"
 # as it (see Agent and the CLI).
 ReasoningMode = Literal["legacy", "compress", "compress+replay"]
@@ -70,12 +69,13 @@ class AgentOptions:
     """How an :class:`Agent` runs its tasks.
 
     The defaults match the agent's behavior from before these options
-    existed, except that every step now offers all registered built-ins
-    and runs only the tools it offered (see ``tool_exposure``), that
-    a reflection decides on its own checks whether the next attempt
-    starts, patiently (see ``attempt_policy``), that a run without
-    a usable answer is asked for one (see ``answer_on_stop``), and that an
-    attempt is long: 50 steps, in a run of 100 (see ``steps_per_attempt``).
+    existed, except that every step offers every registered tool, sorted by
+    name, and runs only the tools it offered (the executor refuses a call to
+    any other: ``TOOL_NOT_OFFERED``), that a reflection decides on its own
+    checks whether the next attempt starts, patiently (see ``attempt_policy``),
+    that a run without a usable answer is asked for one (see ``answer_on_stop``),
+    and that an attempt is long: 50 steps, in a run of 100 (see
+    ``steps_per_attempt``).
     An invalid value raises ``ValueError`` naming the field.
 
     - ``context_window``, ``output_reserve``, ``safety_margin``: the token
@@ -103,14 +103,6 @@ class AgentOptions:
       is trimmed to fit. A reflection's ``useful_evidence``,
       ``failed_hypotheses`` and ``recommended_avoids`` keep at most 8 items of
       at most 300 characters each.
-    - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
-      registered built-in, sorted by name, then the other tools (provided
-      tools, such as MCP tools) that hint extraction and BM25 resolve for
-      the step, ranked among those tools only and also sorted by name;
-      ``"all"`` offers every registered tool, sorted by name, on every
-      step. In both modes the executor refuses a call to a tool that its
-      step did not offer (``TOOL_NOT_OFFERED``), and that tool does not
-      run.
     - ``builtins``: names of the built-in tools to register. ``None``
       registers the default set of ``mode``, an empty set none. Any
       iterable of names except a bare ``str`` is accepted and stored as a
@@ -344,7 +336,6 @@ class AgentOptions:
     attempt_policy: AttemptPolicy = "reflect"
     steps_per_attempt: int = STEPS_PER_ATTEMPT
     max_attempts: int = MAX_ATTEMPTS
-    tool_exposure: ToolExposure = "retrieve"
     builtins: frozenset[str] | None = None
     memory: bool = True
     memory_dir: str | None = None
@@ -459,7 +450,6 @@ class AgentOptions:
 
         for name, allowed in (
             ("attempt_policy", get_args(AttemptPolicy)),
-            ("tool_exposure", get_args(ToolExposure)),
             ("mode", get_args(ToolMode)),
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),

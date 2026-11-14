@@ -72,7 +72,6 @@ def _agent(stub: StubServer, memory_dir: Path) -> Agent:
             reasoning="compress",
             builtins=frozenset(),
             attempt_policy="none",
-            tool_exposure="all",
             retriever="off",
             max_steps=6,
             memory_dir=str(memory_dir),

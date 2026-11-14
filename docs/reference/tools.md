@@ -277,22 +277,12 @@ so the call itself asks nothing; the one case that asks is below. The guide is
 ## How tools are offered
 
 Each planning step sends the model a list of tools, and the step can run only
-those tools. `--tool-exposure` chooses the list:
-
-- **`retrieve`** (the default): every registered built-in tool, sorted by
-  name, then the extra tools for the step, also sorted by name. The extra
-  tools are chosen among the other tools, such as MCP tools:
-  - the tools the model has already called in this conversation, and
-  - the 3 best matches for the task, by a keyword search (Okapi BM25 with
-    IDF) over each tool's name, description and tags.
-
-  Only the model's tool calls are hints: a tool name in the task, in a tool
-  result or in recalled memory adds nothing.
-- **`all`**: every registered tool, sorted by name, on every step. The list
-  never changes, which helps servers that cache prompt prefixes.
-
-A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The twelve browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
+those tools. The list is every registered tool, sorted by name, on every step:
+the built-in tools and the tools a provider adds, such as the tools of MCP
+servers, the twelve browser tools (present only while `[browser] driver` is on,
+see [Browsing with melo](../guides/browsing.md)) and `web_fetch`. The list does
+not change from step to step, which helps servers that cache prompt prefixes; a
+tool that says it takes no more calls in this run leaves it from the next step.
 
 A call to a tool that the step did not offer is refused with
-`Tool '<name>' was not offered in this step.` and does not run. The refusal
-stays in the conversation, so a later step can offer that tool.
+`Tool '<name>' was not offered in this step.` and does not run.

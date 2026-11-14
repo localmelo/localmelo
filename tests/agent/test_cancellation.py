@@ -282,7 +282,6 @@ def _agent(
 ) -> Agent:
     """An agent with the custom tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     agent = Agent(
         llm=llm,
         embedding=embedding,

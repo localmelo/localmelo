@@ -146,8 +146,6 @@ class TestFlags:
             "7",
             "--attempt-policy",
             "none",
-            "--tool-exposure",
-            "all",
             "--builtins",
             "file_read, shell_exec",
             "--memory",
@@ -163,7 +161,6 @@ class TestFlags:
             mode="direct",
             max_steps=7,
             attempt_policy="none",
-            tool_exposure="all",
             builtins=frozenset({"file_read", "shell_exec"}),
             memory=False,
             memory_dir="~/melo-memory",  # the Agent expands it
@@ -219,9 +216,7 @@ class TestFlags:
     def test_mcp_only_offers_only_the_mcp_tools(self, tmp_path: Path) -> None:
         ran = _main("--mcp-only", "--mcp-config", str(_mcp_config(tmp_path)), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions(
-            mode="direct", builtins=frozenset(), tool_exposure="all"
-        )
+        assert ran.options == AgentOptions(mode="direct", builtins=frozenset())
         [provider] = ran.tool_providers
         assert isinstance(provider, McpToolProvider)
 
@@ -309,10 +304,6 @@ class TestUsageErrors:
                 ["--mcp-only", "--mcp-config", "m.json", "--builtins", "all", "q"],
                 "--mcp-only sets --builtins; do not give both",
             ),
-            (
-                ["--mcp-only", "--mcp-config", "m.json", "--tool-exposure", "all", "q"],
-                "--mcp-only sets --tool-exposure; do not give both",
-            ),
             (["--max-steps", "0", "q"], "argument --max-steps: must be at least 1"),
             (["--max-steps", "many", "q"], "argument --max-steps: not an integer"),
             (
@@ -351,10 +342,6 @@ class TestUsageErrors:
             (
                 ["--attempt-policy", "retry", "q"],
                 "argument --attempt-policy: invalid choice: 'retry'",
-            ),
-            (
-                ["--tool-exposure", "some", "q"],
-                "argument --tool-exposure: invalid choice: 'some'",
             ),
             (["--memory", "maybe", "q"], "argument --memory: invalid choice: 'maybe'"),
             (

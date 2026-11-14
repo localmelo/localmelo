@@ -94,9 +94,7 @@ def task_agent(llm: FakeModel, root: Path, types: Types) -> Agent:
     root.mkdir(exist_ok=True)
     agent = Agent(
         llm=llm,
-        options=AgentOptions(
-            builtins=frozenset(), tool_exposure="all", workspace_root=str(root)
-        ),
+        options=AgentOptions(builtins=frozenset(), workspace_root=str(root)),
         tool_providers=[types],
     )
     agent.chat.sleep = _no_wait

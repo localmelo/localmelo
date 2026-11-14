@@ -13,8 +13,6 @@ import itertools
 from collections import deque
 from typing import Any
 
-import pytest
-
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import TOOL_OVER_ANSWER_NOTE
 from localmelo.melo.agent.agent import TOOL_OVER, TOOL_OVER_ANSWER
@@ -71,9 +69,8 @@ class Tools(BaseToolProvider):
                 },
             )
 
-        # One group: offered on every step, in both exposure modes.
         return [
-            ProvidedTool(definition=definition(name), function=function, group="g")
+            ProvidedTool(definition=definition(name), function=function)
             for name, function in (
                 ("keep", self.keep),
                 ("look", self.look),
@@ -122,7 +119,6 @@ async def _run(
     llm: FakeLLM,
     tools: Tools,
     *queries: str,
-    exposure: Any = "all",
     events: list[AgentEvent] | None = None,
 ) -> list[Any]:
     agent = Agent(
@@ -130,7 +126,6 @@ async def _run(
         options=AgentOptions(
             builtins=frozenset(),
             attempt_policy="none",
-            tool_exposure=exposure,
             answer_on_stop=False,
         ),
         tool_providers=[tools],
@@ -147,13 +142,12 @@ async def _run(
         await agent.close()
 
 
-@pytest.mark.parametrize("exposure", ["all", "retrieve"])
-async def test_a_tool_that_takes_no_more_calls_is_not_offered_from_the_next_step(
-    exposure: str,
-) -> None:
+async def test_a_tool_that_takes_no_more_calls_is_not_offered_from_the_next_step() -> (
+    None
+):
     llm = FakeLLM(_step(("keep", "a")), _step(("keep", "b")), _say("done"))
     tools = Tools()
-    (outcome,) = await _run(llm, tools, "keep my notes", exposure=exposure)
+    (outcome,) = await _run(llm, tools, "keep my notes")
     assert (outcome.status, outcome.result) == ("completed", "done")
     # The second call said it was the last: the step after it offers the others only.
     assert llm.offered() == [ALL, ALL, ["chatty", "look"]]

@@ -79,7 +79,6 @@ def _agent(llm: BaseLLMProvider, options: AgentOptions, **kwargs: Any) -> Agent:
 def _options(**kwargs: Any) -> AgentOptions:
     kwargs.setdefault("builtins", frozenset())
     kwargs.setdefault("attempt_policy", "none")
-    kwargs.setdefault("tool_exposure", "all")
     # R4's tests keep R4's behavior: recall is R5's subject, and its own
     # tests turn it on.
     kwargs.setdefault("retriever", "off")

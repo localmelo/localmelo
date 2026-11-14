@@ -198,7 +198,6 @@ async def build_agent(args: argparse.Namespace, root: Path, seed: int | None) ->
         options=AgentOptions(
             workspace_root=str(root),
             record_answers=True,
-            tool_exposure="all",
             builtins=TOOLS,
             timeout_s=args.turn_timeout,
         ),

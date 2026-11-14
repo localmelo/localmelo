@@ -1,10 +1,9 @@
-"""Tool search: the BM25 tool index and Hippo's tool resolution."""
+"""Tool search: the BM25 tool index."""
 
 from __future__ import annotations
 
-from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.tools import ToolIndex, ToolRegistry
-from localmelo.melo.schema import TOOL_SEARCH_TOP_K, ToolDef
+from localmelo.melo.schema import ToolDef
 
 
 def _tool(name: str, description: str = "", tags: list[str] | None = None) -> ToolDef:
@@ -68,48 +67,3 @@ class TestToolIndexSearch:
         registry.register(_tool("file_read", "Read the contents of a file"))
         registry.register(_tool("note_read", "Read a note"))
         assert _names(registry.search("read", exclude={"note_read"})) == ["file_read"]
-
-
-def _hippo() -> Hippo:
-    hippo = Hippo(embedding=None)
-    for tool in (
-        _tool("file_read", "Read file contents"),
-        _tool("weather", "Weather forecast for a city"),
-        _tool("calendar", "Add calendar events"),
-        _tool("notes", "Search notes"),
-    ):
-        hippo.register_tool(tool)
-    return hippo
-
-
-class TestResolveTools:
-    def test_hinted_tools_first_in_hint_order_then_the_search(self) -> None:
-        tools = _hippo().resolve_tools(
-            "what is the weather in Paris", hints=["notes", "calendar"]
-        )
-        assert _names(tools) == ["notes", "calendar", "weather"]
-
-    def test_a_tool_both_hinted_and_found_appears_once(self) -> None:
-        tools = _hippo().resolve_tools("weather in Paris", hints=["weather", "weather"])
-        assert _names(tools) == ["weather"]
-
-    def test_a_hint_that_names_no_registered_tool_is_ignored(self) -> None:
-        tools = _hippo().resolve_tools("weather in Paris", hints=["no_such_tool"])
-        assert _names(tools) == ["weather"]
-
-    def test_excluded_tools_are_neither_hinted_nor_searched(self) -> None:
-        tools = _hippo().resolve_tools(
-            "read the weather file",
-            hints=["file_read", "notes"],
-            exclude={"file_read"},
-        )
-        assert _names(tools) == ["notes", "weather"]
-
-    def test_the_search_adds_at_most_top_k_tools(self) -> None:
-        hippo = Hippo(embedding=None)
-        for i in range(TOOL_SEARCH_TOP_K + 2):
-            hippo.register_tool(_tool(f"tool_{i}", "alpha"))
-        assert len(hippo.resolve_tools("alpha")) == TOOL_SEARCH_TOP_K
-        # Hinted tools come on top of the search's matches.
-        tools = hippo.resolve_tools("alpha", hints=["tool_4"])
-        assert _names(tools) == ["tool_4", "tool_0", "tool_1", "tool_2"]

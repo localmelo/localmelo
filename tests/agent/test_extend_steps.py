@@ -64,7 +64,6 @@ async def _run(
         llm=FakeModel(_plans(calls, same=same)),
         options=AgentOptions(
             builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
             attempt_policy="none",
             max_steps=STEPS,

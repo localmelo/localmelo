@@ -92,8 +92,6 @@ def test_a_completed_run_on_a_pty_it_does_not_control_exits_0(
                 stub.base_url,
                 "--chat-model",
                 "stub-model",
-                "--tool-exposure",
-                "all",
                 "--builtins",
                 "all",
                 "--",

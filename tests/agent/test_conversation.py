@@ -171,7 +171,6 @@ def _agent(
 ) -> Agent:
     """An agent with the custom tool, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     agent = Agent(llm=llm, options=AgentOptions(**options), tool_providers=providers)
     agent.hippo.register_tool(ECHO)
     agent.executor.register("echo", (tools or Tools()).echo)

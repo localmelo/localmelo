@@ -10,7 +10,9 @@ now checks UI dispatch and its complete namespace; the original golden remains.
 The cases that gave ``--reflection-gate`` are gone with the option, and the
 ``--a`` prefix no longer matches ``--admit-on-outcome`` (an ``upstream_overrides``
 entry); every other case is as recorded. The cases that gave ``--replay-turns``
-or the reasoning values ``drop`` and ``replay`` are gone with them.
+or the reasoning values ``drop`` and ``replay`` are gone with them, and so are
+the ones that gave ``--tool-exposure`` or an abbreviation of it (``b6-all-options``
+no longer gives it).
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 

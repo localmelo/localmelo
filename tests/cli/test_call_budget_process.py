@@ -100,8 +100,6 @@ def _run(
         server.base_url,
         "--chat-model",
         "m",
-        "--tool-exposure",
-        "all",
         "--output-format",
         "json",
     ]

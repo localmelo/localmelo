@@ -227,7 +227,6 @@ def _agent(
         options=AgentOptions(
             builtins=frozenset({"list_files"}),
             attempt_policy="none",
-            tool_exposure="all",
             retriever="off",
             max_steps=6,
             workspace_root=str(tmp_path),

@@ -110,12 +110,10 @@ _UI_FLAGS = {
     "resume": "-r",
 }
 
-# Direct-mode flags the interactive UI refuses: its Agents offer every tool,
-# an approval's wait would count toward a timeout, it has no machine output,
-# it draws its own progress. `--keep-decision-text` is an evaluation
-# switch, so the UI never accepts it.
+# Direct-mode flags the interactive UI refuses: an approval's wait would count
+# toward a timeout, it has no machine output, it draws its own progress.
+# `--keep-decision-text` is an evaluation switch, so the UI never accepts it.
 _UI_REFUSED = (
-    "tool_exposure",
     "timeout",
     "output_format",
     "progress",
@@ -1175,10 +1173,8 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error(f"{flag} is only for a direct task")
     if args.mcp_only and args.mcp_config is None:
         parser.error("--mcp-only requires --mcp-config")
-    if args.mcp_only:
-        for dest in ("builtins", "tool_exposure"):
-            if getattr(args, dest) is not None:
-                parser.error(f"--mcp-only sets {_DIRECT_FLAGS[dest]}; do not give both")
+    if args.mcp_only and args.builtins is not None:
+        parser.error(f"--mcp-only sets {_DIRECT_FLAGS['builtins']}; do not give both")
     _check_recall_args(parser, args)
     if args.embedding_model is not None and args.embedding_base_url is None:
         parser.error("--embedding-model requires --embedding-base-url")
@@ -1280,7 +1276,6 @@ def _direct_options(
         fields["builtins"] = _parse_builtins(parser, args.builtins)
     if args.mcp_only:
         fields["builtins"] = frozenset()
-        fields["tool_exposure"] = "all"
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -1569,12 +1564,6 @@ def _build_parser(
         f"{SHORT_TERM_MAX} on a cloud vendor)",
     )
     direct.add_argument(
-        "--tool-exposure",
-        choices=["retrieve", "all"],
-        help="Offer every built-in plus the extra tools retrieved for each step "
-        "(default), or all tools",
-    )
-    direct.add_argument(
         "--builtins",
         metavar="all|none|NAME,...",
         help="Built-in tools to register (default: the mode's set)",
@@ -1587,7 +1576,7 @@ def _build_parser(
     direct.add_argument(
         "--mcp-only",
         action="store_true",
-        help="Only the MCP tools: --builtins none --tool-exposure all",
+        help="Only the MCP tools: --builtins none",
     )
     direct.add_argument(
         "--memory",

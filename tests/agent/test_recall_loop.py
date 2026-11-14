@@ -86,7 +86,6 @@ async def _run_recall(query: str, k: int | None = None) -> str:
 def _options(**kwargs: Any) -> AgentOptions:
     kwargs.setdefault("builtins", frozenset())
     kwargs.setdefault("attempt_policy", "none")
-    kwargs.setdefault("tool_exposure", "all")
     return AgentOptions(**kwargs)
 
 
