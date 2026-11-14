@@ -351,7 +351,7 @@ from localmelo.support.config import Config, load, save
 | Path | What it holds |
 |---|---|
 | `~/.cache/localmelo/config.toml` | The configuration; a missing file means not configured. No flag or variable moves it: set `HOME`. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, and `long_term.db` outside `legacy`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, and `long_term.db` outside `legacy`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. Chats and tasks of the app, console and terminal write `procedures.db` alone, with no task text. |
 | `~/.cache/localmelo/gateway/` | `sessions.db` (console chats, tasks, grants), `auth/token`, `endpoint.json` (the running gateway). |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats. |
 | `~/.cache/localmelo/scheduler/runs/` | The gateway's model-call log. |

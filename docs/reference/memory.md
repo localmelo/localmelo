@@ -268,7 +268,9 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
   history.db      tasks, steps and model calls
   long_term.db    long-term memory, when memory is on and the reasoning
                   mode is not legacy
-  procedures.db   procedural memory, written at the end of every run
+  procedures.db   procedural memory, written at the end of every run (alone,
+                  with no task text, by the chats and tasks of the app, the
+                  console and the terminal)
 ```
 
 - SQLite may also create `history.db-wal` and `history.db-shm` (and the same
@@ -294,7 +296,10 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
 - `procedures.db` holds [procedural memory](../concepts/procedures.md). With
   persistence on, the first run that ends creates it, and every run adds
   its record at its end, `--memory off` included. With persistence off,
-  procedural memory stays in RAM, and nothing is written.
+  procedural memory stays in RAM and nothing is written, except for the chats
+  and tasks of the app, the web console and the terminal: they write
+  `procedures.db` alone, in the default directory, with no task text. "Forget
+  everything" does not remove it.
 
 ## Task records
 

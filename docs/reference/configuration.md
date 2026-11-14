@@ -669,7 +669,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | Path | What it holds | Created |
 |---|---|---|
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, or a chat or task of the app, console or terminal runs (it writes `procedures.db` alone), with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
 | `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |
