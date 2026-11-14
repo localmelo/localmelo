@@ -21,6 +21,7 @@ from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
     FRONT_TEXT,
     TASK_TOOLS,
+    WHO_NOTE,
     answer_head,
     clean_title,
 )
@@ -113,6 +114,11 @@ async def test_every_request_tells_the_chat_to_act(tmp_path: Path) -> None:
         await _say(client, console, "tidy my notes")
         await _wait_turn(client, str(console.main_id))
         assert FRONT_TEXT in llm.requests[0][0].content
+        # The choice is asked for with the person's message too: on a real model the
+        # rule in the identity alone moved nothing (0 of 32 long requests, 26 with it).
+        said = str(llm.requests[0][-1].content)
+        assert said.startswith("tidy my notes") and WHO_NOTE in said
+        assert "first call is task_create" in WHO_NOTE
     # Who does the work is decided before it starts, and by the model: long work is
     # a task's, the rest the chat's, and a doubt starts in the chat.
     choice = FRONT_TEXT.index("decide first who does it")

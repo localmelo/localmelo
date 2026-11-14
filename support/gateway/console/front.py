@@ -240,6 +240,15 @@ FRONT_TEXT: Final = (
     "its record. A question about a task (is it done, what did it find) is "
     "answered from task_get, which gives its whole answer and the files it wrote."
 )
+# What a chat reads with each message of the person, before the acting reminder: the
+# choice comes before the work (#701). A rule in the identity alone moved no model.
+WHO_NOTE: Final = (
+    "[localmelo · first decide who does this. Count the tool calls it will take. "
+    "More than about five (writing or changing several files, running and fixing "
+    "until something passes, working through a whole folder or project) is a "
+    "task's: your first call is task_create, with nothing before it. Fewer (an "
+    "answer, one look, one change) is yours: do it now.]"
+)
 # What a chat reads each turn while no browser is set up (#567).
 BROWSING_OFF_NOTE: Final = (
     "[localmelo · browsing is off: you can read public pages but have no browser, "
@@ -441,7 +450,7 @@ class FrontAgent(Agent):
     """A chat's Agent, main or side: the person's work runs here, in its own run.
 
     Each person's turn reads the tasks that ended since the last one and what
-    the chat cannot do now, and ends with :data:`ACTING_NOTE`. A task's question
+    the chat cannot do now, and ends with :data:`WHO_NOTE` and :data:`ACTING_NOTE`. A task's question
     and a follow-up are short internal runs with their own bounds. Without
     ``front`` it is a plain Agent.
     """
@@ -474,7 +483,7 @@ class FrontAgent(Agent):
             kwargs["user_words"] = query if own_chars is None else query[:own_chars]
         if front is not None and turn is not None:
             query = await self._with_news(front, query)
-        query = f"{query}\n\n{ACTING_NOTE}"
+        query = f"{query}\n\n{WHO_NOTE}\n\n{ACTING_NOTE}"
         outcome = await super().run_task(query, on_event=on_event, **kwargs)
         if front is not None and turn is not None and outcome.status == "completed":
             await front.offer_chore(turn)

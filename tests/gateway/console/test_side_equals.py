@@ -37,6 +37,7 @@ from localmelo.support.gateway.console.front import (
     ECHO_EVENT,
     FRONT_TEXT,
     SIDE_SUMMARY_EVENT,
+    WHO_NOTE,
     FrontAgent,
 )
 from localmelo.support.gateway.console.registry import chat_options
@@ -182,7 +183,7 @@ def _hear(console: Console, session: str, kind: str, data: dict[str, Any]) -> No
 def _asked(llm: ScriptedLLM, request: int = -1) -> str:
     """The user message the model was last sent, without the chat's reminder."""
     said = str(llm.requests[request][-1].content).removesuffix("\n\n" + ACTING_NOTE)
-    return said.removesuffix("\n\n" + BROWSING_OFF_NOTE)
+    return said.removesuffix("\n\n" + WHO_NOTE).removesuffix("\n\n" + BROWSING_OFF_NOTE)
 
 
 # ── 1. The task tools and code's rules ──
