@@ -14,6 +14,7 @@
  */
 
 import {saidText, t} from './i18n.mjs';
+import {STATE_MARKS} from './marks.mjs';
 import {grantPlace, grantWho, grantWords} from './permissions-tab.mjs';
 import {formatBytes, formatDuration, formatTokens, shownItems, turnDuration} from './turns.mjs';
 
@@ -139,8 +140,8 @@ export function createActions(host) {
       const reachable = health?.model_server?.reachable;
       const lines = [row('model',
         {text: [model?.name, model?.backend_label].filter(Boolean).join(' · ') || t('slash.noModel')},
-        ...(reachable === true ? [{text: ` ✓ ${t('slash.answers')}`, tone: 'ok'}] : []),
-        ...(reachable === false ? [{text: ` ✗ ${t('slash.noAnswer')}`, tone: 'error'}] : []))];
+        ...(reachable === true ? [{text: ` ${STATE_MARKS.ok} ${t('slash.answers')}`, tone: 'ok'}] : []),
+        ...(reachable === false ? [{text: ` ${STATE_MARKS.failed} ${t('slash.noAnswer')}`, tone: 'error'}] : []))];
       if (session?.workspace_label) lines.push(row('folder', {text: session.workspace_label}));
       const count = turns.filter((turn) => !turn.undone).length;
       lines.push(row('chat', {text: `${main ? t('chat.main') : `“${title}”`} · ${count ? t('slash.turns', {n: count}) : t('slash.new')}`}));

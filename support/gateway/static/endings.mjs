@@ -6,6 +6,7 @@
  */
 
 import {t} from './i18n.mjs';
+import {STATE_MARKS} from './marks.mjs';
 
 const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 // The reasons worth words beside the state; the others restate it.
@@ -16,7 +17,7 @@ const OWED = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'comm
 // What an ending notes beside its state, such as that no tests apply to the folder.
 const NOTES = new Set(['no_tests']);
 const OUTCOMES = new Set(['passed', 'failed', 'unknown']);
-export const ENDING_MARKS = {ready: '✓', draft: '◐', blocked: '?', failed: '✕', dropped: '■'};
+export const ENDING_MARKS = {ready: STATE_MARKS.ok, draft: '◐', blocked: '?', failed: STATE_MARKS.failed, dropped: STATE_MARKS.stopped};
 // The report's proposal line (`Ending: ready`), as the server's task_endings reads it.
 const PROPOSAL = /^[\s>*_`-]*ending[*_`\s]*[:：][*_`\s]*(?:ready|blocked|failed|dropped)\b[*_`]*[ \t]*(?:[:：—–-].*)?$/gim;
 
@@ -80,5 +81,5 @@ export const canFinish = (ending) => ['draft', 'failed', 'dropped'].includes(end
 export const finishLabel = (ending) => t(ending.reasons.includes('commit_missing') ? 'ending.finishCommit' : 'ending.finish');
 
 /** One test the run ran: `{mark, command, outcome}`, the outcome in words (`passed`, `failed`, `result not checked`). */
-export const testWords = (test) => ({mark: {passed: '✓', failed: '✕', unknown: '?'}[test.outcome], command: test.command,
+export const testWords = (test) => ({mark: {passed: STATE_MARKS.ok, failed: STATE_MARKS.failed, unknown: '?'}[test.outcome], command: test.command,
   outcome: t(`ending.outcome.${test.outcome}`)});

@@ -447,7 +447,7 @@ export function setupSettings({
   function editor(open) {
     $("s-editor").hidden = !open;
     $("s-change").setAttribute("aria-expanded", String(open));
-    $("s-change").textContent = t(open ? "common.close" : "settings.change");
+    $("s-change").textContent = t(open ? "common.done" : "settings.change");
   }
 
   // The environment variable is optional: it is checked when a name is typed, and says it wins when it is set.

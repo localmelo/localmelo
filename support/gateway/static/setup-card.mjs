@@ -22,11 +22,12 @@
  */
 import {t} from "./i18n.mjs";
 import {maker} from "./dom.mjs";
+import {STATE_MARKS} from "./marks.mjs";
 
 const RECHECK_MS = 3000;
 const JOB_MS = 1500;
 // One shape for each state of a step: the glyph differs, not only the colour.
-const MARKS = {waiting: "○", running: "●", done: "✓", skipped: "·", stopped: "■", failed: "✕"};
+const MARKS = {waiting: STATE_MARKS.waiting, running: STATE_MARKS.running, done: STATE_MARKS.ok, skipped: "·", stopped: STATE_MARKS.stopped, failed: STATE_MARKS.failed};
 
 const host = (url) => {
   try {
@@ -159,7 +160,10 @@ export function setupModelCard({
     const where = el("span", "setup-where");
     const detail = el("span", "setup-detail");
     detail.append(kind, where);
-    node.append(lead, name, size, detail);
+    // The whole row is the box's label, so a click anywhere on it turns the row on or off; the label draws no box of its own.
+    const pick = el("label", "setup-pick");
+    pick.append(lead, name, size, detail);
+    node.append(pick);
     const fill = (found) => {
       node.dataset.state = found.state;
       name.textContent = found.name;
@@ -170,7 +174,7 @@ export function setupModelCard({
         box.checked = !off.has(found.id);
         box.setAttribute("aria-label", t("setup.rowOn", {name: found.name}));
       } else {
-        mark.textContent = "✓";
+        mark.textContent = STATE_MARKS.ok;
         lead.replaceChildren(mark);
       }
     };

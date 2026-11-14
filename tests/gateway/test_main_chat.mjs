@@ -97,11 +97,11 @@ test('side chats group newest first under their day', () => {
 test('a card says what came back in words, never by colour alone', () => {
   const base = {id: 1, at: NOON, sourceId: 'a', sourceKind: 'chat', title: 'Fix CI', line: ''};
   assert.deepEqual(cardWords({...base, state: 'done'}), {mark: '✓', heading: 'Done: Fix CI', action: 'Open side chat'});
-  assert.deepEqual(cardWords({...base, state: 'failed', sourceKind: 'task'}), {mark: '✕', heading: 'Did not finish: Fix CI', action: 'Open task'});
+  assert.deepEqual(cardWords({...base, state: 'failed', sourceKind: 'task'}), {mark: '✗', heading: 'Did not finish: Fix CI', action: 'Open task'});
   assert.deepEqual(cardWords({...base, state: 'waiting'}), {mark: '!', heading: 'Needs your approval: Fix CI', action: 'Review'});
   // An answered approval has nothing to review: its words are the answer, and it opens its source.
   assert.deepEqual(cardWords({...base, state: 'answered', line: 'Allowed once'}), {mark: '✓', heading: 'Approval for Fix CI', action: 'Open side chat'});
-  assert.deepEqual(cardWords({...base, state: 'answered', line: 'Denied', sourceKind: 'task'}), {mark: '✕', heading: 'Approval for Fix CI', action: 'Open task'});
+  assert.deepEqual(cardWords({...base, state: 'answered', line: 'Denied', sourceKind: 'task'}), {mark: '✗', heading: 'Approval for Fix CI', action: 'Open task'});
   assert.equal(cardWords({...base, state: 'answered', line: 'No answer in time'}).mark, '·');
 });
 
@@ -442,7 +442,7 @@ test('the card of a reminder says Reminder: and the persons words, done or not',
   assert.equal(done.reminder, true);
   assert.equal(readCard({id: 6, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'x'}}).reminder, undefined);
   assert.deepEqual(cardWords({...base, state: 'done', reminder: true}), {mark: '✓', heading: 'Reminder: send the report', action: 'Open task'});
-  assert.deepEqual(cardWords({...base, state: 'failed', reminder: true}), {mark: '✕', heading: 'Reminder: send the report', action: 'Open task'});
+  assert.deepEqual(cardWords({...base, state: 'failed', reminder: true}), {mark: '✗', heading: 'Reminder: send the report', action: 'Open task'});
   // An approval a reminder's run asks for is still an approval.
   assert.equal(cardWords({...base, state: 'waiting', reminder: true}).heading, 'Needs your approval: send the report');
 });

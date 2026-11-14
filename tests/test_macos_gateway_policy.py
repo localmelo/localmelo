@@ -384,6 +384,8 @@ let window = consoleWindow()
 precondition(window.styleMask.isSuperset(of: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]))
 precondition(window.titleVisibility == .hidden && window.titlebarAppearsTransparent && window.title == "localmelo")
 precondition(window.contentView!.frame.height == window.frame.height)
+// It cannot be dragged below the page's desktop layout (the page turns into the phone layout under 700 points).
+precondition(window.minSize == NSSize(width: 720, height: 480), "\(window.minSize)")
 // The strip's size comes from the system's title bar, not from a number in the page.
 let bar = WindowBar(titleBarOf: window)
 precondition(bar.height > 0 && bar.buttons > 0 && bar.buttons < 200, "\(bar)")

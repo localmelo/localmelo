@@ -15,6 +15,7 @@ import {answerLine, blockCard, blockFacts, pageText, ranOut} from "./blocked.mjs
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
+import {STATE_MARKS} from "./marks.mjs";
 import {statusText} from "./turns.mjs";
 
 const DAY_S = 86400;
@@ -298,21 +299,21 @@ export function cardWords(card, stage = null) {
   if (card.state === "answered") {
     const allowed = card.answer ? card.answer.startsWith("allowed") : card.line.startsWith("Allowed");
     const denied = card.answer ? card.answer === "denied" : card.line.startsWith("Denied");
-    return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
+    return {mark: allowed ? STATE_MARKS.ok : denied ? STATE_MARKS.failed : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
-  if (card.reminder) return {mark: card.state === "failed" || card.state === "stopped" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
+  if (card.reminder) return {mark: card.state === "failed" || card.state === "stopped" ? STATE_MARKS.failed : STATE_MARKS.ok, heading: t("mainChat.card.reminder", {title}), action: open};
   // A done task says how code found it ended, in the words of every screen: Ready, Done, not finished (Finish it),
   // Needs you…
   const ending = card.state === "done" ? card.ending : null;
-  if (ending && stage) return {mark: "✓", heading: t("mainChat.card.ended", {state: t(stage.label, {chat: ""}), title}), action: open};
+  if (ending && stage) return {mark: STATE_MARKS.ok, heading: t("mainChat.card.ended", {state: t(stage.label, {chat: ""}), title}), action: open};
   if (ending) {
     const heading = t("mainChat.card.ended", {state: endingLabel(ending), title});
     return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
   }
-  if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
+  if (card.state === "failed") return {mark: STATE_MARKS.failed, heading: t("mainChat.card.failed", {title}), action: open};
   // A task that ran out of steps stopped; it can go on from where it was, so Continue comes first.
-  if (card.state === "stopped") return {mark: "■", heading: t("mainChat.card.stopped", {title}), action: open, more: t("failure.continue")};
-  return {mark: "✓", heading: t("mainChat.card.done", {title}), action: open};
+  if (card.state === "stopped") return {mark: STATE_MARKS.stopped, heading: t("mainChat.card.stopped", {title}), action: open, more: t("failure.continue")};
+  return {mark: STATE_MARKS.ok, heading: t("mainChat.card.done", {title}), action: open};
 }
 
 /**
@@ -330,7 +331,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   const node = el("article", "main-card");
   node.dataset.state = card.state;
   if (card.ending) node.dataset.ending = card.ending.state;
-  if (card.state === "answered") node.dataset.answer = words.mark === "✓" ? "allowed" : words.mark === "✕" ? "denied" : "other";
+  if (card.state === "answered") node.dataset.answer = words.mark === STATE_MARKS.ok ? "allowed" : words.mark === STATE_MARKS.failed ? "denied" : "other";
   node.dataset.cardId = String(card.id);
   node.setAttribute("aria-label", words.heading);
   const mark = el("span", "main-card-mark", words.mark);
@@ -492,8 +493,8 @@ const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "un
   "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked",
   "followup", "followed"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", notice: "i", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
-  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
-  earlier: "✓", revoked: "↺", followup: "↻"};
+  stop: STATE_MARKS.stopped, pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
+  earlier: STATE_MARKS.ok, revoked: "↺", followup: "↻"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
 const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
 const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];

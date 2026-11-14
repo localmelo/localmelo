@@ -21,6 +21,7 @@
  */
 import {t} from './i18n.mjs';
 import {maker} from './dom.mjs';
+import {STATE_MARKS} from './marks.mjs';
 import {ENDING_MARKS, endingLabel} from './endings.mjs';
 
 /** The states in which a run uses the browser: the card watches its source, and the chat's chip names it. */
@@ -28,7 +29,7 @@ export const ACTIVE = new Set(['working', 'waiting', 'you']);
 const STATES = new Set([...ACTIVE, 'done', 'stopped']);
 const ACTIONS = new Set(['open', 'read', 'press', 'type', 'wait', 'search']);
 // The glyph of each state, the same on the card, the dock and the panel; its word is the one thing that says it in text.
-const GLYPHS = {working: '⊕', waiting: '!', you: '‖', done: '✓', stopped: '■', stale: '◌'};
+const GLYPHS = {working: '⊕', waiting: '!', you: '‖', done: STATE_MARKS.ok, stopped: STATE_MARKS.stopped, stale: '◌'};
 const WORDS = {
   working: 'browser.state.working',
   waiting: 'browser.state.waiting',
