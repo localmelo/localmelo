@@ -247,7 +247,7 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 - **Each card keeps its own report.** When a task given from the task page ran more than once, each `Did not finish` card shows the report of its own run.
 - **It approves nothing.** A follow-up has only the task tools (no web, browser, file or shell tool) and widens no permission. What it tells the task reaches it as melo's note, never as your words: a step your own request did not ask for stays blocked in Auto, whatever the note says.
 - **Only tasks the chat started.** A run of a chore the chat saved counts as one of them (a reminder's does not). Tasks started from the task page and other chats' tasks keep the card alone. Activity reads what the chat did: `Continued the task: Fix CI`, `Asked you: Should I split it?`.
-- **Turn it off** with **Follow up on tasks** in Settings → Chats and folders (developer mode), or `[tasks] follow_up = false`.
+- **Turn it off** with **When a task stops, its chat takes over** in Settings → Chats and folders (developer mode), or `[tasks] follow_up = false`.
 
 <a id="slash-commands"></a>
 
@@ -805,7 +805,7 @@ never what runs. When it is on:
   priority;
 - a running turn shows the tool's name and arguments on each tool card, its step, attempt, phase and test count, the number of tool calls on the work line and the steps and tokens under an answer, and a model server error keeps its own text on the card (default mode words each of these for a person and keeps the raw text under **Details**);
 - the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the
-  connection form keeps its technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
+  connection form keeps its technical words (**Chat backend**, **Chat API URL**).
 
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:

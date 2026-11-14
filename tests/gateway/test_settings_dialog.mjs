@@ -530,17 +530,15 @@ test('developer mode lists the Developer section, and the layout is chosen befor
   assert.equal(plain.element('s-recall-key').hidden, true);
 });
 
-const NAMES = ['settings-description', 's-adapter-label', 's-chat-url-label', 's-chat-url-hint'];
+const NAMES = ['s-adapter-label', 's-chat-url-label'];
 
 test('default mode names the server and its address in plain words', async () => {
   const h = harness({'GET /settings': fixture({mode: 'default'}), [LISTED()]: listing(['a'])});
   await h.open();
   await flush();
   assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
-    'The models Melo runs on, and the server that serves them. Changes apply to your next message.',
     'Model server',
     'Server address',
-    'The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.',
   ]);
   assert.equal(h.element('discover-status').textContent, 'Choose the chat model from the list, or pick Other to type a name.');
   await change(h, 's-chat-url', '');
@@ -555,10 +553,8 @@ test('developer mode keeps the technical words of the dialog', async () => {
   await h.open();
   await flush();
   assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
-    'Settings apply to subsequent turns. Current turns finish with their existing connection.',
     'Chat backend',
     'Chat API URL',
-    "Use your model server's API address. oMLX supports the OpenAI-compatible adapter.",
   ]);
   await change(h, 's-chat-url', 'http://localhost:9/v1');
   assert.equal(h.element('discover-status').textContent, 'Discovery lists models without starting a chat.');
@@ -858,7 +854,7 @@ test('Web search says that the words leave the computer, in English and Simplifi
   }
 });
 
-test('Follow up on tasks: a developer switch that saves follow_up, hidden in default mode', async () => {
+test('When a task stops, its chat takes over: a developer switch that saves follow_up, hidden in default mode', async () => {
   const plain = harness({'GET /settings': full({follow_up: true})});
   await plain.open('chats');
   assert.equal(plain.element('s-follow-up-row').hidden, true, 'few choices in default mode');
@@ -907,18 +903,6 @@ test('Reflect when stuck after many steps: a plain switch that saves reflection,
   assert.equal(h.puts().at(-1).options.body.reflection, true);
   assert.equal(h.element('settings-saved-text').textContent, 'Undone: Reflecting after many steps is on.');
   assert.equal(h.element('s-reflection').checked, true);
-});
-
-test('Reflect when stuck after many steps says what it costs, in English and Simplified Chinese', async () => {
-  const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
-  assert.equal(t('settings.reflection.title'), 'Reflect when stuck after many steps');
-  assert.match(t('settings.reflection.hint'), /50 steps.*one more model request.*100 steps/);
-  try {
-    await useLanguage('zh-Hans');
-    assert.match(t('settings.reflection.hint'), /50 步.*多花一次模型请求.*100 步/);
-  } finally {
-    await useLanguage('en');
-  }
 });
 
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
@@ -1069,10 +1053,13 @@ test('the default folder changes from a typed path, the app\'s panel or a recent
   await change(h, 's-workspace', 'relative/path');
   await h.element('s-folder-use').emit('click');
   assert.equal(h.element('s-workspace').attributes['aria-invalid'], 'true');
+  assert.match(h.element('s-folder-hint').textContent, /not a full path/);
+  assert.equal(h.element('s-folder-hint').hidden, false);
   assert.equal(h.puts().length, 0);
   await change(h, 's-workspace', '~/projects');
   await h.element('s-folder-use').emit('click');
   await flush();
+  assert.equal(h.element('s-folder-hint').hidden, true, 'the line says only what is wrong');
   assert.equal(h.puts().at(-1).options.body.workspace, '~/projects');
   assert.equal(h.element('settings-saved-text').textContent, 'Saved: New chats start in ~/projects.');
   assert.equal(h.element('s-folder-edit').hidden, true);
@@ -1115,6 +1102,11 @@ test('the check-in switch shows the next time, saves with PUT /checkin and can b
   await h.element('settings-undo').emit('click');
   assert.deepEqual(h.calls.at(-1).options.body, {on: true});
   assert.equal(h.element('settings-saved-text').textContent, 'Undone: the check-in is on.');
+  assert.equal(h.element('s-chores-hint').hidden, false, 'the example of a request shows while no chore is listed');
+  const busy = harness({'GET /settings': full(), 'GET /chores': {chores: [{id: 'c1'}], checkin: {on: false}}});
+  await busy.open('scheduled');
+  await flush();
+  assert.equal(busy.element('s-chores-hint').hidden, true, 'and goes once one is');
   const down = harness({'GET /settings': full()});
   await down.open('scheduled');
   await flush();

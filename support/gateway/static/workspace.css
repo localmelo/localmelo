@@ -2575,6 +2575,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-7) var(--space-7); }
 .st-section h3 { margin: 0; padding-right: var(--space-7); font-size: var(--text-heading); font-weight: 500; line-height: 30px; letter-spacing: -0.4px; }
 .st-help { max-width: 62ch; margin: var(--space-1) 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+/* A section with no lead under its heading goes straight to its first group. */
+.st-section h3 + .st-group { margin-top: var(--space-5); }
 /* The rest of a section's help, folded under the two sentences that matter first. */
 .st-help:has(+ .st-more) { margin-bottom: var(--space-2); }
 .st-more { max-width: 62ch; margin: 0 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
