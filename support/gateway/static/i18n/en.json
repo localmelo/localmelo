@@ -1033,6 +1033,7 @@
   "hosted.key.unavailable": "The keychain is not available on this computer. Set the key in an environment variable instead.",
   "hosted.test.busy": "The service is busy, or this account reached a limit (429). Wait a moment, then test again.",
   "hosted.test.error": "The service answered with an error ({status}): {detail}",
+  "hosted.test.errorBare": "The service answered with an error ({status}).",
   "hosted.test.noKey": "There is no key yet. Paste your key first.",
   "hosted.test.noModel": "The service has no model called {model}. Choose one from the list.",
   "hosted.test.noTool": "Connected, but {model} did not use the test tool. melo needs a model that can use tools.",

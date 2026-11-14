@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.support import hosted_check, keychain
+from localmelo.support import hosted, hosted_check, keychain
 from localmelo.support.config import CloudVendorConfig, Config
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.tests.fake_keychain import FakeSecurity
@@ -271,12 +271,98 @@ async def test_a_listing_answer_past_the_limit_or_compressed_is_a_failure_not_a_
     assert failed.detail == "Encoded" and not Unread.entered
 
 
+async def test_the_anthropic_list_is_asked_in_its_own_format_and_others_are_unchanged(
+    fake_keychain: FakeSecurity,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [{"id": "claude-sonnet-5-5"}]})
+
+    transport = httpx.MockTransport(handler)
+    anthropic, openai = hosted.get("anthropic"), hosted.get("openai")
+    assert anthropic is not None and openai is not None
+    keychain.write(anthropic.service, KEY)
+
+    # The key comes through the preset's reader and goes in its own header, alone.
+    found = await hosted_check.service_models(
+        anthropic,
+        anthropic.base_url,
+        transport=transport,
+        listings=hosted_check.Listings(),
+    )
+    assert found.models == ("claude-sonnet-5-5",) and found.check is None
+    sent = seen[-1]
+    assert str(sent.url) == "https://api.anthropic.com/v1/models?limit=1000"
+    assert sent.headers["anthropic-version"] == "2026-10-21"
+    assert sent.headers["x-api-key"] == KEY and "authorization" not in sent.headers
+
+    # Another service gets the request it always got.
+    await hosted_check.list_models(openai.base_url, KEY, transport=transport)
+    other = seen[-1]
+    async with httpx.AsyncClient(transport=transport) as client:
+        await client.get(
+            f"{openai.base_url}/models",
+            headers={"Accept-Encoding": "identity", "Authorization": f"Bearer {KEY}"},
+        )
+    before = seen[-1]
+    assert str(other.url) == str(before.url) == "https://api.openai.com/v1/models"
+    assert list(other.headers.items()) == list(before.headers.items())
+
+
+async def test_a_json_error_body_gives_its_message_as_one_short_line() -> None:
+    said = "anthropic-version: header is required"
+    body = {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": said},
+        "request_id": "req_1",
+    }
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(lambda r: httpx.Response(400, json=body)),
+    )
+    assert models == [] and failed is not None and failed.result == "error"
+    assert failed.detail == said and "{" not in failed.detail
+
+    # The sentence is one line, cut at the limit, with the key and known secrets out of it.
+    def detail(payload: Any) -> str:
+        return hosted_check.failure(500, json.dumps(payload), KEY)[1]
+
+    assert detail({"message": "top\nlevel   words"}) == "top level words"
+    assert detail({"error": {"message": f"bad {KEY} here"}}) == "bad [redacted] here"
+    long = detail({"error": {"message": "word " * 100}})
+    assert len(long) == hosted_check.MAX_DETAIL and long.endswith("…")
+    for odd in ({"error": "just a string"}, {"errors": ["x"]}, ["x"], "x", 5):
+        assert detail(odd) == ""
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<html><body><h1>502 Bad Gateway</h1> {not json} nginx</body></html>",
+        "upstream connect error or disconnect/reset before headers",
+        '<html>{"error": {"message": "inside a page"}}</html>',
+        "",
+    ],
+)
+async def test_an_error_body_that_is_not_json_gives_no_text(body: str) -> None:
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(lambda r: httpx.Response(502, text=body)),
+    )
+    assert models == [] and failed is not None and failed.status == 502
+    assert (failed.result, failed.detail) == ("error", "")
+
+
 @pytest.mark.parametrize("status", [403, 500])
 async def test_an_error_body_that_repeats_the_key_never_reaches_a_result(
     status: int,
 ) -> None:
     odd = "zz9-" + "q7" * 12  # a shape no redaction pattern knows
-    body = f"denied for key {odd}, again {odd}"
+    body = json.dumps({"error": {"message": f"denied for key {odd}, again {odd}"}})
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

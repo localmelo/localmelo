@@ -622,7 +622,7 @@ one `GET <address>/models` with the service's own key and never a chat.
 - `preset` is required; `address` names the address of `other`. `model` is the saved model, if any.
 - `key` is where the key comes from (`env`, `keychain`, `missing`, `locked`, `unavailable`, `address`). With no key nothing is sent, and `result` is `no_key`.
 - `models` holds at most 200 names, each a printable line of at most 200 characters. `listed` is `false` when the service lists none. The whole request is cut at 10 s and an answer past 1 MB is an `error`, not a list.
-- A failure is `result` (`wrong_key`, `refused`, `no_model`, `busy`, `timeout`, `unreachable`, `error` or a `keychain_*` kind) with `message` in the console's language, as the Test button says it.
+- A failure is `result` (`wrong_key`, `refused`, `no_model`, `busy`, `timeout`, `unreachable`, `error` or a `keychain_*` kind) with `message` in the console's language, as the Test button says it. For `error` the message ends with the one line the service said (its JSON `error.message`, at most 160 characters), or at the status when it said none: no raw body is shown.
 - `gone` is `true`, and `line` says `The service has no model called ...`, when the service lists models but not `model`. Nothing is sent and nothing is changed.
 - The answer is kept in memory for about a minute, and one request per service is in flight at a time. Redirects are not followed.
 - 409 `key_address`: an `address` that is not the built-in address of the service. The key is never sent anywhere else, and the refusal comes before any request.

@@ -38,6 +38,20 @@ _DEEPSEEK_THINKING_OFF: Final[Mapping[str, Any]] = {"thinking": {"type": "disabl
 
 
 @dataclass(frozen=True)
+class ListFormat:
+    """How a service's ``GET <address>/models`` differs from the OpenAI format.
+
+    Preset data, never a setting: *headers* are sent as they are, *key_header* is the
+    header the key goes in alone (empty: ``Authorization: Bearer``), and *query* is
+    appended to the address. Empty for a service that lists the OpenAI way.
+    """
+
+    headers: Mapping[str, str] = field(default_factory=dict)
+    key_header: str = ""
+    query: str = ""
+
+
+@dataclass(frozen=True)
 class Preset:
     """One hosted service, as Settings and the setup list offer it.
 
@@ -48,7 +62,8 @@ class Preset:
     service has no such switch), and *off_models* the models that start with
     thinking off. *image_models* and *text_models* are lowercase name prefixes of
     the models known to read images and known not to; a service's model listing
-    does not say, so ``[agent] tool_images = "auto"`` follows these.
+    does not say, so ``[agent] tool_images = "auto"`` follows these. *listing* is
+    how its model list is asked for when that is not the OpenAI way.
     """
 
     id: str
@@ -61,6 +76,7 @@ class Preset:
     off_models: tuple[str, ...] = ()
     image_models: tuple[str, ...] = ()
     text_models: tuple[str, ...] = ()
+    listing: ListFormat = ListFormat()
 
     @property
     def service(self) -> str:
@@ -111,6 +127,10 @@ PRESETS: Final[tuple[Preset, ...]] = (
             "claude-haiku",
             "claude-fable",
         ),
+        # Its list is its own format: a version header, the key in `x-api-key`, pages of 20 unless asked.
+        listing=ListFormat(
+            {"anthropic-version": "2026-10-21"}, "x-api-key", "limit=1000"
+        ),
     ),
     Preset(
         "nvidia",
@@ -145,6 +165,17 @@ def get(preset_id: str) -> Preset | None:
 
 def _same_address(left: str, right: str) -> bool:
     return left.strip().rstrip("/").lower() == right.strip().rstrip("/").lower()
+
+
+def listing_for(address: str) -> ListFormat:
+    """How the model list at *address* is asked for: the built-in service's format, else the OpenAI one.
+
+    Chosen by the address the request goes to, so a format and its address never part.
+    """
+    for preset in PRESETS:
+        if not preset.free_address and _same_address(preset.base_url, address):
+            return preset.listing
+    return ListFormat()
 
 
 def preset_of(backend: str, base_url: str) -> Preset | None:

@@ -865,7 +865,7 @@ def _hosted_message(found: hosted_check.HostedCheck, model: str) -> str:
             "hosted.test.works" if found.tools else "hosted.test.noTool", model=model
         )
     return t(
-        hosted_check.WORDS.get(found.result, "hosted.test.error"),
+        hosted_check.words(found.result, found.detail),
         model=model,
         status=found.status or "",
         seconds=int(hosted_check.CHAT_TIMEOUT_S),

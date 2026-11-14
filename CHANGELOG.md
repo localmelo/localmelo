@@ -151,6 +151,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A hosted service lists its models by itself once its key is saved, and the first one it suggests is offered first; a saved model the service no longer offers is said at once, and never changed for you.
 - Keep keys for several hosted services at once: each remembers its last model, and one list in the console, the app and `/model` switches between them and the local server, from the next message.
 - A key is sent only to its own service; a key saved for another address is refused before any request, and "Other" keeps one key per address.
+- The Anthropic service lists its models (it asks in its own format), and a service's error shows as one short line, not its raw answer.
 - melo_serve is a local model server, and its model can be switched from every surface.
 - `melo serve` just works after the first run, and can run at login on macOS.
 - oMLX is supported and recommended on Apple silicon.
