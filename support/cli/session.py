@@ -40,7 +40,14 @@ from localmelo.support import config
 from localmelo.support.backends import discovery, model_offer
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.openai_family import USUAL_URL
-from localmelo.support.cli import browsing, commands, hanging, serve_model, usershell
+from localmelo.support.cli import (
+    browsing,
+    commands,
+    hanging,
+    hosted_model,
+    serve_model,
+    usershell,
+)
 from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
@@ -568,7 +575,7 @@ class CliSession:
                 "attach",
                 "attachments",
                 "detach",
-            ) or (command.name == "model" and serve_model.applies(self)):
+            ) or (command.name == "model" and self._model_lists_services()):
                 self._state = "switching"
                 self._pending_command = command.name
                 self._work = self.spawn(
@@ -652,9 +659,10 @@ class CliSession:
         if (
             command is not None
             and command.name in commands.LOCAL_ONLY
-            and not (command.name == "model" and serve_model.applies(self))
+            and not (command.name == "model" and self._model_lists_services())
         ):
-            # melo_serve's /model switches what every chat uses, the main chat's too.
+            # melo_serve's /model, and the list of every keyed service, switch what
+            # every chat uses, the main chat's too.
             self.out.print(
                 self._text(
                     f"/{name} works only in the terminal's own chat "
@@ -1903,13 +1911,20 @@ class CliSession:
             rule = self.renderer.symbols.rule
             self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
+    def _model_lists_services(self) -> bool:
+        """Whether /model switches through the gateway: melo_serve, or a hosted key exists."""
+        return serve_model.applies(self) or hosted_model.applies(self)
+
     async def model(self, arguments: str) -> None:
         """``/model``: pick one of the server's models, or switch to one by name and save it.
 
-        With melo_serve, its chat models instead, and a switch every chat follows.
+        With melo_serve, its chat models instead, and a switch every chat follows. With
+        a key for a hosted service, one list of every model that can be used now.
         """
         if serve_model.applies(self):
             await serve_model.command(self, arguments)
+            return
+        if hosted_model.applies(self) and await hosted_model.command(self, arguments):
             return
         backend = self.factory.backend
         if not arguments:
