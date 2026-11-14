@@ -40,6 +40,8 @@ CHAT_TIMEOUT_S: Final = 60.0
 MAX_MODELS: Final = 200
 # The longest model name that is kept.
 MAX_NAME: Final = 200
+# The most of a service's error sentence that is shown.
+MAX_DETAIL: Final = 160
 # The most of a listing's answer that is read; a longer one is a failure, not a list.
 MAX_BODY: Final = 1024 * 1024
 # How long a listing is reused, so a menu opened again does not ask again.
@@ -55,6 +57,8 @@ TIMEOUT: Final = "timeout"
 UNREACHABLE: Final = "unreachable"
 ERROR: Final = "error"
 
+# The words for an error that has nothing to add to its status.
+ERROR_BARE: Final = "hosted.test.errorBare"
 # The catalog key of the words for each failure, by result code.
 WORDS: Final = {
     NO_KEY: "hosted.test.noKey",
@@ -66,6 +70,13 @@ WORDS: Final = {
     UNREACHABLE: "hosted.test.unreachable",
     ERROR: "hosted.test.error",
 }
+
+
+def words(result: str, detail: str) -> str:
+    """The catalog key of the words for *result*; an error with nothing to add ends at its status."""
+    found = WORDS.get(result, WORDS[ERROR])
+    return ERROR_BARE if found == WORDS[ERROR] and not detail else found
+
 
 _TOOL = ToolDef(
     "echo",
@@ -97,15 +108,40 @@ class HostedCheck:
     tools: bool | None = None
 
 
+def _says(text: str) -> str:
+    """The sentence a JSON error body carries (``error.message``, else ``message``); "" for anything else.
+
+    Never raw JSON, HTML or any other body text: the person reads a line, not a payload.
+    """
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return ""
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error")
+    said = error.get("message") if isinstance(error, dict) else None
+    if not isinstance(said, str):
+        said = body.get("message")
+    return said if isinstance(said, str) else ""
+
+
 def failure(status: int | None, text: str, key: str = "") -> tuple[str, str]:
     """The result code and detail for an HTTP *status* (or none) with body *text*.
 
-    The *key* the request carried is cut out of *text* first, whatever its shape; the
-    patterns :func:`redact_secrets` knows come after.
+    The detail is one short line: what a JSON body says (see :func:`_says`), at most
+    :data:`MAX_DETAIL` characters, else empty. The *key* the request carried is cut out
+    first, whatever its shape; the patterns :func:`redact_secrets` knows come after.
     """
     if key:
         text = text.replace(key, REDACTED)
-    detail = redact_secrets(" ".join(text.split())[:200])[0]
+    said = " ".join(_says(text).split())
+    if key:
+        said = said.replace(key, REDACTED)  # also as the JSON text spelled it
+    # Redacted before the cut, so a cut never leaves half a secret.
+    detail = redact_secrets(said)[0]
+    if len(detail) > MAX_DETAIL:
+        detail = detail[: MAX_DETAIL - 1] + "…"
     if status == 401:
         return WRONG_KEY, ""
     if status in (402, 403):
@@ -129,8 +165,14 @@ async def list_models(
     """
     # An uncompressed answer: nothing to inflate past the limit below.
     headers = {"Accept-Encoding": "identity"}
+    # The service's own way of listing, chosen by the address the request goes to.
+    form = hosted.listing_for(address)
+    headers.update(form.headers)
     if key:
-        headers["Authorization"] = f"Bearer {key}"
+        headers[form.key_header or "Authorization"] = (
+            key if form.key_header else f"Bearer {key}"
+        )
+    url = f"{address}/models" + (f"?{form.query}" if form.query else "")
     try:
         # The whole request, not each phase, is bounded; so is the answer that is read.
         async with (
@@ -138,7 +180,7 @@ async def list_models(
             httpx.AsyncClient(
                 timeout=LIST_TIMEOUT_S, transport=transport, follow_redirects=False
             ) as client,
-            client.stream("GET", f"{address}/models", headers=headers) as response,
+            client.stream("GET", url, headers=headers) as response,
         ):
             status = response.status_code
             if status in (404, 405, 501):  # no list: the chat decides

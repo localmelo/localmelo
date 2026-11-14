@@ -381,7 +381,9 @@ def test_a_services_error_text_that_repeats_the_key_is_not_in_the_answer(
 
     async def asks(address: str, key: str, **_: Any) -> Any:
         transport = httpx.MockTransport(
-            lambda request: httpx.Response(status, text=f"no access for {odd}")
+            lambda request: httpx.Response(
+                status, json={"error": {"message": f"no access for {odd}"}}
+            )
         )
         return await real(address, key, transport=transport)
 
@@ -395,6 +397,91 @@ def test_a_services_error_text_that_repeats_the_key_is_not_in_the_answer(
     ):  # the words for an error carry the service's text, so this is the case that matters
         assert "no access for" in body.json()["message"]
     assert odd not in body.text
+
+
+@pytest.mark.parametrize(
+    ("status", "answer", "words"),
+    [
+        (
+            400,
+            {
+                "type": "error",
+                "error": {"message": "anthropic-version: header is required"},
+            },
+            "The service answered with an error (400): anthropic-version: header is required",
+        ),
+        (
+            502,
+            "<html><body>502 Bad Gateway {x}</body></html>",
+            "The service answered with an error (502).",
+        ),
+    ],
+)
+def test_a_services_error_is_one_short_line_and_ends_cleanly(
+    client: TestClient,
+    fake_keychain: FakeSecurity,
+    status: int,
+    answer: Any,
+    words: str,
+) -> None:
+    keychain.write("localmelo.openai", KEY)
+    real = REAL_LIST_MODELS
+
+    async def asks(address: str, key: str, **_: Any) -> Any:
+        body = {"json": answer} if isinstance(answer, dict) else {"text": answer}
+        transport = httpx.MockTransport(lambda r: httpx.Response(status, **body))
+        return await real(address, key, transport=transport)
+
+    save_local()
+    hosted_check.LISTINGS.clear()
+    with mock.patch.object(hosted_check, "list_models", asks):
+        shown = client.get("/api/hosted/models", params={"preset": "openai"}).json()[
+            "message"
+        ]
+        row = {g["id"]: g for g in client.get("/api/chat-models").json()["groups"]}[
+            "openai"
+        ]
+
+    assert shown == words and row["problem"] == words
+
+
+def test_the_anthropic_service_lists_its_models_on_the_page_and_in_the_switch_list(
+    client: TestClient, fake_keychain: FakeSecurity
+) -> None:
+    keychain.write("localmelo.anthropic", KEY)
+    save_local()
+    real = REAL_LIST_MODELS
+    sent: list[httpx.Request] = []
+
+    def answers(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if "x-api-key" not in request.headers:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "anthropic-version: header is required"}},
+            )
+        return httpx.Response(
+            200, json={"data": [{"id": "claude-sonnet-5-5"}, {"id": "claude-opus-5-5"}]}
+        )
+
+    async def asks(address: str, key: str, **_: Any) -> Any:
+        return await real(address, key, transport=httpx.MockTransport(answers))
+
+    hosted_check.LISTINGS.clear()
+    with mock.patch.object(hosted_check, "list_models", asks):
+        gone = listing(client, preset="anthropic", model="claude-retired")
+        groups = {g["id"]: g for g in client.get("/api/chat-models").json()["groups"]}
+
+    assert (
+        gone["models"] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+        and gone["gone"] is True
+    )
+    assert groups["anthropic"]["models"] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+    assert groups["anthropic"]["problem"] == ""
+    # Every request went to the service's own address, in its own format.
+    assert {str(r.url) for r in sent} == {
+        "https://api.anthropic.com/v1/models?limit=1000"
+    }
 
 
 def test_the_switch_list_sends_a_key_only_to_the_address_it_belongs_to(

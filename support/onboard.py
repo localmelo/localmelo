@@ -636,7 +636,7 @@ def _hosted_hint(cfg: config.Config, exc: ProbeError) -> str:
     result, detail = hosted_check.failure(status, str(exc))
     return t_in(
         "en",
-        hosted_check.WORDS[result],
+        hosted_check.words(result, detail),
         model=section.chat_model,
         status=status,
         detail=detail,
