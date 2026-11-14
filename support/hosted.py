@@ -100,9 +100,15 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "Anthropic",
         "anthropic",
         "https://api.anthropic.com/v1",
-        ("claude-sonnet-4-20250514",),
+        ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"),
         "ANTHROPIC_API_KEY",
-        image_models=("claude-3", "claude-sonnet", "claude-opus", "claude-haiku"),
+        image_models=(
+            "claude-3",
+            "claude-sonnet",
+            "claude-opus",
+            "claude-haiku",
+            "claude-fable",
+        ),
     ),
     Preset(
         "nvidia",

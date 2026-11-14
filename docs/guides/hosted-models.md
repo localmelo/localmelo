@@ -22,7 +22,7 @@ Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, Dee
 |---|---|---|
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o`, `gpt-4o-mini` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
-| Anthropic | `https://api.anthropic.com/v1` | `claude-sonnet-4-20250514` |
+| Anthropic | `https://api.anthropic.com/v1` | `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5` |
 | NVIDIA | `https://integrate.api.nvidia.com/v1` | `nvidia/llama-3.1-nemotron-70b-instruct` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-flash`, `deepseek-v4-pro` |
 | Other (OpenAI format) | the address you type, up to `/v1` | the model you type |
