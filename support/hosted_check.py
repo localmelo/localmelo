@@ -17,13 +17,17 @@ the request carries the key in a header only.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
-from localmelo.melo.contracts.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import REDACTED, redact_secrets
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support import config, hosted, keychain
 from localmelo.support.backends import discovery
@@ -34,6 +38,12 @@ LIST_TIMEOUT_S: Final = 10.0
 CHAT_TIMEOUT_S: Final = 60.0
 # The most models a result lists.
 MAX_MODELS: Final = 200
+# The longest model name that is kept.
+MAX_NAME: Final = 200
+# The most of a listing's answer that is read; a longer one is a failure, not a list.
+MAX_BODY: Final = 1024 * 1024
+# How long a listing is reused, so a menu opened again does not ask again.
+LISTING_TTL_S: Final = 60.0
 # The results, in the order the console words them.
 WORKS: Final = "works"
 NO_KEY: Final = "no_key"
@@ -87,16 +97,14 @@ class HostedCheck:
     tools: bool | None = None
 
 
-def _address(backend: str, section: config.CloudVendorConfig) -> str:
-    """The address the section's requests go to."""
-    if section.base_url:
-        return section.base_url.rstrip("/")
-    preset = hosted.preset_of(backend, "")
-    return preset.base_url.rstrip("/") if preset is not None else ""
+def failure(status: int | None, text: str, key: str = "") -> tuple[str, str]:
+    """The result code and detail for an HTTP *status* (or none) with body *text*.
 
-
-def failure(status: int | None, text: str) -> tuple[str, str]:
-    """The result code and detail for an HTTP *status* (or none) with body *text*."""
+    The *key* the request carried is cut out of *text* first, whatever its shape; the
+    patterns :func:`redact_secrets` knows come after.
+    """
+    if key:
+        text = text.replace(key, REDACTED)
     detail = redact_secrets(" ".join(text.split())[:200])[0]
     if status == 401:
         return WRONG_KEY, ""
@@ -119,30 +127,174 @@ async def list_models(
     A service with no list answers 404 or 405, which is no failure: the list
     is empty and the chat decides.
     """
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    # An uncompressed answer: nothing to inflate past the limit below.
+    headers = {"Accept-Encoding": "identity"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     try:
-        async with httpx.AsyncClient(
-            timeout=LIST_TIMEOUT_S, transport=transport, follow_redirects=False
-        ) as client:
-            response = await client.get(f"{address}/models", headers=headers)
+        # The whole request, not each phase, is bounded; so is the answer that is read.
+        async with (
+            asyncio.timeout(LIST_TIMEOUT_S),
+            httpx.AsyncClient(
+                timeout=LIST_TIMEOUT_S, transport=transport, follow_redirects=False
+            ) as client,
+            client.stream("GET", f"{address}/models", headers=headers) as response,
+        ):
+            status = response.status_code
+            if status in (404, 405, 501):  # no list: the chat decides
+                return [], None
+            # A compressed answer would be inflated before the size is known: refused unread.
+            if response.headers.get("content-encoding", "").strip().lower() not in (
+                "",
+                "identity",
+            ):
+                return [], HostedCheck(False, ERROR, status=status, detail="Encoded")
+            raw = bytearray()
+            async for chunk in response.aiter_bytes():
+                raw += chunk
+                if len(raw) > MAX_BODY:
+                    return [], HostedCheck(
+                        False, ERROR, status=status, detail="TooLarge"
+                    )
+    except TimeoutError:
+        return [], HostedCheck(False, TIMEOUT, detail="TimeoutError")
     except httpx.TimeoutException as exc:
         return [], HostedCheck(False, TIMEOUT, detail=type(exc).__name__)
     except httpx.RequestError as exc:
         return [], HostedCheck(False, UNREACHABLE, detail=type(exc).__name__)
-    if response.status_code in (404, 405, 501):
-        return [], None
-    if response.status_code >= 300:  # a redirect is never followed
-        result, detail = failure(response.status_code, response.text)
-        return [], HostedCheck(
-            False, result, status=response.status_code, detail=detail
-        )
+    if status >= 300:  # a redirect is never followed
+        result, detail = failure(status, raw.decode("utf-8", "replace"), key)
+        return [], HostedCheck(False, result, status=status, detail=detail)
     try:
-        body = response.json()
+        body = json.loads(raw)
     except ValueError:
         return [], None
     names = (name.removeprefix("models/") for name in discovery.parse_model_ids(body))
-    models = sorted(name for name in names if discovery.is_chat_model(name))
+    # A name is the service's text: one printable line of a sane length, shown as text only.
+    models = sorted(
+        name
+        for name in names
+        if name.isprintable()
+        and len(name) <= MAX_NAME
+        and discovery.is_chat_model(name)
+    )
     return models[:MAX_MODELS], None
+
+
+def lacks(models: list[str] | tuple[str, ...], model: str) -> bool:
+    """Whether the listing *models* is known and does not hold *model*."""
+    return (
+        bool(models)
+        and model not in models
+        and not any(name.endswith(f"/{model}") for name in models)
+    )
+
+
+class Listings:
+    """The listings of the services, reused for a short while, one in flight per service.
+
+    A listing is asked at an address with a key; its answer is kept in memory for
+    :data:`LISTING_TTL_S` seconds (never on disk). A transient failure (a timeout, no
+    answer) is not kept. The key is part of the entry as a digest, never as itself,
+    so a new key asks again. Callers that ask while a listing is in flight wait for it.
+    """
+
+    def __init__(
+        self,
+        ttl_s: float = LISTING_TTL_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._ttl_s = ttl_s
+        self._clock = clock
+        self._done: dict[
+            tuple[str, str], tuple[float, tuple[list[str], HostedCheck | None]]
+        ] = {}
+        self._busy: dict[
+            tuple[str, str], asyncio.Future[tuple[list[str], HostedCheck | None]]
+        ] = {}
+
+    def clear(self) -> None:
+        self._done.clear()
+
+    async def get(
+        self,
+        address: str,
+        key: str,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> tuple[list[str], HostedCheck | None]:
+        """:func:`list_models` for *address* with *key*, reused or shared as above."""
+        entry = (address, hashlib.sha256(key.encode()).hexdigest()[:16])
+        hit = self._done.get(entry)
+        if hit is not None and self._clock() - hit[0] < self._ttl_s:
+            return hit[1]
+        waiting = self._busy.get(entry)
+        if waiting is None:
+            waiting = asyncio.ensure_future(
+                list_models(address, key, transport=transport)
+            )
+            self._busy[entry] = waiting
+            waiting.add_done_callback(lambda done: self._finish(entry, done))
+        return await asyncio.shield(waiting)
+
+    def _finish(
+        self,
+        entry: tuple[str, str],
+        done: asyncio.Future[tuple[list[str], HostedCheck | None]],
+    ) -> None:
+        self._busy.pop(entry, None)
+        if done.cancelled() or done.exception() is not None:
+            return
+        answer = done.result()
+        if answer[1] is None or answer[1].result not in (TIMEOUT, UNREACHABLE):
+            self._done[entry] = (self._clock(), answer)
+
+
+LISTINGS: Final = Listings()
+
+
+@dataclass(frozen=True)
+class Listing:
+    """What a service's model list gave: whether a key exists, the models, and why not.
+
+    *models* is empty for a service with no list (then the chat decides) and when the
+    listing failed; *check* then holds the failure (its *result* is a code of this
+    module or ``keychain_<kind>``).
+    """
+
+    key: bool
+    models: tuple[str, ...] = ()
+    check: HostedCheck | None = None
+
+
+async def service_models(
+    preset: hosted.Preset,
+    address: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    listings: Listings | None = None,
+) -> Listing:
+    """The models *preset* lists at *address*, once a key for it exists.
+
+    The key is the preset's (:func:`hosted.preset_key`): it goes to *address* only
+    when that is the address the key belongs to; any other is refused before a
+    request is made. One ``GET <address>/models``, never a chat.
+    """
+    state = hosted.preset_key_state(preset, address)
+    if state == hosted.ADDRESS:
+        return Listing(False, check=HostedCheck(False, f"keychain_{hosted.ADDRESS}"))
+    if state not in (hosted.ENV, hosted.KEYCHAIN):
+        return Listing(False)
+    try:
+        credential = hosted.preset_key(preset, address)
+    except keychain.KeychainError as exc:
+        return Listing(True, check=HostedCheck(False, f"keychain_{exc.kind}"))
+    if not credential.key:
+        return Listing(False)
+    models, failed = await (listings or LISTINGS).get(
+        credential.address, credential.key, transport=transport
+    )
+    return Listing(True, tuple(models), failed)
 
 
 async def check_hosted(
@@ -159,22 +311,18 @@ async def check_hosted(
     backend = cfg.chat_backend
     section: config.CloudVendorConfig = getattr(cfg, backend)
     try:
-        key = hosted.api_key(section)
+        credential = hosted.api_key(backend, section)
     except keychain.KeychainError as exc:
         return HostedCheck(False, f"keychain_{exc.kind}")
-    if not key:
+    if not credential.key:
         return HostedCheck(False, NO_KEY)
     models, failed = await list_models(
-        _address(backend, section), key, transport=transport
+        credential.address, credential.key, transport=transport
     )
     if failed is not None:
         return failed
     model = section.chat_model
-    if (
-        models
-        and model not in models
-        and not any(m.endswith(f"/{model}") for m in models)
-    ):
+    if lacks(models, model):
         return HostedCheck(False, NO_MODEL, models=tuple(models))
     owned = provider is None
     if provider is None:
@@ -185,7 +333,7 @@ async def check_hosted(
     except TimeoutError:
         return HostedCheck(False, TIMEOUT, models=tuple(models))
     except ProviderError as exc:
-        result, detail = failure(exc.status_code, str(exc))
+        result, detail = failure(exc.status_code, str(exc), credential.key)
         return HostedCheck(
             False, result, models=tuple(models), status=exc.status_code, detail=detail
         )

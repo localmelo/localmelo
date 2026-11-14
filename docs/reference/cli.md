@@ -43,7 +43,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 
 | Command | What it does | Options |
 |---|---|---|
-| `melo setup` | Choose the model server again, then open the chat. | |
+| `melo setup` | Choose the model server again, then open the chat. For a hosted service with a key it offers the models the service lists first (`GET <address>/models`, no chat), then asks for a name when none is listed. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
 | `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`, `import` (and `sleep`, `ingest` in developer mode). | `list -n N`, `forget ID`, `forget -y`, `import --undo BATCH` |
 | `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. With the `melo_serve` backend, `melo serve` checks melo_serve first and `melo serve status` also prints a `melo_serve:` block ([Gateway](../guides/gateway.md#start-the-gateway)). | `--host H`, `-p`/`--port N`, `--force` |

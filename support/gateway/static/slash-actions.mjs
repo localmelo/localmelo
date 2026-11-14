@@ -7,7 +7,7 @@
  * `host` is the page (`workspace.js`): `api`, `state()`, and the moves it makes: `send`,
  * `newChat`, `pickChat`, `openChat`, `openMain`, `openSettings`, `openMemory`, `settingsSaved`,
  * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`,
- * `models` (melo_serve's chat models: `serves()`, `open()`, `load()`, `named(word)`, `switchTo(id)`)
+ * `models` (the chat models: `serves()`, `open()`, `load()`, `named(word)`, `unknown(word)`, `switchTo(id)`)
  * `memoryImport` (`/memory import`: the Memory tab looks for notes), `undoSleep` (`/memory undo`: the
  * newest "melo tidied your notes" line of the main chat is undone) and `media` (the composer's pictures
  * and files: `pick()` opens the file picker, `list()` the names and sizes, `remove(id)` and `clear()`).
@@ -66,7 +66,7 @@ export function createActions(host) {
     }
     await models.load();
     const pick = models.named(args);
-    if (!pick) throw new Error(t('serve.errors.unknownPick', {pick: args}));
+    if (!pick) throw new Error(models.unknown(args));
     if (pick.current) return [say(t('serve.still', {name: pick.name}), 'muted')];
     if (!pick.loadable) throw new Error(t('serve.errors.cannotLoad', {name: pick.name, reason: pick.words}));
     const started = await models.switchTo(pick.id);

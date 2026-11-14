@@ -1025,6 +1025,7 @@
   "header.working": "Working",
   "header.workingDots": "Working…",
   "header.yourConfiguredModel": "Your configured model",
+  "hosted.key.address": "This key was saved for another service or address, and melo never sends a key anywhere else. Paste it again for this one.",
   "hosted.key.bad": "That does not look like an API key. Paste only the key itself: no spaces, no quotes and no line breaks.",
   "hosted.key.failed": "The keychain refused the request. Try again.",
   "hosted.key.locked": "The keychain is locked. Unlock it (open Keychain Access, or sign in to this Mac again), then try again.",
@@ -1579,6 +1580,7 @@
   "serve.errors.noSwitch": "No switch is waiting.",
   "serve.errors.notServe": "Switching the model needs melo_serve as the model server.",
   "serve.errors.running": "A switch to {name} is already running.",
+  "serve.errors.unknownModel": "No listed model is called {pick}.",
   "serve.errors.unknownPick": "melo_serve offers no model called {pick}.",
   "serve.failed": "The switch to {name} did not finish: {error}",
   "serve.fit.fits": "fits",
@@ -1586,6 +1588,7 @@
   "serve.foot": "Every chat on this Mac follows the switch.",
   "serve.held": "Waiting for the model switch",
   "serve.listLabel": "Chat models on this Mac",
+  "serve.listLabelAll": "Chat models, every server and service",
   "serve.loadingAbout": "Loading, about {s} s",
   "serve.loadingNow": "Loading",
   "serve.noAnswer": "melo_serve did not answer for {minutes} minutes",
@@ -1726,7 +1729,7 @@
   "settings.hosted.keySavedState": "Saved in the keychain",
   "settings.hosted.keySaving": "Saving…",
   "settings.hosted.keyUnavailable": "No keychain on this computer",
-  "settings.hosted.modelHint": "Pick a suggested model or type one. Test lists what the service offers.",
+  "settings.hosted.modelHint": "Pick a suggested model or type one. The list of what the service offers appears once a key is saved.",
   "settings.hosted.modelsListed": {
     "one": "The service offers 1 model. Pick it or type one.",
     "other": "The service offers {n} models. Pick one or type one."

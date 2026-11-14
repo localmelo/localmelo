@@ -328,6 +328,8 @@ file's revision.
     "mlc": {"chat_url": "http://127.0.0.1:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "", "embedding_model": ""},
     "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "api_key": "", "key": "none", "chat_model": "gpt-4o", "base_url": "", "thinking": "", "preset": "openai"}
   },
+  "services": {"openai": {"chat_model": "gpt-4o"}, "local": {"backend": "mlc"}},
+  "keyed": ["openai"],
   "defaults": {
     "mlc": {"chat_url": "http://localhost:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "http://localhost:8400/v1", "embedding_model": "nomic-embed"},
     "openai": {"api_key_env": "OPENAI_API_KEY", "chat_model": "gpt-4o"}
@@ -366,6 +368,8 @@ file's revision.
   `key` (where the key comes from now: `env`, `keychain`, `missing`,
   `locked`, `unavailable` or `none`), `thinking` (`""`, `"on"` or `"off"`) and
   `preset` (the id of the hosted service the section is).
+- `key` is also `address` when the key belongs to another service or address than the section sends to: it is then never read or sent.
+- `services` is what each hosted service you used remembers (`chat_model`, and `base_url` for `other`) and, under `local`, the last local server (`backend`); it is `{}` until a hosted service is involved. `keyed` lists the ids of the services that have a key now (their own variable or a keychain item), so the page knows whether the chat models are one list without asking.
 - `choices.hosted` lists the hosted services (the example shows one of six):
   their address, suggested models, the variable that held the key before the
   keychain, the reference a saved key gets, and whether the service has a
@@ -514,8 +518,13 @@ Never returns the variable's value.
 - `name` must match `^[A-Za-z_][A-Za-z0-9_]{0,127}$`; any other value is 400
   `invalid_request`.
 - `preset=<id>` instead of `name` asks about a hosted service: `{"keychain":
-  "saved", "env_set": false}`, where `keychain` is `saved`, `missing`, `locked`
-  or `unavailable`. It reads no key. An unknown id is 400 `invalid_request`.
+  "saved", "env_set": false, "api_key": "keychain:localmelo.deepseek"}`, where
+  `keychain` is `saved`, `missing`, `locked` or `unavailable` and `api_key` is the
+  reference of the item that holds its key. It reads no key. An unknown id is 400
+  `invalid_request`.
+- `address=<url>` names the address of a free-form service (`other`), whose key
+  is kept for that address; it is required for `other`. For a service with a
+  built-in address, an `address` that is not that address is 409 `key_address`.
 
 ## PUT /api/settings/key
 
@@ -529,6 +538,11 @@ line, where `ps` could show it.
 ```json
 {"preset": "deepseek", "key": "<your key>"}
 ```
+
+`other` also takes `"address": "https://llm.example.com/v1"`: its key is saved
+under `localmelo.other-<32 hex digits of the address>`, so another address never
+finds it. A built-in service takes no address, and one that is not its own is 409
+`key_address`.
 
 The reply:
 
@@ -591,6 +605,52 @@ can be contacted.
   `Listing models works for local backends only; type the model name.`
 - An unreachable server or an empty model list returns 502
   `backend_unreachable`.
+
+## GET /api/hosted/models
+
+List the models a hosted service offers, as Settings does once a key exists. It sends
+one `GET <address>/models` with the service's own key and never a chat.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/hosted/models?preset=deepseek&model=deepseek-flash'
+```
+
+```json
+{"preset": "deepseek", "key": "keychain", "listed": true, "models": ["deepseek-flash", "deepseek-v4-pro"], "result": "", "message": "", "gone": false, "line": ""}
+```
+
+- `preset` is required; `address` names the address of `other`. `model` is the saved model, if any.
+- `key` is where the key comes from (`env`, `keychain`, `missing`, `locked`, `unavailable`, `address`). With no key nothing is sent, and `result` is `no_key`.
+- `models` holds at most 200 names, each a printable line of at most 200 characters. `listed` is `false` when the service lists none. The whole request is cut at 10 s and an answer past 1 MB is an `error`, not a list.
+- A failure is `result` (`wrong_key`, `refused`, `no_model`, `busy`, `timeout`, `unreachable`, `error` or a `keychain_*` kind) with `message` in the console's language, as the Test button says it.
+- `gone` is `true`, and `line` says `The service has no model called ...`, when the service lists models but not `model`. Nothing is sent and nothing is changed.
+- The answer is kept in memory for about a minute, and one request per service is in flight at a time. Redirects are not followed.
+- 409 `key_address`: an `address` that is not the built-in address of the service. The key is never sent anywhere else, and the refusal comes before any request.
+
+## GET /api/chat-models
+
+The one list of every model the chat can use now: the local server's models and, per hosted service that has a key, the models it lists.
+
+```json
+{"hosted": true, "current": {"group": "deepseek", "model": "deepseek-flash"}, "groups": [{"id": "local", "label": "oMLX", "kind": "local", "serves": false, "models": ["Qwen3-8B-4bit"], "current": "", "problem": ""}, {"id": "deepseek", "label": "DeepSeek", "kind": "hosted", "serves": false, "models": ["deepseek-flash", "deepseek-v4-pro"], "current": "deepseek-flash", "problem": ""}]}
+```
+
+- `hosted` is `false`, and `groups` empty, while no hosted service has a key: nothing is asked and the list is the model server's, as before.
+- A group whose listing failed has no models and says why in `problem`; the other groups are unaffected. `serves` marks a local server that serves its own model (one row to go back to it).
+- `models=0` names the groups and asks no server.
+- The embedding choice is not part of the list.
+
+## POST /api/chat-models/switch
+
+Switch the chat model for the next message. Body: `{"group": "deepseek", "model": "deepseek-v4-pro"}`.
+
+```json
+{"ok": true, "model": {"backend": "openai", "backend_label": "DeepSeek", "local": false, "name": "deepseek-v4-pro", "embedding": "none"}}
+```
+
+- The choice is saved like a settings change. Idle chats take it at once; a turn that runs finishes on the model it started with. No key is typed, no chat is sent and nothing restarts. Only the chat backend, its section and the remembered models change: every other service's key and model stay, and so does the embedding choice.
+- A hosted service must have a key and, when it lists its models, hold `model`.
+- 400 `no_model`: the service lists no such model. 400 `invalid_request`: an unknown `group` or a bad `model`. 409 `no_key`: no key for the service. 409 `key_address` and `keychain_*`: the key cannot be used, as for the key routes.
 
 ## GET /api/serve
 

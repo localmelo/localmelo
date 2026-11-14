@@ -3391,6 +3391,8 @@ async function refreshMode(saved) {
     // The macOS app reads this to decide what its menu offers (an app has no other way to know the mode).
     document.documentElement.dataset.mode = developerMode ? "developer" : "default";
     if (typeof settings.workspace === "string" && settings.workspace) S.defaultWorkspace = settings.workspace;
+    // The hosted services that have a key: the chat models list is one list once there is one.
+    S.keyed = Array.isArray(settings.keyed) ? settings.keyed : [];
     S.defaultMode = modeOf(settings.approvals);
   } catch { /* Keep the last known mode and folder. */ }
 }
@@ -3621,6 +3623,8 @@ async function settingsSaved(saved) {
   } catch (error) {
     notify(t("chat.settingsRefreshFailed", { problem: error.message }), {sticky: true});
   }
+  // A connection that was saved may have put a service with a key on the list, or taken one off.
+  serve.reloadChoices();
 }
 const showSettings = setupSettings({
   api,
@@ -3638,6 +3642,8 @@ const showSettings = setupSettings({
   desktop: () => globalThis.webkit?.messageHandlers?.localmeloDesktop,
   folders: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
   onSaved: settingsSaved,
+  // A key saved or removed in Settings (before any connection is saved) already puts its service on the list, or takes it off.
+  keysChanged: () => serve.reloadChoices(true),
 });
 function openSettings(section) {
   drawer.close();
@@ -3713,12 +3719,17 @@ const modeChip = setupModeChip({
   },
   openSettings: () => openSettings("chats"),
 });
-// melo_serve's chat models (serve.mjs): the header chip and the composer's model button open one list.
+// The chat models (serve.mjs): the header chip and the composer's model button open one list.
 const serve = setupServe({
   doc: document,
   api,
-  state: () => ({ health: S.health }),
+  state: () => ({ health: S.health, keyed: S.keyed }),
   notify: (message) => notify(message, { sticky: true }),
+  // A model picked from the list is the chat's from the next message: the chip and the composer name it now.
+  modelChanged: (model) => {
+    if (S.health) S.health.model = model;
+    syncUI();
+  },
   changed: (sw) => {
     if (S.health && sw) S.health.switch = sw;
     syncUI();

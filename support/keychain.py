@@ -45,12 +45,15 @@ SAVED = "saved"
 MISSING = "missing"
 LOCKED = "locked"
 UNAVAILABLE = "unavailable"
+# Not an item's state: the key belongs to another address than the request's.
+ADDRESS = "address"
 
 
 class KeychainError(Exception):
     """The keychain could not do what was asked; the message says what to do.
 
-    *kind* is ``missing``, ``locked``, ``unavailable``, ``bad`` or ``failed``.
+    *kind* is ``missing``, ``locked``, ``unavailable``, ``bad``, ``failed`` or
+    ``address`` (a key is never sent to an address it was not saved for).
     The message is the catalog's English words for it (``hosted.key.<kind>``);
     the console says the same in the person's language through :func:`words_key`.
     """

@@ -329,10 +329,11 @@ class HostedBackend(BaseBackend):
         from localmelo.support.backends.openai_compat import build_openai_chat
 
         section = getattr(cfg, self.key)
+        credential = hosted.api_key(self.key, section)
         return build_openai_chat(
-            base_url=section.base_url or self.preset.base_url,
+            base_url=credential.address,
             model=section.chat_model,
-            api_key=hosted.api_key(section),
+            api_key=credential.key,
             extra_body=hosted.request_body(self.key, section),
             thinking_off_body=hosted.retry_body(self.key, section),
             **hosted.image_args(self.key, section),

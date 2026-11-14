@@ -2,8 +2,9 @@
 
 Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, DeepSeek or any service that speaks the OpenAI format) when the model on your Mac is not enough. You set it up in Settings, with no shell work. For a model server you run yourself, see [Model servers](model-servers.md).
 
-- Choose a service, paste your key once, press **Test connection**, save.
-- The key is kept in your Mac's keychain, never in melo's settings.
+- Choose a service, paste your key once, pick a model from the list it offers, save.
+- Keep keys for several services; each remembers the model you used last, and one list switches between them.
+- The key is kept in your Mac's keychain, never in melo's settings, and goes only to its own service.
 - If a thinking model leaves its answer only in its thinking, melo recovers it.
 
 ## Set up a service
@@ -12,9 +13,9 @@ Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, Dee
 
 - Open **Settings**, then **Model server**, then **Change…**.
 - In the **Model server** list, under **Hosted services**, choose the service. Its address and suggested models fill in.
-- Paste your key and choose **Save key**.
-- Pick a model from the list or type one, then choose **Test connection**.
-- Choose **Save connection**. Your next message uses the service.
+- Paste your key and choose **Save key**. The service's models appear in the list by themselves.
+- Pick a model. The first one the service suggests is offered first; if it lists none, type one.
+- Choose **Test connection** to check the key and the model with one short chat, then **Save connection**. Your next message uses the service.
 
 ## The services
 
@@ -27,16 +28,31 @@ Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, Dee
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-flash`, `deepseek-v4-pro` |
 | Other (OpenAI format) | the address you type, up to `/v1` | the model you type |
 
-- **Test connection** lists the models the service offers, so you can pick one from the list.
+- The list comes from the service itself (`GET <address>/models`, never a chat) once a key exists: when you open Settings, when you choose the service and after you save a key. It is asked once a minute at most.
+- A service that does not list its models, or a failure, says so in plain words; you can still type a model.
 - OpenAI, DeepSeek and Other share the `[openai]` section of the config file; Gemini, Anthropic and NVIDIA have their own.
 - Use **Other** for a service not in the list, such as a company gateway.
+
+## Switch between models
+
+- The model chip in the console (and in the app's window), the model button under the message box and `/model` in the terminal show one list: the model server on this Mac and every hosted service that has a key, grouped, the one in use ticked.
+- Pick a model: your next message uses it. No key is typed again, no test runs and nothing restarts. In the terminal, `/model NAME` or `/model service:NAME` switches with no list.
+- A turn that is running finishes on the model it started with.
+- A service that cannot be listed is one row that says why; it hides nothing else. A service with no key is not in the list.
+- Switching never changes your embedding choice, and melo never changes a saved hosted model by itself.
+
+- Without a hosted key nothing changes: the list is the model server's, as before.
+- If the service no longer offers the model you saved, Settings says so at once (`The service has no model called ...`), with no test. Choose another from the list.
 
 ## Your key
 
 - **Save key** writes the key to your Mac's keychain, under the name `localmelo.<service>` (for example `localmelo.deepseek`).
+- A key goes only to its own service: the built-in address of a service in the list, or for **Other** the address saved with it. melo refuses anything else before it sends a request.
+- **Other** keeps one key per address (`localmelo.other-<32 characters>`), so a key saved for one gateway is never found for another. A key an earlier version saved as `localmelo.other` is not used: paste it again.
 - The config file keeps only a pointer to it, `api_key = "keychain:localmelo.deepseek"`. melo does not show the key again, and it never reaches the config, the logs or the page.
 - **Replace** saves a new key; **Remove** deletes it from the keychain.
 - An environment variable still works: if `api_key_env` is set and the variable has a value, it is used before the keychain.
+- A key stays with its address: if a service's section pointed at a proxy and you switch it to the service's own address, the proxy's key or variable is not carried along (paste the key for the service, or use **Other** for the proxy).
 - The macOS app does not see variables from your shell. Paste the key in Settings instead of exporting it.
 
 If melo cannot read the key, it says what to do:
@@ -47,6 +63,7 @@ If melo cannot read the key, it says what to do:
 | The keychain is locked | Unlock it (open Keychain Access, or sign in to your Mac again), then try again. |
 | No keychain on this computer | Set the key in an environment variable and name it in `api_key_env`. |
 | That does not look like an API key | Paste only the key: no spaces, quotes or line breaks. |
+| The key was saved for another service or address | Paste it again for this service. melo never sends a key anywhere else. |
 
 ## Test the connection
 
@@ -74,9 +91,11 @@ melo setup
 ```
 
 - `melo setup` lists the servers on this computer and the same hosted services as Settings.
+- With a key, it offers the models the service lists first; with none listed it asks for a name.
 - The key is typed hidden and saved to the keychain; Enter keeps a key melo already has.
 - **Use an environment variable instead** sets `api_key_env`.
 - With no model server found, the first run offers **Use a hosted service**.
+- `/model` lists every model you can use now once a service has a key; see [Switch between models](#switch-between-models).
 
 ## Thinking models
 
@@ -109,6 +128,22 @@ thinking = "off"             # "on", "off", or leave out to follow the service
 ```
 
 - `base_url` tells the presets apart: OpenAI has none (its address is built in), DeepSeek has the address above, and any other address is Other.
+- Each service you used keeps its last model in a table of its own, written beside the lines above. An older melo ignores these tables and drops them the next time it saves; nothing else changes. Keys are never in them.
+
+```toml
+[services.deepseek]
+chat_model = "deepseek-flash"
+
+[services.openai]
+chat_model = "gpt-4o"
+
+[services.other]
+chat_model = "my-model"
+base_url = "https://llm.example.com/v1"   # the address the Other key belongs to
+
+[services.local]
+backend = "vllm"                          # the model server the list returns to
+```
 - `api_key_env` still works. See the [configuration reference](../reference/configuration.md#cloud-api-keys) for every key.
 - An `extra_body` field of your own wins over the thinking switch.
 
@@ -118,6 +153,8 @@ thinking = "off"             # "on", "off", or leave out to follow the service
 |---|---|
 | The test says wrong key (401) after you pasted one | The key may have a space or a line break in it, or belong to another service. Paste it again. |
 | The app cannot find a key you exported | The app starts without your shell's variables. Paste the key in Settings. |
+| A service has a key but is not in the list | The list names only the services with a key; paste the key in Settings. |
+| The list says a service did not answer | The row says why. The other services still work; try again in a minute. |
 | A run stops with "melo did not finish an answer" | The model replied with nothing and had no thinking to use. Try another model. |
 | The answer ends with `(from melo's thinking)` | The model answered only in its thinking. Turn thinking off for that model, or choose another. |
 

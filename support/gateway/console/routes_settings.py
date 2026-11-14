@@ -38,6 +38,7 @@ from localmelo.support import (
     hosted,
     hosted_check,
     keychain,
+    model_choices,
     onboard,
     onboard_probe,
 )
@@ -167,6 +168,8 @@ class KeyBody(BaseModel):
     preset: StrictStr
     # Not shown in a repr, an error or a log line.
     key: StrictStr = Field(repr=False, max_length=1024)
+    # The address of a free-form service ("Other"), whose key is kept for that address.
+    address: StrictStr = Field(default="", max_length=2048)
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -441,7 +444,7 @@ def settings_json() -> dict[str, Any]:
             # where the key comes from now: env, keychain, missing, locked,
             # unavailable or none.
             "api_key": str(sec.api_key),
-            "key": hosted.key_state(sec),
+            "key": hosted.key_state(name, sec),
             "chat_model": str(sec.chat_model),
             "base_url": str(sec.base_url),
             "thinking": str(sec.thinking),
@@ -458,6 +461,10 @@ def settings_json() -> dict[str, Any]:
         "embedding_backend": cfg.embedding_backend,
         "workspace": ws or DEFAULT_WORKSPACE,
         "sections": sections,
+        # What each hosted service remembers: its last model (and "Other"'s address).
+        "services": hosted.stored_services(cfg),
+        # The hosted services that have a key now: with one, the chat models are one list across servers and services.
+        "keyed": [preset.id for preset, _ in model_choices.keyed(cfg)],
         "defaults": onboard.backend_defaults(),
         "errors": [redact_secrets(err)[0] for err in cfg.validate()],
         "choices": {
@@ -654,6 +661,8 @@ def _build_candidate(
 
     before = config.load()
     candidate = config.load()
+    # The service in use is kept before the section takes another one's values.
+    candidate.services = hosted.last_models(candidate)
     candidate.chat_backend = body.chat_backend
     candidate.embedding_backend = body.embedding_backend
     candidate.gateway.workspace = body.workspace
@@ -809,6 +818,7 @@ _KEY_STATUS: Final = {
     "unavailable": (409, "keychain_unavailable"),
     "missing": (404, "key_missing"),
     "failed": (502, "keychain_failed"),
+    "address": (409, "key_address"),
 }
 
 
@@ -825,6 +835,24 @@ def _preset(preset_id: str) -> hosted.Preset:
     if preset is None:
         raise ApiError(400, "invalid_request", "preset: Unknown hosted service.")
     return preset
+
+
+def key_service(preset: hosted.Preset, address: str | None) -> str:
+    """The keychain item of *preset*'s key.
+
+    A free-form service keeps one per address, so the address is needed; a preset
+    with a built-in address takes none, and an address named for it must be that one.
+    """
+    address = (address or "").strip()
+    _check_single_line("address", address)
+    if preset.free_address:
+        if not url_label(address):
+            raise ApiError(
+                400, "invalid_request", "address: Expected an absolute http(s) URL."
+            )
+    elif address and not hosted.address_allowed(preset, address):
+        raise ApiError(409, "key_address", t(keychain.words_key(hosted.ADDRESS)))
+    return hosted.service_for(preset, address or preset.base_url)
 
 
 def _hosted_message(found: hosted_check.HostedCheck, model: str) -> str:
@@ -886,6 +914,31 @@ async def _test_hosted(candidate: config.Config) -> JSONResponse:
     )
 
 
+async def apply_settings(
+    console: Console, candidate: config.Config, changed: str = "none"
+) -> None:
+    """Save *candidate* and make the running gateway use it from the next message.
+
+    A turn that runs finishes on the settings it started with: only idle chats are
+    rebuilt at once (:meth:`SessionManager.settings_changed`).
+    """
+    config.save(candidate)
+    logger.info(
+        "settings saved: chat_backend=%s embedding_backend=%s changed=%s",
+        candidate.chat_backend,
+        candidate.embedding_backend,
+        changed,
+    )
+    active = copy.deepcopy(candidate)
+    active.gateway.host = console.cfg.gateway.host
+    active.gateway.port = console.cfg.gateway.port
+    console.cfg = active
+    reset = getattr(console.probe, "reset", None)
+    if reset is not None:
+        reset(active)
+    await console.sessions.settings_changed()
+
+
 def add_routes(app: FastAPI, console: Console) -> None:
     """Register the health, settings and models routes on *app*."""
 
@@ -906,14 +959,21 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/settings/key-status")
     async def api_key_status(
-        name: str | None = None, preset: str | None = None
+        name: str | None = None, preset: str | None = None, address: str | None = None
     ) -> JSONResponse:
         if preset is not None:
             # Whether a key is saved for the preset in the keychain (no secret is read).
             found = _preset(preset)
-            state = await asyncio.to_thread(keychain.status, found.service)
+            service = key_service(found, address)
+            state = await asyncio.to_thread(keychain.status, service)
             env = bool(found.key_env and os.environ.get(found.key_env))
-            return JSONResponse(content={"keychain": state, "env_set": env})
+            return JSONResponse(
+                content={
+                    "keychain": state,
+                    "env_set": env,
+                    "api_key": keychain.ref_for(service),
+                }
+            )
         if not name or not hosted.ENV_NAME_RE.fullmatch(name):
             raise ApiError(
                 400,
@@ -925,24 +985,28 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.put("/api/settings/key")
     async def api_put_key(body: KeyBody) -> JSONResponse:
         found = _preset(body.preset)
+        service = key_service(found, body.address)
         try:
-            await asyncio.to_thread(keychain.write, found.service, body.key)
+            await asyncio.to_thread(keychain.write, service, body.key)
         except keychain.KeychainError as exc:
             raise _key_error(exc) from None
         logger.info("settings: a key was saved in the keychain for %s", found.id)
         return JSONResponse(
             content={
                 "preset": found.id,
-                "api_key": keychain.ref_for(found.service),
+                "api_key": keychain.ref_for(service),
                 "keychain": keychain.SAVED,
             }
         )
 
     @app.delete("/api/settings/key")
-    async def api_delete_key(preset: str | None = None) -> JSONResponse:
+    async def api_delete_key(
+        preset: str | None = None, address: str | None = None
+    ) -> JSONResponse:
         found = _preset(preset or "")
+        service = key_service(found, address)
         try:
-            await asyncio.to_thread(keychain.remove, found.service)
+            await asyncio.to_thread(keychain.remove, service)
         except keychain.KeychainError as exc:
             raise _key_error(exc) from None
         logger.info("settings: the key of %s was removed from the keychain", found.id)
@@ -953,23 +1017,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         before, candidate = _build_candidate(body, check_revision=body.revision)
         _spell_server(before, candidate)
         changed = _changed_fields(before, candidate)
-        config.save(candidate)
-        logger.info(
-            "settings saved: chat_backend=%s embedding_backend=%s changed=%s",
-            candidate.chat_backend,
-            candidate.embedding_backend,
-            ",".join(changed) or "none",
-        )
-        running_host = console.cfg.gateway.host
-        running_port = console.cfg.gateway.port
-        active = copy.deepcopy(candidate)
-        active.gateway.host = running_host
-        active.gateway.port = running_port
-        console.cfg = active
-        reset = getattr(console.probe, "reset", None)
-        if reset is not None:
-            reset(active)
-        await console.sessions.settings_changed()
+        await apply_settings(console, candidate, ",".join(changed) or "none")
         return JSONResponse(content=await asyncio.to_thread(settings_json))
 
     @app.post("/api/settings/test")

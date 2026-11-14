@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -204,3 +205,153 @@ async def test_the_result_never_carries_the_key(fake_keychain: FakeSecurity) -> 
 
     found = await run(config(), echo)
     assert KEY not in repr(found)
+
+
+# -- The listing as the pages ask for it ------------------------------------
+
+
+async def test_a_listing_is_one_get_that_never_follows_a_redirect_and_cleans_names() -> (
+    None
+):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        body = {
+            "data": [{"id": "models/ok-model"}, {"id": "bad\nname"}, {"id": "x" * 300}]
+        }
+        return httpx.Response(200, json=body)
+
+    models, failed = await hosted_check.list_models(
+        BASE, KEY, transport=httpx.MockTransport(handler)
+    )
+    assert (models, failed) == (["ok-model"], None)
+    assert [(r.method, r.url.path) for r in seen] == [("GET", "/v1/models")]
+
+    moved = httpx.MockTransport(
+        lambda request: httpx.Response(302, headers={"location": "https://evil.test/"})
+    )
+    models, failed = await hosted_check.list_models(BASE, KEY, transport=moved)
+    assert models == [] and failed is not None and failed.status == 302
+
+
+async def test_a_listing_answer_past_the_limit_or_compressed_is_a_failure_not_a_list() -> (
+    None
+):
+    big = {"data": [{"id": f"model-{i}"} for i in range(hosted_check.MAX_BODY // 8)]}
+    assert len(json.dumps(big)) > hosted_check.MAX_BODY
+
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=big)),
+    )
+
+    assert models == [] and failed is not None and failed.result == "error"
+    assert failed.status == 200
+
+    # An answer that is compressed although it was asked not to be is refused before it is read.
+    class Unread(httpx.AsyncByteStream):
+        entered = False
+
+        async def __aiter__(self) -> Any:
+            Unread.entered = True
+            yield b"x"
+
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, headers={"content-encoding": "gzip"}, stream=Unread()
+            )
+        ),
+    )
+    assert models == [] and failed is not None and failed.result == "error"
+    assert failed.detail == "Encoded" and not Unread.entered
+
+
+@pytest.mark.parametrize("status", [403, 500])
+async def test_an_error_body_that_repeats_the_key_never_reaches_a_result(
+    status: int,
+) -> None:
+    odd = "zz9-" + "q7" * 12  # a shape no redaction pattern knows
+    body = f"denied for key {odd}, again {odd}"
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status, text=body)
+
+    models, failed = await hosted_check.list_models(
+        BASE, odd, transport=httpx.MockTransport(handler)
+    )
+
+    assert models == [] and failed is not None and failed.status == status
+    assert odd not in repr(failed) and "denied for key" in failed.detail
+    assert (
+        seen[0].headers["authorization"] == f"Bearer {odd}"
+    )  # it was sent, only there
+
+    # The Test button's chat: the error the provider raises is cut the same way.
+    def chat_fails(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "deepseek-flash"}]})
+        return httpx.Response(status, text=body)
+
+    cfg = config()
+    keychain.write("localmelo.deepseek", odd)
+    keychain._cache.clear()
+    checked = await run(cfg, chat_fails)
+    assert checked.status == status and odd not in repr(checked)
+
+
+async def test_listings_are_reused_for_a_while_and_shared_while_in_flight() -> None:
+    calls: list[tuple[str, str]] = []
+    gate = asyncio.Event()
+    now = [0.0]
+
+    async def slow(address: str, key: str, **_: Any) -> tuple[list[str], None]:
+        calls.append((address, key))
+        await gate.wait()
+        return ["m"], None
+
+    listings = hosted_check.Listings(ttl_s=60, clock=lambda: now[0])
+    original = hosted_check.list_models
+    hosted_check.list_models = slow  # type: ignore[assignment]
+    try:
+        both = asyncio.gather(listings.get(BASE, KEY), listings.get(BASE, KEY))
+        await asyncio.sleep(0)
+        gate.set()
+        assert await both == [(["m"], None), (["m"], None)]
+        assert len(calls) == 1  # one in flight for the service
+        await listings.get(BASE, KEY)
+        assert len(calls) == 1  # reused
+        now[0] = 61.0
+        await listings.get(BASE, KEY)
+        assert len(calls) == 2  # past the minute
+        await listings.get(BASE, KEY + "x")
+        assert len(calls) == 3  # another key asks again
+    finally:
+        hosted_check.list_models = original  # type: ignore[assignment]
+
+
+async def test_a_transient_failure_is_not_kept() -> None:
+    answers: list[tuple[list[str], hosted_check.HostedCheck | None]] = [
+        ([], hosted_check.HostedCheck(False, hosted_check.TIMEOUT)),
+        ([], hosted_check.HostedCheck(False, hosted_check.WRONG_KEY, status=401)),
+    ]
+
+    async def next_answer(address: str, key: str, **_: Any) -> Any:
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    listings = hosted_check.Listings()
+    original = hosted_check.list_models
+    hosted_check.list_models = next_answer  # type: ignore[assignment]
+    try:
+        assert (await listings.get(BASE, KEY))[1].result == hosted_check.TIMEOUT  # type: ignore[union-attr]
+        assert (await listings.get(BASE, KEY))[1].result == hosted_check.WRONG_KEY  # type: ignore[union-attr]
+        assert (await listings.get(BASE, KEY))[1].result == hosted_check.WRONG_KEY  # type: ignore[union-attr]
+        assert len(answers) == 1  # the definite answer was kept, the timeout was not
+    finally:
+        hosted_check.list_models = original  # type: ignore[assignment]

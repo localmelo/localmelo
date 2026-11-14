@@ -514,6 +514,15 @@ See [Memory](memory.md).
   does not have, stops `melo` before the run with exit code 1 and a plain fix.
 - A reference must name one of melo's own items (`keychain:localmelo.` and a
   name of lowercase letters, digits, `-` and `_`); any other value is refused.
+- A key goes only to its own service. A built-in service's key is read only for
+  its own address; "Other" keeps one item per address
+  (`localmelo.other-<32 hex digits>`). A reference whose item belongs to another
+  address stops the run with `This key was saved for another service or address`,
+  before any request. An item `localmelo.other` from an earlier version is not used.
+- `[services.<id>]` tables (`chat_model`; `base_url` for `other`; `backend` for
+  `local`) hold each hosted service's last model and the last local server, so
+  Settings and `/model` can switch back. They hold no key. Older versions ignore
+  them and drop them the next time they save.
 - Export the variable in the shell that runs `melo`.
 - If it is not set and there is no saved key, `melo` stops before the run with
   exit code 1:
