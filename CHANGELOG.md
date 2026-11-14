@@ -147,6 +147,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The first run finds a model server that already runs, or on a Mac sets one up after one OK.
 - The chat model is picked from what the server offers; when the saved model is gone and the server has one chat model, melo uses it and says so.
 - Hosted model services in Settings and `melo setup`, chosen from a list, with the key in the keychain.
+- The Anthropic choice suggests models the service offers today; the one it suggested before had been withdrawn, so a new key could not be used.
 - melo_serve is a local model server, and its model can be switched from every surface.
 - `melo serve` just works after the first run, and can run at login on macOS.
 - oMLX is supported and recommended on Apple silicon.
