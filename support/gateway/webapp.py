@@ -14,7 +14,11 @@ from starlette.types import Scope
 from localmelo.support.config import Config
 from localmelo.support.gateway.guard import app_instance
 from localmelo.support.gateway.i18n import SETTINGS, page_language
-from localmelo.support.gateway_endpoint import GATEWAY_HEADER
+from localmelo.support.gateway_endpoint import (
+    BUILD_HEADER,
+    BUSY_HEADER,
+    GATEWAY_HEADER,
+)
 
 _STATIC = Path(__file__).with_name("static")
 
@@ -90,4 +94,9 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
         gateway_id = getattr(app.state, "gateway_id", "")
         if gateway_id:
             headers = {**headers, GATEWAY_HEADER: gateway_id}
+            # Which build this is and whether anything runs in it (see gateway_endpoint).
+            if build := getattr(app.state, "gateway_build", ""):
+                headers[BUILD_HEADER] = build
+            if busy := getattr(app.state, "gateway_busy", None):
+                headers[BUSY_HEADER] = "1" if await busy() else "0"
         return HTMLResponse(_page(request, _language_setting(app)), headers=headers)

@@ -170,6 +170,12 @@ melo serve uninstall
   backend with the service.
 - The service needs macOS; on other systems `install` fails.
 
+## After an update
+
+- A gateway that was running before an update is the old version's. The app and `melo` check that when they start: one that is idle is stopped and the new version's starts in its place, with nothing for you to do.
+- One with a chat, task or run in it is never stopped for this: it is used as it is, and replaced the next time the app or `melo` starts and finds it idle. `melo serve stop` replaces it at once.
+- A gateway run from a source checkout has no build stamp and replaces nothing.
+
 ## Stop the gateway
 
 - In its terminal, press Ctrl+C.

@@ -47,6 +47,14 @@ precondition(attachConfirmed(status: 200, gatewayHeader: gatewayId, endpoint: en
 precondition(!attachConfirmed(status: 200, gatewayHeader: nil, endpoint: endpoint!))
 precondition(!attachConfirmed(status: 200, gatewayHeader: "other", endpoint: endpoint!))
 precondition(!attachConfirmed(status: nil, gatewayHeader: gatewayId, endpoint: endpoint!))
+// After an update: an idle gateway of another build is replaced; a busy one, the same build, one that does not say
+// it is idle and anything found by an app without a stamp are used as they are.
+precondition(replacesGateway(own: "new", build: "old", busy: "0"))
+precondition(replacesGateway(own: "new", build: nil, busy: "0"))
+precondition(!replacesGateway(own: "new", build: "new", busy: "0"))
+precondition(!replacesGateway(own: "new", build: "old", busy: "1"))
+precondition(!replacesGateway(own: "new", build: "old", busy: nil))
+precondition(!replacesGateway(own: "", build: "old", busy: "0"))
 // Quit leaves an attached gateway running, and its menu item says so.
 precondition(quitTitle(attached: false) == "Quit localmelo")
 precondition(quitTitle(attached: true) == "Quit localmelo (the gateway keeps running)")

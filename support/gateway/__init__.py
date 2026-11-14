@@ -84,6 +84,10 @@ class GatewayServer:
             openapi_url=None,
         )
         self.app.state.gateway_id = self.gateway_id
+        # The build this process loaded (the stamp file may be a newer build's by now), and
+        # whether anything runs: what finds this gateway after an update replaces an idle one.
+        self.app.state.gateway_build = gateway_endpoint.build()
+        self.app.state.gateway_busy = self.busy
         self._register_routes()
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
@@ -105,6 +109,18 @@ class GatewayServer:
             auth=self.auth,
             instance=self.instance,
         )
+
+    async def busy(self) -> bool:
+        """Whether a chat, task or run is in this gateway; true when that cannot be told."""
+        from localmelo.support.gateway.console.running import busy
+
+        if any(row["is_busy"] for row in self.sessions.list_sessions()):
+            return True
+        try:
+            return self.console is None or await busy(self.console)
+        except Exception:  # the answer to "may I be ended" never fails open
+            logger.exception("Could not tell whether the gateway is busy")
+            return True
 
     # ── The endpoint file ──
 
