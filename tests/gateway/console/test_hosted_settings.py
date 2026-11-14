@@ -358,7 +358,7 @@ def test_the_test_reads_the_key_from_the_keychain_not_the_page(
     async def fake(cfg: Config) -> hosted_check.HostedCheck:
         from localmelo.support import hosted
 
-        seen.append(hosted.api_key(cfg.openai))
+        seen.append(hosted.api_key("openai", cfg.openai))
         return hosted_check.HostedCheck(True, "works", tools=True)
 
     with mock.patch.object(routes_settings, "check_hosted", fake):

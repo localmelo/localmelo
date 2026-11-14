@@ -63,6 +63,7 @@ from . import (
     routes_details,
     routes_grants,
     routes_memory,
+    routes_models,
     routes_page,
     routes_pictures,
     routes_sessions,
@@ -469,6 +470,7 @@ class Console:
         # The words the server writes follow the language the console page asks for.
         app.add_middleware(LanguageMiddleware, remember=self._remember_language)
         routes_settings.add_routes(app, self)
+        routes_models.add_routes(app, self)
         routes_sessions.add_routes(app, self)
         routes_status.add_routes(app, self)
         routes_browser.add_routes(app, self)
