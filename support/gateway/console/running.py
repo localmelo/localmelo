@@ -292,6 +292,24 @@ async def _with_activity(
     return dict(first or max(items, key=lambda item: changed[item["id"]]))
 
 
+async def busy(console: Console) -> bool:
+    """Whether a chat, task or run is in the gateway (running, queued or held): ending it now would end that.
+
+    A store that cannot be read counts as busy: what cannot be seen is not ended.
+    """
+    if console.store_state() != "ok":
+        return True
+    if await _chat_items(console):
+        return True
+    queue = task_counts(await live_tasks(console))
+    if queue is None or queue.running or queue.queued or queue.held:
+        return True
+    try:
+        return bool(await console.worker_history.running())
+    except (SessionStoreError, OSError):
+        return True
+
+
 async def running_status(console: Console) -> dict[str, Any]:
     """The ``status`` object: counts by kind, the queue, the running, waiting and recent items."""
     chats: list[dict[str, str]] = []

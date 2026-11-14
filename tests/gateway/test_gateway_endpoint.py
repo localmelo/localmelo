@@ -124,6 +124,36 @@ def test_serve_stop_ends_the_gateway_the_file_names(
         assert process.poll() is not None
 
 
+# ── After an update: the gateway of the build before ──
+
+
+def test_only_an_idle_gateway_of_another_build_is_replaceable() -> None:
+    build, busy = gateway_endpoint.BUILD_HEADER, gateway_endpoint.BUSY_HEADER
+    replaceable = gateway_endpoint.replaceable
+    assert replaceable({build: "old", busy: "0"}, "new")
+    assert replaceable({busy: "0"}, "new")  # a gateway without a stamp
+    assert not replaceable({build: "new", busy: "0"}, "new")  # the same build
+    assert not replaceable({build: "old", busy: "1"}, "new")  # something runs in it
+    assert not replaceable({build: "old"}, "new")  # it does not say it is idle
+    assert not replaceable({build: "old", busy: "0"}, "")  # a source checkout replaces nothing
+
+
+@pytest.mark.parametrize(("busy", "ended"), [("0", True), ("1", False)])
+def test_an_idle_gateway_of_another_build_is_ended_and_a_busy_one_is_used(
+    home: Path, monkeypatch: pytest.MonkeyPatch, busy: str, ended: bool
+) -> None:
+    headers = {gateway_endpoint.BUILD_HEADER: "old", gateway_endpoint.BUSY_HEADER: busy}
+    monkeypatch.setattr(gateway_endpoint, "answer", lambda found: headers)
+    monkeypatch.setattr(gateway_endpoint, "build", lambda: "new")
+    with _sleeper() as process:
+        found = _endpoint(process.pid, port=8125)
+        gateway_endpoint.write(found)
+        if ended:
+            _reap(process)
+        assert gateway_endpoint.current() == (None if ended else found)
+        assert (process.poll() is not None) is ended
+
+
 # ── A real gateway, as the macOS app starts it ──
 
 
@@ -189,7 +219,11 @@ def test_the_terminal_attaches_to_the_apps_gateway(home: Path) -> None:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         page = httpx.get(found.url + "/", trust_env=False, timeout=5)
         assert page.headers[gateway_endpoint.GATEWAY_HEADER] == found.id
+        # It says it is idle, and no build: this is a source checkout, which has no stamp.
+        assert page.headers[gateway_endpoint.BUSY_HEADER] == "0"
+        assert gateway_endpoint.BUILD_HEADER not in page.headers
         assert gateway_endpoint.live() == found
+        assert gateway_endpoint.current() == found
 
         cfg = config.Config()
         cfg.gateway.port = _other_port()  # not the app's port

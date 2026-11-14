@@ -2764,7 +2764,7 @@ def _serve_with_service(cfg: Config) -> int:
             say("melo_serve", "running")
         else:
             print(line, file=sys.stderr)
-    found = gateway_endpoint.live()
+    found = gateway_endpoint.current()
     if found is not None:
         say("gateway", "running")
     else:
