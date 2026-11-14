@@ -173,8 +173,7 @@ def test_a_worker_acts_for_the_user_too() -> None:
 
 
 def test_every_chat_is_told_to_start_the_work_not_to_talk_about_it() -> None:
-    assert "you do their work yourself" in FRONT_TEXT
-    assert "start right away" in FRONT_TEXT
+    assert "start right away, yourself or with a task" in FRONT_TEXT
     assert "Do not ask whether to start it" in FRONT_TEXT
     assert "no browser" not in FRONT_TEXT.casefold()
     assert "find openings and apply" in FRONT_TEXT

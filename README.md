@@ -29,7 +29,7 @@ remembers across chats and talks to your own model server or a cloud API.
 
 ## What you can do
 
-- Talk to one main chat in the terminal (`melo`), the web console (`melo serve`) or the Mac app: it answers and does the work itself, a task you ask for runs beside it by priority, and a card says what happened.
+- Talk to one main chat in the terminal (`melo`), the web console (`melo serve`) or the Mac app: it answers and does short work itself, long work and tasks you ask for run beside it by priority, and a card says what happened.
 - Let melo remember across chats: the newer fact wins, and the Memory tab lets you read, edit or forget each note.
 - Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished.
 - Ask for a reminder, like `remind me to send the report on Friday at 9`: melo shows the date it understood, then tells you at that time.

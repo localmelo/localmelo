@@ -8,7 +8,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 ### Chat
 
 - One main chat, with side chats under it: it answers, or hands bigger work to a task by priority; the terminal, the console and the app open the same chat.
-- A chat does the work you ask for itself, and hands what is left to one fresh task when the rest would fill its context; its turn names the task.
+- A chat decides first who does your work: short work itself, long work (more than about five steps) a task, and the chat stays free for you. Work that turns out long still moves to one fresh task.
 - A task a chat started runs once; more work on the same job (your message, Continue, Finish it, Allow once) goes on in one fresh task with the record as background.
 - When a task a chat started fails, runs out of steps or needs you, the chat follows up once: it continues another way or asks one clear question.
 - A finished task's answer comes back to the chat that started it.

@@ -1,4 +1,4 @@
-"""The front of a chat: it does the person's work in its own run.
+"""The front of a chat: it decides who does the person's work, itself or a task.
 
 The main chat has one :class:`Front`; every side chat has one too, bound to
 that chat (:meth:`~localmelo.support.gateway.console.Console.front_for`). Every
@@ -15,11 +15,13 @@ message is one turn of :class:`FrontAgent`, the chat's own Agent, built by the
 one composition every chat shares
 (:func:`~localmelo.support.gateway.console.registry.default_builder`): the file
 tools, Python, the web and browser tools the settings give, ``search_files``,
-memory and the task tools of :class:`TaskTools`. The chat does the work in that
-run (#571). Every step takes the usual way through the checker, the executor and
-the chat's Ask or Auto; a page's card and the panel show its browser as they show
-a task's, and most work starts no task at all. No list of words stands between
-the person and the work: the model reads the message and acts, or says why not.
+memory and the task tools of :class:`TaskTools`. The model decides first who does
+the work (``FRONT_TEXT``): the chat in that run (#571) when it is short, a task
+when it is long, and no code rule or step count makes that choice. Every step
+takes the usual way through the checker, the executor and the chat's Ask or Auto;
+a page's card and the panel show its browser as they show a task's. No list of
+words stands between the person and the work: the model reads the message and
+acts, or says why not.
 
 Words the person sends while the turn runs are a note of that turn
 (``routes_turns``): one Agent run per chat, never a second turn beside it. A turn
@@ -27,8 +29,8 @@ melo began itself (a task's question, a follow-up on a task) reads and answers
 and has no authority to act: the runner says so for the run
 (``Agent.run_task(acts=False)``), and the executor refuses what is not offered.
 
-A task is for the person who asks for one, or for work the model sets apart
-(``task_create``). A message has one receipt (:meth:`Front.receipt`): its work is
+A task is for the person who asks for one, for long work, and for the rest of
+work that turned out long (``task_create``). A message has one receipt (:meth:`Front.receipt`): its work is
 admitted under it and its schedule named by it, so a retry or a card's tap starts
 nothing twice, whichever words a model gives it.
 
@@ -208,28 +210,44 @@ RETRIES_READ: Final = 32
 # What every chat is told about itself, after melo's identity. The language
 # of the reply is set once, in that identity (sessions/identity.py LANGUAGE_RULE).
 FRONT_TEXT: Final = (
-    "You are a chat with the user, and you do their work yourself, here, with your "
-    "tools: you read and change files in this chat's folder, run Python, read web "
-    "pages and, when browsing is on, use a browser whose live page shows in this "
-    "chat; search_files finds where something is in the folder. A request to act for "
+    "You are a chat with the user. Their work is done by you, here, or by a task "
+    "you start with task_create, which works beside this chat with the same tools "
+    "while the user goes on talking to you. Your own tools: you read and change "
+    "files in this chat's folder, run Python, read web pages and, when browsing is "
+    "on, use a browser whose live page shows in this chat; search_files finds where "
+    "something is in the folder. For each request, decide first who does it. A task "
+    "does the long work: many steps or some minutes (building or testing something, "
+    "going through many files or pages, research that ends in a report), and "
+    "whatever the user wants run as its own task or in the background. You do the "
+    "rest yourself: an answer, a look at a file or a page, one change, a few steps. "
+    "When you cannot tell, start it yourself. A request to act for "
     "the user (find openings and apply, sign in, fill in and submit a form, book, "
-    "send, run a command, change a file) is work, not advice: start right away. Do "
+    "send, run a command, change a file) is work, not advice: start right away, "
+    "yourself or with a task. Do "
     "not ask whether to start it, and do not answer with a list of links for the "
     "user to follow themselves. Ask one short question only when a request is too "
-    "unclear to act on. Never reply with only what you are about to do: do it, or "
-    "say why you cannot. Your steps ask or are blocked as this chat's Ask or Auto "
-    "says. Words the user adds while you work reach you at your next step. Do the "
-    "work here, and finish it here when that is practical; when the rest of it "
+    "unclear to act on. Never reply with only what you are about to do: do it, "
+    "start its task, or say why you cannot. Your steps ask or are blocked as this "
+    "chat's Ask or Auto says. Words the user adds while you work reach you at your "
+    "next step. When work you began yourself turns out long, or the rest of it "
     "will hold large tool or page material, hand the remaining objective to a "
     "task with task_create and continue_current true: your turn ends there, and "
-    "the task picks up from where you are without redoing what is done. A task "
-    "(task_create) is also for when the user asks for one or for background "
-    "work. Work the user wants on a schedule (every day at 9, every weekday) goes "
+    "the task picks up from where you are without redoing what is done. "
+    "Work the user wants on a schedule (every day at 9, every weekday) goes "
     "to task_schedule, which also runs it now when the same message asks for that. "
     "A message for a running task goes to it with task_message; a task that ended "
     "runs no more, and task_message then starts a fresh task that goes on from "
     "its record. A question about a task (is it done, what did it find) is "
     "answered from task_get, which gives its whole answer and the files it wrote."
+)
+# What a chat reads with each message of the person, before the acting reminder: the
+# choice comes before the work (#701). A rule in the identity alone moved no model.
+WHO_NOTE: Final = (
+    "[localmelo · first decide who does this. Count the tool calls it will take. "
+    "More than about five (writing or changing several files, running and fixing "
+    "until something passes, working through a whole folder or project) is a "
+    "task's: your first call is task_create, with nothing before it. Fewer (an "
+    "answer, one look, one change) is yours: do it now.]"
 )
 # What a chat reads each turn while no browser is set up (#567).
 BROWSING_OFF_NOTE: Final = (
@@ -432,7 +450,7 @@ class FrontAgent(Agent):
     """A chat's Agent, main or side: the person's work runs here, in its own run.
 
     Each person's turn reads the tasks that ended since the last one and what
-    the chat cannot do now, and ends with :data:`ACTING_NOTE`. A task's question
+    the chat cannot do now, and ends with :data:`WHO_NOTE` and :data:`ACTING_NOTE`. A task's question
     and a follow-up are short internal runs with their own bounds. Without
     ``front`` it is a plain Agent.
     """
@@ -465,7 +483,7 @@ class FrontAgent(Agent):
             kwargs["user_words"] = query if own_chars is None else query[:own_chars]
         if front is not None and turn is not None:
             query = await self._with_news(front, query)
-        query = f"{query}\n\n{ACTING_NOTE}"
+        query = f"{query}\n\n{WHO_NOTE}\n\n{ACTING_NOTE}"
         outcome = await super().run_task(query, on_event=on_event, **kwargs)
         if front is not None and turn is not None and outcome.status == "completed":
             await front.offer_chore(turn)
@@ -557,8 +575,9 @@ _ID: Final = {"type": "string", "description": "The task's id, from task_list."}
 TASK_TOOLS: Final = (
     _tool(
         "task_create",
-        "Start a separate task beside this chat, when the user asks for a task or for "
-        "background work; do anything else yourself with your own tools. With "
+        "Start a separate task beside this chat, for long work (many steps or some "
+        "minutes) and when the user asks for a task or for background work; do short "
+        "work yourself with your own tools. With "
         "continue_current true it takes over the rest of your current work instead: "
         "your turn ends with this call, which must be the only call of its step. Its "
         "steps ask or are blocked as this chat's Ask or Auto says, and its result "
