@@ -62,7 +62,7 @@ from localmelo.melo.agent._brief_aids import FileStamp, edited_files
 from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.gateway.front_rules import asks_tests
-from localmelo.support.sessions.store import SessionStore, StoredEvent
+from localmelo.support.sessions.store import SessionStore, StoredEvent, iter_events
 from localmelo.support.words import LANGUAGES, t_in
 
 from .finishing import OUT_OF_STEPS
@@ -1064,16 +1064,11 @@ async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[Tu
     *turn* is a stored turn (its ``turn`` and ``run_id``): of a task, or of a
     chat whose run hands its work on (#571).
     """
-    events: list[StoredEvent] = []
-    after = 0
-    while True:
-        page = await store.list_events(
-            session_id, after_id=after, limit=1000, turns=(turn.turn, turn.turn)
-        )
-        events += page
-        if len(page) < 1000:
-            return paired_calls(events, turn.run_id)
-        after = page[-1].id or after
+    events = [
+        stored
+        async for stored in iter_events(store, session_id, turns=(turn.turn, turn.turn))
+    ]
+    return paired_calls(events, turn.run_id)
 
 
 def paired_calls(

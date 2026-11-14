@@ -13,7 +13,7 @@
  */
 
 import { approvalCard as drawApprovalCard, guardLeft } from "./approval-card.mjs";
-import { maker } from "./dom.mjs";
+import { maker, reachable, titleWhenCut } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown, renderPartialMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
@@ -570,7 +570,9 @@ function syncUI() {
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
   // melo_serve's pick has a name of its own (Qwen3.8 27B), shorter than the model it serves.
-  $("model-btn").textContent = `${(serve.serves() && serve.current()?.name) || model?.name || t("header.chooseModel")}  ⌄`;
+  const modelName = (serve.serves() && serve.current()?.name) || model?.name || t("header.chooseModel");
+  $("model-btn").textContent = `${modelName}  ⌄`;
+  titleWhenCut($("model-btn"), modelName);
   if (serve.serves()) $("model-btn").setAttribute("aria-haspopup", "menu");
   else $("model-btn").removeAttribute("aria-haspopup");
   $("send-btn").hidden = false;
@@ -1909,10 +1911,18 @@ function shotsOf(turn) {
   return row ? [row] : [];
 }
 
+/** The code blocks and tables of rendered Markdown, each reachable from the keyboard while it scrolls. */
+function reachableMarkdown(node) {
+  for (const box of node.querySelectorAll("pre, table, .table-scroll")) {
+    reachable(box, t(box.localName === "pre" ? "answer.code" : "answer.table"));
+  }
+  return node;
+}
+
 function answerNode(answer) {
   const node = el("div", "answer");
   node.innerHTML = renderMarkdown(answer);
-  return node;
+  return reachableMarkdown(node);
 }
 
 /**
@@ -2202,12 +2212,12 @@ function itemNode(item, turn, context = {}) {
     case "tool":
       return toolCard(item, turn, context);
     case "thinking": {
-      if (context.inline) return el("div", "thinking-body", item.text);
+      if (context.inline) return reachable(el("div", "thinking-body", item.text), t("turns.summary.thought"));
       const card = el("details", "thinking");
       card.open = item.expanded ?? prefs.thinking;
       card.append(el("summary", "", item.durationS === null ? t("turns.summary.thought")
         : t("tool.thoughtFor", { duration: formatDuration(item.durationS) })));
-      const body = el("div", "thinking-body", item.text);
+      const body = reachable(el("div", "thinking-body", item.text), t("turns.summary.thought"));
       card.append(body);
       // Only a change of the person's own is kept: opening it by /thinking is not.
       card.addEventListener("toggle", () => {
@@ -2218,7 +2228,7 @@ function itemNode(item, turn, context = {}) {
     case "assistant_text": {
       const node = el("div", "assistant-text");
       node.innerHTML = renderMarkdown(item.text);
-      return node;
+      return reachableMarkdown(node);
     }
     case "notice": {
       const node = el("div", "notice-item", `${item.noticeKind === "retry" ? "↻" : "⚠"} ${item.message}`);
@@ -2370,12 +2380,12 @@ function toolBody(item, context = {}) {
   const entries = Object.entries(item.arguments ?? {});
   if (entries.length > 0) {
     const section = el("div", "tool-section");
-    section.append(el("h4", "", t("tool.arguments")));
+    section.append(el("h3", "tool-heading", t("tool.arguments")));
     const pre = el("pre", "tool-arguments");
     pre.textContent = entries
       .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
       .join("\n");
-    section.append(pre);
+    section.append(reachable(pre, t("tool.arguments")));
     body.append(section);
   }
   const declined = declinedStep(item);
@@ -2400,14 +2410,14 @@ function toolBody(item, context = {}) {
 
 function outputBlock(item, context = {}) {
   const section = el("div", "tool-section");
-  section.append(el("h4", "", t("tool.output")));
+  section.append(el("h3", "tool-heading", t("tool.output")));
   const text = cleanOutput(item.output);
   const lines = text.split("\n");
   const shown =
     item.showAll || (text.length <= 2000 && lines.length <= 40)
       ? text
       : lines.slice(0, 40).join("\n").slice(0, 2000);
-  section.append(el("pre", "tool-output", shown));
+  section.append(reachable(el("pre", "tool-output", shown), t("tool.output")));
   // The count is the design's raw character count, not the house's 2.0k.
   const hidden = item.outputChars || text.length;
   if (shown !== text) {
@@ -3151,7 +3161,7 @@ function showWorkers(id) {
   else if (workers.state.loaded && !workers.state.error) { workers.state.epoch++; workers.state.mode = "list"; workers.state.session = null; workers.state.view = null; workers.state.loading = false; renderWorkers(); }
   else workers.list();
   const previousRow = !id && previousWorker && Array.from($("worker-panel").children).find((node) => node.dataset?.workerId === previousWorker);
-  (previousRow || $("worker-panel").querySelector("h1"))?.focus();
+  (previousRow || $("worker-panel").querySelector(".worker-title"))?.focus();
 }
 
 function leaveWorkers() {
@@ -3231,10 +3241,11 @@ function taskResultNodes(view, render) {
 function renderWorkers() {
   const state = workers.state;
   const root = $("worker-panel");
-  const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.tagName === "H1";
+  const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.className === "worker-title";
   const terminal = state.mode === "detail" ? state.session?.kind === "terminal" : state.kind === "terminal";
   const w = (key, params) => t(`workersView.${key}`, params);
-  const title = el("h1", "", state.mode === "list" ? w("title") : state.session?.title || w(terminal ? "terminalChat" : "workerRun"));
+  // The page's one h1 is the header's title, which says the same words in this view: this one is the next level.
+  const title = el("h2", "worker-title", state.mode === "list" ? w("title") : state.session?.title || w(terminal ? "terminalChat" : "workerRun"));
   title.tabIndex = -1;
   const nodes = [title, el("p", "muted", w(state.mode === "list" ? "readOnly" : terminal ? "readOnlyTerminal" : "readOnlyRun"))];
   if (state.mode === "detail") {
@@ -4161,6 +4172,11 @@ $("sidebar-toggle").addEventListener("click", () =>
   sidebar(!$("app").classList.contains("sidebar-open")),
 );
 $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
+// The first Tab stop takes the keyboard past the list of chats: to the message box, or in a worker's history (which has none) to its title.
+$("skip-link").addEventListener("click", (event) => {
+  event.preventDefault();
+  (workerMode ? $("worker-panel").querySelector(".worker-title") : $("input"))?.focus();
+});
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async (event) => {

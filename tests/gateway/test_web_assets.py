@@ -523,6 +523,20 @@ def test_shell_buttons_have_no_native_title_tooltips() -> None:
     assert not re.findall(r"<button\b[^>]*\btitle=", page)
 
 
+def test_each_screen_has_one_h1_and_a_skip_link_before_the_chat_list() -> None:
+    page = (webapp._STATIC / "index.html").read_text(encoding="utf-8")
+    # The sign-in card and the app are never on screen together; the app's h1 is the header's title.
+    assert re.findall(r'<h1\b[^>]*\bid="([\w-]+)"', page) == [
+        "lock-title",
+        "header-title",
+    ]
+    assert len(re.findall(r"<h1\b", page)) == 2
+    inside = page[page.index('<div class="app" id="app"') :]
+    first = re.search(r"<(\w+)\b([^>]*)>", inside[inside.index(">") + 1 :])
+    assert first and first.group(1) == "a" and 'href="#input"' in first.group(2)
+    assert 'id="input"' in page
+
+
 async def test_the_shell_has_the_setup_card(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     assert re.search(r'<section\b[^>]*\bid="setup-card"[^>]*\bhidden\b', page.text)

@@ -1032,6 +1032,7 @@ test('saving the connection offers Undo, which sends the old connection without 
   await h.element('s-change').emit('click');
   assert.equal(h.element('s-editor').hidden, false);
   assert.equal(h.element('s-change').attributes['aria-expanded'], 'true');
+  assert.equal(h.element('s-change').textContent, 'Done', 'the dialog\'s own x is the only control called Close');
   await change(h, 's-adapter', 'mlc', 'change');
   await h.element('create-btn').emit('click');
   await h.element('settings-undo').emit('click');

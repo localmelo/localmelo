@@ -10,6 +10,8 @@ func consoleWindow() -> NSWindow {
     window.title = "localmelo"
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
+    // No smaller than the page's own narrowest desktop layout (it turns into the phone layout below 700 points).
+    window.minSize = NSSize(width: 720, height: 480)
     return window
 }
 

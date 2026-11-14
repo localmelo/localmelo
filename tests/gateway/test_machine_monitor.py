@@ -547,11 +547,15 @@ def test_no_code_writes_the_lock(tmp_path: Path) -> None:
     assert snapshot.holder == "local_ai-benchmark session"
     assert path.read_text(encoding="utf-8") == original
 
-    # A grep-style check over both modules: the lock reader opens read-only;
+    # A grep-style check over these modules: the lock reader opens read-only;
     # nothing creates, writes, renames or removes a lock.
-    gateway_dir = Path(__file__).resolve().parents[2] / "support" / "gateway"
-    for name in ("machine_monitor.py", "chat_gate.py"):
-        source = (gateway_dir / name).read_text(encoding="utf-8")
+    support_dir = Path(__file__).resolve().parents[2] / "support"
+    for module in (
+        support_dir / "gateway" / "machine_monitor.py",
+        support_dir / "gateway" / "chat_gate.py",
+        support_dir / "gpu_lock.py",
+    ):
+        source = module.read_text(encoding="utf-8")
         for pattern in (
             'open(path, "w"',
             'open(target, "w"',
@@ -562,7 +566,7 @@ def test_no_code_writes_the_lock(tmp_path: Path) -> None:
             "os.rename",
             "os.replace",
         ):
-            assert pattern not in source, f"{name} uses {pattern}"
+            assert pattern not in source, f"{module.name} uses {pattern}"
 
 
 class _FakeKqueue:
