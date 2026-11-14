@@ -269,7 +269,7 @@ test('opening the form with Change lists the models again, so the list is there 
   assert.equal(h.calls.filter((call) => call.path.startsWith('/models')).length, 2, 'the form asked when it opened');
 });
 
-test('a hosted service is never asked for a list of models', async () => {
+test('a hosted service is not asked through the local server\'s listing route', async () => {
   const h = harness({
     'GET /settings': fixture(),
     [LISTED()]: listing(['a']),
@@ -1470,13 +1470,14 @@ test('a hosted service is sent as its backend, with its address and the thinking
 
 test('the key is sent once, leaves the field at once and only its keychain reference stays in the page', async () => {
   const put = [];
+  const keysChanged = [];
   const h = harness({
     'GET /settings': full(),
     'GET /settings/key-status?preset=deepseek': {keychain: 'missing'},
     'PUT /settings/key': (body) => { put.push(body); return {keychain: 'saved', api_key: DEEPSEEK_REF}; },
     'POST /settings/test': {ok: true, result: 'works', message: 'Works.'},
     'PUT /settings': (body) => hostedFixture({revision: 'rev2', chat_backend: body.chat_backend}),
-  });
+  }, new Map(), () => false, {keysChanged: () => keysChanged.push(1)});
   await h.open();
   await change(h, 's-adapter', 'deepseek', 'change');
   await flush();
@@ -1484,11 +1485,13 @@ test('the key is sent once, leaves the field at once and only its keychain refer
   assert.equal(h.element('s-key-saved').hidden, true);
   await h.element('s-key-save').emit('click');
   assert.equal(h.element('s-key-status').textContent, 'Paste your key first.');
+  assert.equal(keysChanged.length, 0);
   assert.equal(put.length, 0, 'an empty field sends nothing');
   h.element('s-key-input').value = `  ${SECRET} `;
   await h.element('s-key-save').emit('click');
   await flush();
   assert.deepEqual(put, [{preset: 'deepseek', key: SECRET}]);
+  assert.equal(keysChanged.length, 1, 'the page learns at once that a service now has a key');
   assert.equal(h.element('s-key-input').value, '', 'the field is cleared at once');
   assert.equal(h.element('s-key-saved').hidden, false);
   assert.equal(h.element('s-key-entry').hidden, true);
@@ -1666,4 +1669,140 @@ test('a service tried in the form does not change the saved connection\'s state 
   await same.element('s-change').emit('click');
   await same.element('settings-test').emit('click');
   assert.match(same.element('s-chat-state').dataset.text, /^Connected · old/, 'the saved connection tested as it is shows its result');
+});
+
+
+// --- hosted services list their models by themselves ------------------------------------------------------------
+
+const HOSTED_LIST = (preset, model = '', address = '') => `GET /hosted/models?${new URLSearchParams({preset, model, ...(address ? {address} : {})})}`;
+const hostedList = (models, extra = {}) => ({preset: 'deepseek', key: true, listed: models.length > 0, models, result: '', message: '', gone: false, line: '', ...extra});
+const pickLabels = (h) => h.element('s-model-pick').children.map((option) => option.textContent);
+
+test('the models of a service with a key are listed on opening Settings, without a press', async () => {
+  const h = harness({
+    'GET /settings': hostedFixture(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'saved', env_set: false, api_key: DEEPSEEK_REF},
+    [HOSTED_LIST('deepseek', 'deepseek-flash')]: hostedList(['deepseek-flash', 'deepseek-v4-pro']),
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.element('s-model-pick').hidden, false);
+  assert.deepEqual(pickValues(h), ['deepseek-flash', 'deepseek-v4-pro', '']);
+  assert.equal(h.element('s-model-pick').value, 'deepseek-flash');
+  assert.match(h.element('discover-status').textContent, /offers 2 models/);
+  assert.equal(h.calls.filter((call) => call.path.startsWith('/hosted/models')).length, 1);
+  assert.equal(h.calls.some((call) => call.path === '/settings/test'), false, 'no test, no chat');
+});
+
+test('a new service offers the first suggested model it lists, and none when it lists none of them', async () => {
+  const route = (models) => harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=openai': {keychain: 'saved', env_set: false, api_key: 'keychain:localmelo.openai'},
+    [HOSTED_LIST('openai', '')]: hostedList(models, {preset: 'openai'}),
+  });
+  const withIt = route(['gpt-4.1', 'gpt-4o']);
+  await withIt.open();
+  await change(withIt, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(withIt.element('s-chat-model').value, 'gpt-4o', 'the first suggested name the service has');
+
+  const without = route(['gpt-4.1', 'gpt-5']);
+  await without.open();
+  await change(without, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(without.element('s-chat-model').value, '', 'a name the service does not have is never preselected');
+  assert.equal(without.element('s-model-pick').value, '\u0001');
+  assert.deepEqual(pickLabels(without).slice(0, 3), ['Choose a model', 'gpt-4.1', 'gpt-5']);
+  await change(without, 's-model-pick', 'gpt-5', 'change');
+  assert.equal(without.element('s-chat-model').value, 'gpt-5');
+});
+
+test('without a key the suggestion stays as it was, and nothing is listed', async () => {
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=openai': {keychain: 'missing', env_set: false, api_key: 'keychain:localmelo.openai'},
+    [HOSTED_LIST('openai', '')]: hostedList([], {key: false, listed: false, preset: 'openai'}),
+  });
+  await h.open();
+  await change(h, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(h.element('s-chat-model').value, 'gpt-4o');
+  assert.equal(h.element('s-model-pick').hidden, true);
+});
+
+test('a saved model the service no longer has is said at once, in the words of the test', async () => {
+  const line = 'The service has no model called deepseek-flash. Choose one from the list.';
+  const h = harness({
+    'GET /settings': hostedFixture(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'saved', env_set: false, api_key: DEEPSEEK_REF},
+    [HOSTED_LIST('deepseek', 'deepseek-flash')]: hostedList(['deepseek-v4-pro'], {gone: true, line}),
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.element('discover-status').textContent, line);
+  assert.equal(h.element('s-chat-model').value, 'deepseek-flash', 'melo does not change a saved model by itself');
+  assert.equal(h.element('s-model-pick').value, '', 'the list offers the others and Other…');
+  assert.equal(h.calls.some((call) => call.path === '/settings/test'), false);
+});
+
+test('a listing that failed says why, in the words the service check uses', async () => {
+  const message = 'The service did not accept the key (401). Paste the key again.';
+  const h = harness({
+    'GET /settings': hostedFixture(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'saved', env_set: false, api_key: DEEPSEEK_REF},
+    [HOSTED_LIST('deepseek', 'deepseek-flash')]: hostedList([], {result: 'wrong_key', message, listed: false}),
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.element('discover-status').textContent, message);
+  assert.equal(h.element('s-model-pick').hidden, true);
+});
+
+test('each service comes back with the model it last had, and a free-form one with its address', async () => {
+  const kept = hostedFixture({services: {openai: {chat_model: 'gpt-4o-mini'}, other: {chat_model: 'm1', base_url: 'https://llm.example.com/v1'}}});
+  const h = harness({
+    'GET /settings': kept,
+    'GET /settings/key-status?preset=deepseek': {keychain: 'missing'},
+    'GET /settings/key-status?preset=openai': {keychain: 'missing'},
+    'GET /settings/key-status?preset=other&address=https%3A%2F%2Fllm.example.com%2Fv1': {keychain: 'saved', api_key: 'keychain:localmelo.other-0123456789ab'},
+  });
+  await h.open();
+  await change(h, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(h.element('s-chat-model').value, 'gpt-4o-mini');
+  await change(h, 's-adapter', 'other', 'change');
+  await flush();
+  assert.equal(h.element('s-chat-model').value, 'm1');
+  assert.equal(h.element('s-base-url').value, 'https://llm.example.com/v1');
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  assert.equal(h.element('s-chat-model').value, 'deepseek-flash', 'the saved connection is the one in use');
+});
+
+test('a free-form service saves its key with its address, and another address has no key yet', async () => {
+  const puts = [];
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=other&address=https%3A%2F%2Fllm.example.com%2Fv1': {keychain: 'missing'},
+    'PUT /settings/key': (body) => { puts.push(body); return {preset: 'other', api_key: 'keychain:localmelo.other-0123456789ab', keychain: 'saved'}; },
+    [HOSTED_LIST('other', '', 'https://llm.example.com/v1')]: hostedList(['m1'], {preset: 'other'}),
+  });
+  await h.open();
+  await change(h, 's-adapter', 'other', 'change');
+  await flush();
+  await change(h, 's-key-input', SECRET);
+  await h.element('s-key-save').emit('click');
+  assert.equal(h.element('s-key-status').textContent, 'Enter the service\'s address.');
+  assert.deepEqual(puts, [], 'no key leaves the page before the address is known');
+  await change(h, 's-base-url', 'https://llm.example.com/v1');
+  await h.element('s-base-url').emit('change');
+  await flush();
+  await change(h, 's-key-input', SECRET);
+  await h.element('s-key-save').emit('click');
+  await flush();
+  assert.deepEqual(puts, [{preset: 'other', key: SECRET, address: 'https://llm.example.com/v1'}]);
+  assert.equal(h.element('s-key-saved').hidden, false, 'the saved row shows');
+  assert.deepEqual(pickValues(h), ['\u0001', 'm1', ''], 'the list came after the key was saved');
+  await change(h, 's-base-url', 'https://other.example.com/v1');
+  assert.equal(h.element('s-key-saved').hidden, true, 'the key was saved for the other address');
 });

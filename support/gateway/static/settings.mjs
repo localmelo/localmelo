@@ -81,7 +81,7 @@ export function keyWords(key) {
 export function setupSettings({
   api, onSaved, serve = () => null, developer = () => false, health = () => null, sessions = () => [], openTab = () => {},
   desktop = () => null, folders = () => null, narrow = () => globalThis.matchMedia?.("(max-width: 700px)")?.matches === true,
-  clock = Date.now, reloadPage = () => globalThis.location?.reload(),
+  clock = Date.now, reloadPage = () => globalThis.location?.reload(), keysChanged = () => {},
 }) {
   const $ = (id) => document.getElementById(id);
   const dialog = $("settings-dialog");
@@ -305,11 +305,21 @@ export function setupSettings({
     for (const item of presets) {
       const mine = sectionOf(loaded, item);
       const defaults = loaded.defaults[item.backend] || {};
-      // A service that shares its section with another (DeepSeek and OpenAI) starts from its own defaults.
-      sections[item.id] = item === on
-        ? {api_key_env: mine.api_key_env || "", api_key: mine.api_key || "", base_url: mine.base_url || item.stored_url,
-          chat_model: mine.chat_model || item.models[0] || "", thinking: mine.thinking || ""}
-        : {api_key_env: "", api_key: "", base_url: item.stored_url, chat_model: item.models[0] || defaults.chat_model || "", thinking: ""};
+      const remembered = loaded.services?.[item.id] || {};
+      // The section holds the values of the service in use, and of a service that has a section of its own and was
+      // set up. A service that shares its section with another (DeepSeek and OpenAI) starts from what it remembers,
+      // else from its own defaults. `named` says the person's model is there, not a suggestion that a listing may replace.
+      const own = item.id === item.backend && presets.filter((other) => other.backend === item.backend).length === 1;
+      const live = item === on || (own && Boolean(mine.chat_model || mine.api_key));
+      const model = (live && mine.chat_model) || remembered.chat_model || "";
+      sections[item.id] = {
+        api_key_env: live ? mine.api_key_env || "" : "",
+        api_key: live ? mine.api_key || "" : "",
+        base_url: item.free_address ? (item === on ? mine.base_url : remembered.base_url) || "" : item.stored_url,
+        chat_model: model || item.models[0] || defaults.chat_model || "",
+        thinking: live ? mine.thinking || "" : "",
+        named: model !== "",
+      };
     }
     if (on && KEY_STATES[sectionOf(loaded, on).key]) keychain.set(on.id, KEY_STATES[sectionOf(loaded, on).key]);
     options(chat, [], on?.id ?? loaded.chat_backend, loaded.chat_backend ? "" : t("settings.chooseServer"), [
@@ -331,14 +341,17 @@ export function setupSettings({
 
   // The chat model is picked from the list the server offers; "Other" (the empty choice) brings back the field to type in.
   const OTHER = "";
+  const UNCHOSEN = "\u0001";
   function renderModelPick() {
     const pick = $("s-model-pick");
-    const listed = !isCloud() && offeredChat.length > 0;
+    const listed = offeredChat.length > 0;
     pick.hidden = !listed;
     if (listed) {
       const model = $("s-chat-model").value;
-      options(pick, [...offeredChat.map((name) => ({key: name, label: name})), {key: OTHER, label: t("settings.otherModel")}],
-        offeredChat.includes(model) ? model : OTHER);
+      // No model is chosen yet: the list says so instead of showing one the service may not have.
+      const none = model === "" ? [{key: UNCHOSEN, label: t("header.chooseModel")}] : [];
+      options(pick, [...none, ...offeredChat.map((name) => ({key: name, label: name})), {key: OTHER, label: t("settings.otherModel")}],
+        model === "" ? UNCHOSEN : offeredChat.includes(model) ? model : OTHER);
     } else {
       pick.replaceChildren();
     }
@@ -408,16 +421,24 @@ export function setupSettings({
   }
 
   // Whether the keychain holds a key for the service; no key is read.
+  // A free-form service keeps its key for the address it was saved with, so the address goes with every key request.
+  const keyQuery = (item) => new URLSearchParams(item.free_address ? {preset: item.id, address: section(item.id).base_url.trim()} : {preset: item.id});
+
   async function askKeychain(item) {
     const version = ++keychainVersion;
     const currentGeneration = generation;
+    if (item.free_address && !section(item.id).base_url.trim()) {
+      keychain.set(item.id, "missing");
+      renderKey();
+      return;
+    }
     try {
-      const result = await api(`/settings/key-status?${new URLSearchParams({preset: item.id})}`);
+      const result = await api(`/settings/key-status?${keyQuery(item)}`);
       if (version !== keychainVersion || currentGeneration !== generation || !dialog.open) return;
       keychain.set(item.id, result.keychain || "unknown");
       // A key saved earlier is the service's key from now on.
       const data = section(item.id);
-      if (result.keychain === "saved" && !data.api_key) data.api_key = item.key_ref;
+      if (result.keychain === "saved" && !data.api_key) data.api_key = result.api_key || item.key_ref;
     } catch {
       if (version !== keychainVersion || currentGeneration !== generation || !dialog.open) return;
       keychain.set(item.id, "unknown");
@@ -1261,6 +1282,16 @@ export function setupSettings({
     $(id).addEventListener("input", () => {
       section(chat.value)[field] = $(id).value;
       invalidateTest();
+      if (id === "s-chat-model") section(chat.value).named = true;
+      if (id === "s-base-url") {
+        // The key of a free-form service belongs to the address it was saved with: another address has none yet.
+        const item = preset();
+        section(item.id).api_key = "";
+        keychain.delete(item.id);
+        offeredChat = [];
+        renderModelPick();
+        renderKey();
+      }
       if (id === "s-key-env") checkKey();
       if (id === "s-chat-model" && isCloud()) $("s-thinking").checked = thinks(preset(), section(chat.value));
       if (id === "s-base-url") $("s-address-text").textContent = t("settings.hosted.addressIs", {address: $(id).value});
@@ -1275,9 +1306,16 @@ export function setupSettings({
     });
   }
   $("s-chat-url").addEventListener("change", () => discoverModels());
+  $("s-base-url").addEventListener("change", () => {
+    const item = preset();
+    if (!item?.free_address || busy || !settings) return;
+    askKeychain(item);
+    discoverModels();
+  });
   $("s-model-pick").addEventListener("change", () => {
     const name = $("s-model-pick").value;
     if (name !== OTHER) {
+      section(chat.value).named = true;
       section(chat.value).chat_model = name;
       $("s-chat-model").value = name;
       invalidateTest();
@@ -1300,11 +1338,16 @@ export function setupSettings({
       keySays(t("settings.hosted.keyEmpty"));
       return;
     }
+    const address = section(item.id).base_url?.trim() ?? "";
+    if (item.free_address && !address) {
+      keySays(t("settings.hosted.needAddress"));
+      return;
+    }
     const currentGeneration = generation;
     $("s-key-save").disabled = true;
     keySays(t("settings.hosted.keySaving"));
     try {
-      const result = await api("/settings/key", {method: "PUT", body: {preset: item.id, key}});
+      const result = await api("/settings/key", {method: "PUT", body: item.free_address ? {preset: item.id, key, address} : {preset: item.id, key}});
       if (currentGeneration !== generation || !dialog.open) return;
       $("s-key-input").value = "";
       const data = section(item.id);
@@ -1318,6 +1361,8 @@ export function setupSettings({
       renderKey();
       // The saved row already shows "Saved in the keychain", so a plain save is only announced, not shown twice.
       keySays(t(cleared ? "settings.hosted.keySavedCleared" : "settings.hosted.keySaved"), !cleared);
+      listHosted();
+      keysChanged();
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       keySays(err.message || t("settings.hosted.keyFailed"));
@@ -1350,12 +1395,15 @@ export function setupSettings({
     removeArmed = null;
     const currentGeneration = generation;
     try {
-      await api(`/settings/key?${new URLSearchParams({preset: item.id})}`, {method: "DELETE"});
+      await api(`/settings/key?${keyQuery(item)}`, {method: "DELETE"});
       if (currentGeneration !== generation || !dialog.open) return;
       section(item.id).api_key = "";
       keychain.set(item.id, "missing");
+      offeredChat = [];
+      renderModelPick();
       invalidateTest();
       keySays(t("settings.hosted.keyRemoved"));
+      keysChanged();
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       keySays(err.message || t("settings.hosted.keyFailed"));
@@ -1369,7 +1417,8 @@ export function setupSettings({
 
   // Ask the server which models it offers, on its own whenever Settings opens or the address changes; the button asks again.
   async function discoverModels() {
-    if (busy || !settings || isCloud() || !chat.value) return;
+    if (busy || !settings || !chat.value) return;
+    if (isCloud()) return listHosted();
     const version = ++discoveryVersion;
     const currentGeneration = generation;
     if (!$("s-chat-url").value) {
@@ -1404,6 +1453,52 @@ export function setupSettings({
     }
   }
   discover.addEventListener("click", () => discoverModels());
+
+  // A hosted service lists its models by itself once a key for it exists (one GET, no chat, no cost). The model
+  // offered first is one the service has, and a saved model it no longer has is said at once.
+  async function listHosted() {
+    const item = preset();
+    if (!item || busy || !settings) return;
+    const data = section(item.id);
+    const address = (data.base_url || "").trim();
+    if (item.free_address && !address) return;
+    const version = ++discoveryVersion;
+    const currentGeneration = generation;
+    const query = new URLSearchParams({preset: item.id, model: data.named ? data.chat_model || "" : ""});
+    if (item.free_address) query.set("address", address);
+    try {
+      const result = await api(`/hosted/models?${query}`);
+      if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open || item.id !== chat.value) return;
+      offeredChat = result.key && !result.message ? result.models : [];
+      if (!result.key) {
+        renderModelPick();
+        return;
+      }
+      if (result.message) {
+        renderModelPick();
+        modelStatus.textContent = result.message;
+        return;
+      }
+      fillModels(offeredChat);
+      if (offeredChat.length && !data.named) {
+        // A new setup: the first suggested name the service lists, else none, so the person picks.
+        data.chat_model = item.models.find((name) => offeredChat.includes(name)) || "";
+        $("s-chat-model").value = data.chat_model;
+        if ($("s-thinking").checked !== thinks(item, data)) $("s-thinking").checked = thinks(item, data);
+      }
+      renderModelPick();
+      if (result.gone) {
+        // A saved model the service does not have (the Test button's words, without a test).
+        modelStatus.textContent = result.line;
+      } else {
+        modelStatus.textContent = offeredChat.length ? t("settings.hosted.modelsListed", {n: offeredChat.length}) : t("settings.typeModel");
+      }
+    } catch {
+      if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
+      offeredChat = [];
+      renderModelPick();
+    }
+  }
 
   testButton.addEventListener("click", async () => {
     if (busy || !settings || testButton.disabled) return;
@@ -1487,6 +1582,7 @@ export function setupSettings({
       const back = before.chat_backend
         ? () => commit(savedConnection(before), t("settings.connection.undone")) : null;
       saved(t(back ? "settings.connection.saved" : "settings.connection.savedTest"), back);
+      if (isCloud()) listHosted();
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       status.textContent = "";
