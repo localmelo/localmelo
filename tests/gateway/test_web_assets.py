@@ -700,3 +700,22 @@ async def test_the_shell_pins_the_main_chat_and_drops_the_chats_switch(
         css,
     )
     assert block is not None
+
+
+def test_a_settings_switch_takes_the_click_on_its_whole_face() -> None:
+    """The invisible checkbox has a size of its own and lies above the track.
+
+    With only its edges set a checkbox keeps its small size, and the track, which
+    is positioned and comes after it, covers it: then one corner reacts and the
+    switch looks stuck (measured in a real page; a style check keeps it so).
+    """
+    rule = re.search(r"\.st-switch input \{([^}]*)\}", _stylesheet())
+    assert rule is not None
+    style = dict(
+        (name.strip(), value.strip())
+        for name, value in (
+            part.split(":", 1) for part in rule.group(1).split(";") if ":" in part
+        )
+    )
+    assert style["position"] == "absolute" and int(style["z-index"]) > 0
+    assert "100%" in style["width"] and "100%" in style["height"]
