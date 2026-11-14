@@ -155,15 +155,15 @@ def test_the_environment_variable_wins_when_it_is_set(
     keychain.write(SERVICE, KEY)
     chosen = section(api_key_env="SOME_HOSTED_KEY", api_key=f"keychain:{SERVICE}")
     with mock.patch.dict(os.environ, {"SOME_HOSTED_KEY": "from-the-environment"}):
-        assert hosted.api_key("openai", chosen) == "from-the-environment"
+        assert hosted.api_key("openai", chosen).key == "from-the-environment"
         assert hosted.key_state("openai", chosen) == "env"
     with mock.patch.dict(os.environ, {}, clear=True):
-        assert hosted.api_key("openai", chosen) == KEY
+        assert hosted.api_key("openai", chosen).key == KEY
         assert hosted.key_state("openai", chosen) == "keychain"
 
 
 def test_a_section_with_no_key_named_has_none() -> None:
-    assert hosted.api_key("openai", section()) == ""
+    assert hosted.api_key("openai", section()).key == ""
     assert hosted.key_state("openai", section()) == "none"
 
 
@@ -173,7 +173,7 @@ def test_an_old_section_with_only_a_variable_keeps_working(
     old = section(api_key_env="OLD_STYLE_KEY")
     with mock.patch.dict(os.environ, {"OLD_STYLE_KEY": "old-key-value"}):
         assert hosted.key_errors("openai", old, "OPENAI_API_KEY") == []
-        assert hosted.api_key("openai", old) == "old-key-value"
+        assert hosted.api_key("openai", old).key == "old-key-value"
     with mock.patch.dict(os.environ, {}, clear=True):
         errors = hosted.key_errors("openai", old, "OPENAI_API_KEY")
     assert errors == [

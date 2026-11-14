@@ -540,7 +540,7 @@ line, where `ps` could show it.
 ```
 
 `other` also takes `"address": "https://llm.example.com/v1"`: its key is saved
-under `localmelo.other-<12 hex digits of the address>`, so another address never
+under `localmelo.other-<32 hex digits of the address>`, so another address never
 finds it. A built-in service takes no address, and one that is not its own is 409
 `key_address`.
 
@@ -621,7 +621,7 @@ one `GET <address>/models` with the service's own key and never a chat.
 
 - `preset` is required; `address` names the address of `other`. `model` is the saved model, if any.
 - `key` is where the key comes from (`env`, `keychain`, `missing`, `locked`, `unavailable`, `address`). With no key nothing is sent, and `result` is `no_key`.
-- `models` holds at most 200 names, each a printable line of at most 200 characters. `listed` is `false` when the service lists none.
+- `models` holds at most 200 names, each a printable line of at most 200 characters. `listed` is `false` when the service lists none. The whole request is cut at 10 s and an answer past 1 MB is an `error`, not a list.
 - A failure is `result` (`wrong_key`, `refused`, `no_model`, `busy`, `timeout`, `unreachable`, `error` or a `keychain_*` kind) with `message` in the console's language, as the Test button says it.
 - `gone` is `true`, and `line` says `The service has no model called ...`, when the service lists models but not `model`. Nothing is sent and nothing is changed.
 - The answer is kept in memory for about a minute, and one request per service is in flight at a time. Redirects are not followed.

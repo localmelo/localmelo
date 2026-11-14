@@ -245,6 +245,12 @@ def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
     preset = hosted.BY_ID[preset_id]
     section: config.CloudVendorConfig = getattr(cfg, preset.backend)
     same_service = hosted.preset_for(preset.backend, section) is preset
+    if same_service and not hosted.address_allowed(
+        preset, hosted.address_of(preset.backend, section)
+    ):
+        # A vendor section that pointed at a proxy is moved to the vendor's own address
+        # below; the key it had belonged to the proxy, so none of it is kept.
+        same_service = False
     print(f"\n  -- {preset.label} (hosted service) --\n")
     if preset.free_address:
         while True:

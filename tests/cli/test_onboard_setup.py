@@ -2084,6 +2084,42 @@ def test_a_keychain_that_cannot_be_used_says_why_and_falls_back_to_a_variable(
     assert fake_keychain.items == {}
 
 
+def test_a_vendor_section_that_pointed_at_a_proxy_keeps_nothing_of_the_proxy(
+    fake_keychain: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def proxied() -> Config:
+        cfg = Config(chat_backend="nvidia")
+        cfg.nvidia.base_url = "https://proxy.example/v1"
+        cfg.nvidia.api_key_env = "MY_PROXY_TOKEN"
+        cfg.nvidia.chat_model = "m"
+        return cfg
+
+    built_in = hosted.BY_ID["nvidia"].stored_url
+    # The setup moves the section to the vendor's own address; the variable that went with the
+    # proxy is not offered to be kept there.
+    cfg = proxied()
+    with (
+        mock.patch.dict("os.environ", {"MY_PROXY_TOKEN": "the-proxys-token"}),
+        mock.patch("builtins.input", _Answers("2", "", "")),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+    ):
+        assert onboard._onboard_hosted(cfg, "nvidia")
+    assert "Keep the key melo already has" not in capsys.readouterr().out
+    assert (cfg.nvidia.base_url, cfg.nvidia.api_key_env) == (built_in, "NVIDIA_API_KEY")
+
+    # A key pasted there is saved for the address the section now has, and is read back.
+    cfg = proxied()
+    with (
+        mock.patch("builtins.input", _Answers("1", "")),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        assert onboard._onboard_hosted(cfg, "nvidia")
+    found = hosted.api_key("nvidia", cfg.nvidia)
+    assert (found.address, found.key) == (hosted.BY_ID["nvidia"].base_url, SECRET)
+
+
 def test_a_saved_key_is_kept_by_enter(config_path: Path, fake_keychain: Any) -> None:
     from localmelo.support import keychain
 

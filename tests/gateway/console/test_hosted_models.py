@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,7 @@ from localmelo.support.config import Config
 from localmelo.support.gateway.console import Console
 from localmelo.tests.fake_keychain import FakeSecurity
 
+REAL_LIST_MODELS = hosted_check.list_models  # the real one, before a fixture stubs it
 KEY = "sk-test-secret-value-9876543210abcdef"
 DEEPSEEK = "https://api.deepseek.com/v1"
 OPENAI = "https://api.openai.com/v1"
@@ -367,6 +369,32 @@ def test_a_switch_changes_the_model_for_the_next_message_and_keeps_the_rest(
         "localmelo.deepseek",
         "localmelo.openai",
     }
+
+
+@pytest.mark.parametrize("status", [403, 500])
+def test_a_services_error_text_that_repeats_the_key_is_not_in_the_answer(
+    client: TestClient, fake_keychain: FakeSecurity, status: int
+) -> None:
+    odd = "zz9-" + "q7" * 12  # a shape no redaction pattern knows
+    keychain.write("localmelo.openai", odd)
+    real = REAL_LIST_MODELS
+
+    async def asks(address: str, key: str, **_: Any) -> Any:
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(status, text=f"no access for {odd}")
+        )
+        return await real(address, key, transport=transport)
+
+    hosted_check.LISTINGS.clear()
+    with mock.patch.object(hosted_check, "list_models", asks):
+        body = client.get("/api/hosted/models", params={"preset": "openai"})
+
+    assert body.status_code == 200 and body.json()["message"]
+    if (
+        status == 500
+    ):  # the words for an error carry the service's text, so this is the case that matters
+        assert "no access for" in body.json()["message"]
+    assert odd not in body.text
 
 
 def test_the_switch_list_sends_a_key_only_to_the_address_it_belongs_to(

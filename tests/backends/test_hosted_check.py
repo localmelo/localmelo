@@ -235,6 +235,55 @@ async def test_a_listing_is_one_get_that_never_follows_a_redirect_and_cleans_nam
     assert models == [] and failed is not None and failed.status == 302
 
 
+async def test_a_listing_answer_past_the_byte_limit_is_a_failure_not_a_list() -> None:
+    big = {"data": [{"id": f"model-{i}"} for i in range(hosted_check.MAX_BODY // 8)]}
+    assert len(json.dumps(big)) > hosted_check.MAX_BODY
+
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=big)),
+    )
+
+    assert models == [] and failed is not None and failed.result == "error"
+    assert failed.status == 200
+
+
+@pytest.mark.parametrize("status", [403, 500])
+async def test_an_error_body_that_repeats_the_key_never_reaches_a_result(
+    status: int,
+) -> None:
+    odd = "zz9-" + "q7" * 12  # a shape no redaction pattern knows
+    body = f"denied for key {odd}, again {odd}"
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status, text=body)
+
+    models, failed = await hosted_check.list_models(
+        BASE, odd, transport=httpx.MockTransport(handler)
+    )
+
+    assert models == [] and failed is not None and failed.status == status
+    assert odd not in repr(failed) and "denied for key" in failed.detail
+    assert (
+        seen[0].headers["authorization"] == f"Bearer {odd}"
+    )  # it was sent, only there
+
+    # The Test button's chat: the error the provider raises is cut the same way.
+    def chat_fails(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "deepseek-flash"}]})
+        return httpx.Response(status, text=body)
+
+    cfg = config()
+    keychain.write("localmelo.deepseek", odd)
+    keychain._cache.clear()
+    checked = await run(cfg, chat_fails)
+    assert checked.status == status and odd not in repr(checked)
+
+
 async def test_listings_are_reused_for_a_while_and_shared_while_in_flight() -> None:
     calls: list[tuple[str, str]] = []
     gate = asyncio.Event()

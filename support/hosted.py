@@ -300,13 +300,13 @@ def service_for(preset: Preset, address: str) -> str:
     """The keychain item that holds *preset*'s key for the service at *address*.
 
     A preset with a built-in address has one item. "Other" has one per address: the
-    item's name holds a digest of the address, so a key saved for one address is
-    never found for another.
+    item's name holds 128 bits of a digest of the address, so a key saved for one
+    address is never found for another.
     """
     if not preset.free_address:
         return preset.service
     digest = hashlib.sha256(address.strip().rstrip("/").lower().encode()).hexdigest()
-    return keychain.service_for(f"{preset.id}-{digest[:12]}")
+    return keychain.service_for(f"{preset.id}-{digest[:32]}")
 
 
 def address_allowed(preset: Preset, address: str) -> bool:
@@ -361,8 +361,16 @@ def key_state(backend: str, section: CloudVendorConfig) -> str:
     return KEYCHAIN if answer == keychain.SAVED else answer
 
 
-def api_key(backend: str, section: CloudVendorConfig) -> str:
-    """The section's API key, or "" when none is named.
+@dataclass(frozen=True)
+class Credential:
+    """A key and the one address it may be sent to: every request is built from this pair."""
+
+    address: str
+    key: str = field(default="", repr=False)
+
+
+def api_key(backend: str, section: CloudVendorConfig) -> Credential:
+    """The section's API key with its address (the key is "" when none is named).
 
     The environment variable wins when it is set. A keychain item that is missing
     or cannot be read raises :class:`localmelo.support.keychain.KeychainError`
@@ -377,17 +385,17 @@ def api_key(backend: str, section: CloudVendorConfig) -> str:
         if value:
             if _env_refused(section, address):
                 raise keychain.KeychainError(ADDRESS)
-            return value
+            return Credential(address, value)
     service = keychain.parse_ref(section.api_key)
     if service is None:
-        return ""
+        return Credential(address)
     if (
         preset is None
         or service != service_for(preset, address)
         or not address_allowed(preset, address)
     ):
         raise keychain.KeychainError(ADDRESS)
-    return keychain.read(service)
+    return Credential(address, keychain.read(service))
 
 
 def preset_key_state(preset: Preset, address: str) -> str:
@@ -405,25 +413,28 @@ def preset_key_state(preset: Preset, address: str) -> str:
     return KEYCHAIN if answer == keychain.SAVED else answer
 
 
-def preset_key(preset: Preset, address: str) -> str:
-    """The key the person holds for *preset*, to send to *address* and nowhere else.
+def preset_key(preset: Preset, address: str) -> Credential:
+    """The key the person holds for *preset*, with the address it goes to and nowhere else.
 
-    The preset's own variable, else its keychain item; "" when there is none.
-    Raises :class:`localmelo.support.keychain.KeychainError` (kind ``address``)
-    before anything is read when *address* is not the one the key belongs to, and
-    for a keychain that is locked or fails.
+    The preset's own variable, else its keychain item; the key is "" when there is
+    none. The address is the preset's own, or for "Other" *address* as given. Raises
+    :class:`localmelo.support.keychain.KeychainError` (kind ``address``) before
+    anything is read when *address* is not the one the key belongs to, and for a
+    keychain that is locked or fails.
     """
     if not address_allowed(preset, address):
         raise keychain.KeychainError(ADDRESS)
+    sent_to = address if preset.free_address else preset.base_url
+    sent_to = sent_to.strip().rstrip("/")
     if preset.key_env:
         value = os.environ.get(preset.key_env, "")
         if value:
-            return value
+            return Credential(sent_to, value)
     try:
-        return keychain.read(service_for(preset, address))
+        return Credential(sent_to, keychain.read(service_for(preset, address)))
     except keychain.KeychainError as exc:
         if exc.kind in (keychain.MISSING, keychain.UNAVAILABLE):
-            return ""
+            return Credential(sent_to)
         raise
 
 
@@ -519,9 +530,12 @@ def use_service(cfg: Config, preset: Preset, model: str, *, address: str = "") -
     # A section that only this service writes keeps the key it has; a shared one (OpenAI, DeepSeek and
     # "Other" write ``[openai]``) holds the key of the service in use, which is not this one's.
     shared = sum(item.backend == preset.backend for item in PRESETS) > 1
-    kept = was_same or (
-        not shared and key_state(preset.backend, section) in (ENV, KEYCHAIN)
-    )
+    # A key goes with its address: when the switch moves the section to another one (a vendor section
+    # that pointed at a proxy), the key it had belonged to the proxy and is rebuilt from the preset.
+    kept = (
+        was_same
+        or (not shared and key_state(preset.backend, section) in (ENV, KEYCHAIN))
+    ) and _same_address(address_of(preset.backend, section), address or preset.base_url)
     section.base_url = address or preset.stored_url
     if not kept:
         service = service_for(preset, address or preset.base_url)

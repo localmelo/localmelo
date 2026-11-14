@@ -48,10 +48,11 @@ Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, Dee
 
 - **Save key** writes the key to your Mac's keychain, under the name `localmelo.<service>` (for example `localmelo.deepseek`).
 - A key goes only to its own service: the built-in address of a service in the list, or for **Other** the address saved with it. melo refuses anything else before it sends a request.
-- **Other** keeps one key per address (`localmelo.other-<12 characters>`), so a key saved for one gateway is never found for another. A key an earlier version saved as `localmelo.other` is not used: paste it again.
+- **Other** keeps one key per address (`localmelo.other-<32 characters>`), so a key saved for one gateway is never found for another. A key an earlier version saved as `localmelo.other` is not used: paste it again.
 - The config file keeps only a pointer to it, `api_key = "keychain:localmelo.deepseek"`. melo does not show the key again, and it never reaches the config, the logs or the page.
 - **Replace** saves a new key; **Remove** deletes it from the keychain.
 - An environment variable still works: if `api_key_env` is set and the variable has a value, it is used before the keychain.
+- A key stays with its address: if a service's section pointed at a proxy and you switch it to the service's own address, the proxy's key or variable is not carried along (paste the key for the service, or use **Other** for the proxy).
 - The macOS app does not see variables from your shell. Paste the key in Settings instead of exporting it.
 
 If melo cannot read the key, it says what to do:

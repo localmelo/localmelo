@@ -125,6 +125,31 @@ async def test_a_listing_for_another_address_is_refused_before_any_request(
     assert asked == [] and reads(fake_keychain) == 0
 
 
+PROXY = "https://proxy.example/v1"
+
+
+@pytest.mark.parametrize("in_use", [True, False])
+@pytest.mark.parametrize("name", ["nvidia", "anthropic"])
+def test_a_switch_does_not_carry_a_proxys_variable_to_the_built_in_address(
+    fake_keychain: FakeSecurity, name: str, in_use: bool
+) -> None:
+    vendor = preset(name)
+    cfg = Config(chat_backend=name if in_use else "vllm", embedding_backend="none")
+    setattr(
+        cfg,
+        vendor.backend,
+        CloudVendorConfig(base_url=PROXY, api_key_env="MY_PROXY_TOKEN", chat_model="m"),
+    )
+    with mock.patch.dict(os.environ, {"MY_PROXY_TOKEN": "the-proxys-token"}):
+        before = hosted.api_key(vendor.backend, getattr(cfg, vendor.backend))
+        assert (before.address, before.key) == (PROXY, "the-proxys-token")
+
+        hosted.use_service(cfg, vendor, "m")
+
+        after = hosted.api_key(vendor.backend, getattr(cfg, vendor.backend))
+    assert after.address == vendor.base_url and after.key == ""
+
+
 def test_a_presets_own_variable_goes_only_to_its_address() -> None:
     section = CloudVendorConfig(api_key_env="OPENAI_API_KEY", base_url=EVIL)
     with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "from-the-environment"}):
@@ -133,7 +158,7 @@ def test_a_presets_own_variable_goes_only_to_its_address() -> None:
         assert caught.value.kind == "address"
         assert hosted.key_state("openai", section) == "address"
         section.base_url = ""
-        assert hosted.api_key("openai", section) == "from-the-environment"
+        assert hosted.api_key("openai", section).key == "from-the-environment"
 
 
 def test_a_key_saved_for_the_right_address_is_read(
@@ -143,7 +168,7 @@ def test_a_key_saved_for_the_right_address_is_read(
     section = CloudVendorConfig(
         api_key="keychain:localmelo.deepseek", base_url="https://api.deepseek.com/v1/"
     )
-    assert hosted.api_key("openai", section) == KEY
+    assert hosted.api_key("openai", section).key == KEY
     assert hosted.key_state("openai", section) == "keychain"
 
 
@@ -156,11 +181,11 @@ def test_a_free_form_key_is_kept_for_the_address_it_was_saved_with(
     fake_keychain.calls.clear()
 
     assert hosted.preset_key_state(other, GATEWAY_A + "/") == "keychain"
-    assert hosted.preset_key(other, GATEWAY_A) == KEY
+    assert hosted.preset_key(other, GATEWAY_A).key == KEY
     # Another address finds no key: the item is named by the address.
     assert hosted.service_for(other, GATEWAY_A) != hosted.service_for(other, GATEWAY_B)
     assert hosted.preset_key_state(other, GATEWAY_B) == "missing"
-    assert hosted.preset_key(other, GATEWAY_B) == ""
+    assert hosted.preset_key(other, GATEWAY_B).key == ""
     # And a section that names the item of one address, on another address, is refused.
     ref = keychain.ref_for(hosted.service_for(other, GATEWAY_A))
     section = CloudVendorConfig(api_key=ref, base_url=GATEWAY_B)
@@ -184,7 +209,7 @@ def test_a_preset_key_is_never_read_for_another_address(
     assert caught.value.kind == "address"
     assert hosted.preset_key_state(openai, EVIL) == "address"
     assert fake_keychain.calls == []  # no call to the keychain at all
-    assert hosted.preset_key(openai, openai.base_url) == KEY
+    assert hosted.preset_key(openai, openai.base_url).key == KEY
 
 
 # -- M4: several services at once, each with its last model --------------------
@@ -239,9 +264,9 @@ def test_the_section_takes_the_key_of_the_service_chosen_and_no_other(
         "",
         "keychain:localmelo.openai",
     )
-    assert hosted.api_key("openai", cfg.openai) == KEY + "2"
+    assert hosted.api_key("openai", cfg.openai).key == KEY + "2"
     hosted.use_service(cfg, preset("deepseek"), "deepseek-flash")
-    assert hosted.api_key("openai", cfg.openai) == KEY
+    assert hosted.api_key("openai", cfg.openai).key == KEY
 
 
 def test_a_service_with_a_section_of_its_own_keeps_its_section(

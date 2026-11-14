@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from typing import Final
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
-from localmelo.melo.contracts.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import REDACTED, redact_secrets
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support import config, hosted, keychain
 from localmelo.support.backends import discovery
@@ -39,6 +40,8 @@ CHAT_TIMEOUT_S: Final = 60.0
 MAX_MODELS: Final = 200
 # The longest model name that is kept.
 MAX_NAME: Final = 200
+# The most of a listing's answer that is read; a longer one is a failure, not a list.
+MAX_BODY: Final = 1024 * 1024
 # How long a listing is reused, so a menu opened again does not ask again.
 LISTING_TTL_S: Final = 60.0
 # The results, in the order the console words them.
@@ -94,8 +97,14 @@ class HostedCheck:
     tools: bool | None = None
 
 
-def failure(status: int | None, text: str) -> tuple[str, str]:
-    """The result code and detail for an HTTP *status* (or none) with body *text*."""
+def failure(status: int | None, text: str, key: str = "") -> tuple[str, str]:
+    """The result code and detail for an HTTP *status* (or none) with body *text*.
+
+    The *key* the request carried is cut out of *text* first, whatever its shape; the
+    patterns :func:`redact_secrets` knows come after.
+    """
+    if key:
+        text = text.replace(key, REDACTED)
     detail = redact_secrets(" ".join(text.split())[:200])[0]
     if status == 401:
         return WRONG_KEY, ""
@@ -118,25 +127,40 @@ async def list_models(
     A service with no list answers 404 or 405, which is no failure: the list
     is empty and the chat decides.
     """
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    # An uncompressed answer: nothing to inflate past the limit below.
+    headers = {"Accept-Encoding": "identity"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     try:
-        async with httpx.AsyncClient(
-            timeout=LIST_TIMEOUT_S, transport=transport, follow_redirects=False
-        ) as client:
-            response = await client.get(f"{address}/models", headers=headers)
+        # The whole request, not each phase, is bounded; so is the answer that is read.
+        async with (
+            asyncio.timeout(LIST_TIMEOUT_S),
+            httpx.AsyncClient(
+                timeout=LIST_TIMEOUT_S, transport=transport, follow_redirects=False
+            ) as client,
+            client.stream("GET", f"{address}/models", headers=headers) as response,
+        ):
+            status = response.status_code
+            if status in (404, 405, 501):  # no list: the chat decides
+                return [], None
+            raw = bytearray()
+            async for chunk in response.aiter_bytes():
+                raw += chunk
+                if len(raw) > MAX_BODY:
+                    return [], HostedCheck(
+                        False, ERROR, status=status, detail="TooLarge"
+                    )
+    except TimeoutError:
+        return [], HostedCheck(False, TIMEOUT, detail="TimeoutError")
     except httpx.TimeoutException as exc:
         return [], HostedCheck(False, TIMEOUT, detail=type(exc).__name__)
     except httpx.RequestError as exc:
         return [], HostedCheck(False, UNREACHABLE, detail=type(exc).__name__)
-    if response.status_code in (404, 405, 501):
-        return [], None
-    if response.status_code >= 300:  # a redirect is never followed
-        result, detail = failure(response.status_code, response.text)
-        return [], HostedCheck(
-            False, result, status=response.status_code, detail=detail
-        )
+    if status >= 300:  # a redirect is never followed
+        result, detail = failure(status, raw.decode("utf-8", "replace"), key)
+        return [], HostedCheck(False, result, status=status, detail=detail)
     try:
-        body = response.json()
+        body = json.loads(raw)
     except ValueError:
         return [], None
     names = (name.removeprefix("models/") for name in discovery.parse_model_ids(body))
@@ -256,12 +280,14 @@ async def service_models(
     if state not in (hosted.ENV, hosted.KEYCHAIN):
         return Listing(False)
     try:
-        key = hosted.preset_key(preset, address)
+        credential = hosted.preset_key(preset, address)
     except keychain.KeychainError as exc:
         return Listing(True, check=HostedCheck(False, f"keychain_{exc.kind}"))
-    if not key:
+    if not credential.key:
         return Listing(False)
-    models, failed = await (listings or LISTINGS).get(address, key, transport=transport)
+    models, failed = await (listings or LISTINGS).get(
+        credential.address, credential.key, transport=transport
+    )
     return Listing(True, tuple(models), failed)
 
 
@@ -279,13 +305,13 @@ async def check_hosted(
     backend = cfg.chat_backend
     section: config.CloudVendorConfig = getattr(cfg, backend)
     try:
-        key = hosted.api_key(backend, section)
+        credential = hosted.api_key(backend, section)
     except keychain.KeychainError as exc:
         return HostedCheck(False, f"keychain_{exc.kind}")
-    if not key:
+    if not credential.key:
         return HostedCheck(False, NO_KEY)
     models, failed = await list_models(
-        hosted.address_of(backend, section), key, transport=transport
+        credential.address, credential.key, transport=transport
     )
     if failed is not None:
         return failed
@@ -301,7 +327,7 @@ async def check_hosted(
     except TimeoutError:
         return HostedCheck(False, TIMEOUT, models=tuple(models))
     except ProviderError as exc:
-        result, detail = failure(exc.status_code, str(exc))
+        result, detail = failure(exc.status_code, str(exc), credential.key)
         return HostedCheck(
             False, result, models=tuple(models), status=exc.status_code, detail=detail
         )

@@ -516,7 +516,7 @@ See [Memory](memory.md).
   name of lowercase letters, digits, `-` and `_`); any other value is refused.
 - A key goes only to its own service. A built-in service's key is read only for
   its own address; "Other" keeps one item per address
-  (`localmelo.other-<12 hex digits>`). A reference whose item belongs to another
+  (`localmelo.other-<32 hex digits>`). A reference whose item belongs to another
   address stops the run with `This key was saved for another service or address`,
   before any request. An item `localmelo.other` from an earlier version is not used.
 - `[services.<id>]` tables (`chat_model`; `base_url` for `other`; `backend` for
