@@ -734,12 +734,6 @@ button:hover:not(:disabled) {
   object-fit: contain;
   margin: 0 auto 12px;
 }
-.eyebrow {
-  font-size: var(--text-caption);
-  font-weight: 600;
-  color: var(--ink-3);
-  margin: 0 0 12px;
-}
 .welcome > h2 {
   font-size: var(--text-display);
   line-height: 1.25;
@@ -2358,7 +2352,6 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .activity-step-time { color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .activity-output { max-height: 6.4em; margin: 8px 0 0; padding: var(--space-2) var(--space-3); overflow: hidden; border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font: var(--text-caption)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--space-3); }
-.activity-level { max-width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
 .activity-open { margin-left: auto; font-size: var(--text-small); }
 .approval-fold { padding: 0 8px 8px 50px; }
 .approval-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-3); font-size: var(--text-caption); }
@@ -2561,7 +2554,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
   .panel-backdrop { position: fixed; inset: 0; z-index: calc(var(--layer-sheet) - 1); display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
+  .panel-chip, .activity-head, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
 }
 /* Settings: the sections on the left, the chosen one on the right; on a phone the list, and the section as a sheet. */
 dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); max-height: none; padding: 0; overflow: hidden; }
