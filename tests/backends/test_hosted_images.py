@@ -36,7 +36,7 @@ def section(model: str, base_url: str = "") -> CloudVendorConfig:
         ("openai", "gpt-3.5-turbo", "", None),
         ("gemini", "gemini-2.0-flash", "", True),
         ("gemini", "models/gemini-2.0-flash", "", True),
-        ("anthropic", "claude-sonnet-4-20250514", "", True),
+        ("anthropic", "claude-sonnet-5-5", "", True),
         ("anthropic", "claude-3-5-haiku-latest", "", True),
         ("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct", "", False),
         ("nvidia", "meta/llama-3.2-90b-vision-instruct", "", None),
@@ -80,7 +80,11 @@ def test_a_suggested_model_that_reads_images_is_declared_for_each_service() -> N
     }
     assert reading["openai"] == ["gpt-4o", "gpt-4o-mini"]
     assert reading["gemini"] == ["gemini-2.0-flash"]
-    assert reading["anthropic"] == ["claude-sonnet-4-20250514"]
+    assert reading["anthropic"] == [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-haiku-5-5",
+    ]
     assert reading["nvidia"] == []
     assert reading["deepseek"] == ["deepseek-flash"]
     assert reading["other"] == []
@@ -100,7 +104,7 @@ def config_for(backend: str, model: str, base_url: str = "") -> Config:
     [
         ("openai", "gpt-4o", "", True),
         ("gemini", "gemini-2.0-flash", "", True),
-        ("anthropic", "claude-sonnet-4-20250514", "", True),
+        ("anthropic", "claude-sonnet-5-5", "", True),
         ("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct", "", False),
         ("openai", "deepseek-flash", DEEPSEEK, True),
         ("openai", "deepseek-v4-pro", DEEPSEEK, False),
@@ -167,7 +171,7 @@ async def test_a_provider_built_without_a_declaration_asks_as_before() -> None:
     ("backend", "model", "base_url", "sent"),
     [
         ("openai", "gpt-4o", "", True),
-        ("anthropic", "claude-sonnet-4-20250514", "", True),
+        ("anthropic", "claude-sonnet-5-5", "", True),
         ("openai", "deepseek-flash", DEEPSEEK, True),
         ("openai", "deepseek-v4-pro", DEEPSEEK, False),
     ],
