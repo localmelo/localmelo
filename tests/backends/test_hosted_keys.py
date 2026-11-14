@@ -85,6 +85,46 @@ def test_a_section_whose_key_belongs_to_another_address_is_refused_before_a_read
     )
 
 
+def test_a_chat_provider_is_not_built_with_a_key_for_another_address(
+    fake_keychain: FakeSecurity,
+) -> None:
+    from localmelo.support.backends.registry import get_backend
+
+    keychain.write("localmelo.openai", KEY)
+    fake_keychain.calls.clear()
+    keychain._cache.clear()
+    cfg = Config(chat_backend="openai", embedding_backend="none")
+    cfg.openai = CloudVendorConfig(
+        api_key="keychain:localmelo.openai", base_url=EVIL, chat_model="m"
+    )
+
+    with pytest.raises(keychain.KeychainError) as caught:
+        get_backend("openai").build_chat_provider(cfg)
+
+    assert caught.value.kind == "address" and reads(fake_keychain) == 0
+
+
+async def test_a_listing_for_another_address_is_refused_before_any_request(
+    fake_keychain: FakeSecurity,
+) -> None:
+    from localmelo.support import hosted_check
+
+    keychain.write("localmelo.openai", KEY)
+    fake_keychain.calls.clear()
+    keychain._cache.clear()
+    asked: list[str] = []
+
+    async def list_models(address: str, key: str, **_: Any) -> tuple[list[str], None]:
+        asked.append(address)
+        return ["m"], None
+
+    with mock.patch.object(hosted_check, "list_models", list_models):
+        found = await hosted_check.service_models(preset("openai"), EVIL)
+
+    assert found.check is not None and found.check.result == "keychain_address"
+    assert asked == [] and reads(fake_keychain) == 0
+
+
 def test_a_presets_own_variable_goes_only_to_its_address() -> None:
     section = CloudVendorConfig(api_key_env="OPENAI_API_KEY", base_url=EVIL)
     with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "from-the-environment"}):
