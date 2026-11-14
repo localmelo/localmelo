@@ -143,6 +143,12 @@ async def list_models(
             status = response.status_code
             if status in (404, 405, 501):  # no list: the chat decides
                 return [], None
+            # A compressed answer would be inflated before the size is known: refused unread.
+            if response.headers.get("content-encoding", "").strip().lower() not in (
+                "",
+                "identity",
+            ):
+                return [], HostedCheck(False, ERROR, status=status, detail="Encoded")
             raw = bytearray()
             async for chunk in response.aiter_bytes():
                 raw += chunk

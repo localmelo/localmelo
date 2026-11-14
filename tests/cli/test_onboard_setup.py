@@ -2084,7 +2084,7 @@ def test_a_keychain_that_cannot_be_used_says_why_and_falls_back_to_a_variable(
     assert fake_keychain.items == {}
 
 
-def test_a_vendor_section_that_pointed_at_a_proxy_keeps_nothing_of_the_proxy(
+def test_the_setup_keeps_a_key_only_for_the_address_it_belongs_to(
     fake_keychain: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def proxied() -> Config:
@@ -2118,6 +2118,36 @@ def test_a_vendor_section_that_pointed_at_a_proxy_keeps_nothing_of_the_proxy(
         assert onboard._onboard_hosted(cfg, "nvidia")
     found = hosted.api_key("nvidia", cfg.nvidia)
     assert (found.address, found.key) == (hosted.BY_ID["nvidia"].base_url, SECRET)
+
+    # "Other" at one address with a variable the person named: another address does not keep it,
+    # the same address spelled another way does.
+    def other_at_a() -> Config:
+        cfg = Config(chat_backend="openai")
+        cfg.openai.base_url = "https://gw-a.example/v1"
+        cfg.openai.api_key_env = "MY_GW_TOKEN"
+        cfg.openai.chat_model = "m"
+        return cfg
+
+    for typed, kept in (
+        ("https://gw-b.example/v1", False),
+        ("HTTPS://GW-A.example/v1/", True),
+    ):
+        cfg = other_at_a()
+        capsys.readouterr()
+        # With the key kept: Enter keeps it, Enter takes the model; else the variable's row, its name, a model.
+        answers = (
+            _Answers(typed, "", "")
+            if kept
+            else _Answers(typed, "2", "GW_B_TOKEN", "", "m2")
+        )
+        with (
+            mock.patch.dict("os.environ", {"MY_GW_TOKEN": "gateway-a-token"}),
+            mock.patch("builtins.input", answers),
+            mock.patch.object(onboard, "_confirm", return_value=True),
+        ):
+            assert onboard._onboard_hosted(cfg, "other")
+        assert ("Keep the key melo already has" in capsys.readouterr().out) is kept
+        assert cfg.openai.api_key_env == ("MY_GW_TOKEN" if kept else "GW_B_TOKEN")
 
 
 def test_a_saved_key_is_kept_by_enter(config_path: Path, fake_keychain: Any) -> None:

@@ -235,7 +235,9 @@ async def test_a_listing_is_one_get_that_never_follows_a_redirect_and_cleans_nam
     assert models == [] and failed is not None and failed.status == 302
 
 
-async def test_a_listing_answer_past_the_byte_limit_is_a_failure_not_a_list() -> None:
+async def test_a_listing_answer_past_the_limit_or_compressed_is_a_failure_not_a_list() -> (
+    None
+):
     big = {"data": [{"id": f"model-{i}"} for i in range(hosted_check.MAX_BODY // 8)]}
     assert len(json.dumps(big)) > hosted_check.MAX_BODY
 
@@ -247,6 +249,26 @@ async def test_a_listing_answer_past_the_byte_limit_is_a_failure_not_a_list() ->
 
     assert models == [] and failed is not None and failed.result == "error"
     assert failed.status == 200
+
+    # An answer that is compressed although it was asked not to be is refused before it is read.
+    class Unread(httpx.AsyncByteStream):
+        entered = False
+
+        async def __aiter__(self) -> Any:
+            Unread.entered = True
+            yield b"x"
+
+    models, failed = await hosted_check.list_models(
+        BASE,
+        KEY,
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, headers={"content-encoding": "gzip"}, stream=Unread()
+            )
+        ),
+    )
+    assert models == [] and failed is not None and failed.result == "error"
+    assert failed.detail == "Encoded" and not Unread.entered
 
 
 @pytest.mark.parametrize("status", [403, 500])

@@ -261,6 +261,12 @@ def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
             if address:
                 break
             print("    Enter the service's address.")
+        # Another address is another service: the key or variable of the old one is not kept for it.
+        # (The same comparison as the keychain item's name: spelling, case and a trailing slash.)
+        if same_service and hosted.service_for(preset, address) != hosted.service_for(
+            preset, section.base_url
+        ):
+            same_service = False
         section.base_url = address
     else:
         section.base_url = preset.stored_url
