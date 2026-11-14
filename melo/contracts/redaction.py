@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from typing import Any, Final
+from typing import Any, Callable, Final  # noqa: UP035  # imports pinned by a test
 
 REDACTED: Final = "[redacted]"
 
@@ -143,20 +143,31 @@ def secret_spans(text: str) -> list[tuple[int, int]]:
     return sorted(spans)
 
 
-def redacted(value: Any) -> Any:
-    """*value* with every string in it (and in its lists) redacted."""
+def map_strings(value: Any, leaf: Callable[[str], str]) -> Any:
+    """*value* with *leaf* applied to every string in it: a list's items, a dict's
+    keys and values, at any depth. Any other value (a number, a tuple) is kept."""
     if isinstance(value, str):
-        return redact_secrets(value)[0]
+        return leaf(value)
+    if isinstance(value, dict):
+        return {
+            map_strings(key, leaf): map_strings(item, leaf)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [redacted(item) for item in value]
+        return [map_strings(item, leaf) for item in value]
     return value
+
+
+def redacted(value: Any) -> Any:
+    """*value* with every string in it (in its lists and dicts, keys too) redacted."""
+    return map_strings(value, lambda text: redact_secrets(text)[0])
 
 
 def _redact_pem(text: str) -> tuple[str, int]:
     """Pass 1 of :func:`redact_secrets`: the PEM private key blocks."""
     blocks = _pem_blocks(text)
     pieces = [(start, end, _pem_body(closed)) for start, end, closed in blocks]
-    return _splice(text, pieces), len(blocks)
+    return splice(text, pieces), len(blocks)
 
 
 def _pem_body(closed: bool) -> str:
@@ -200,8 +211,12 @@ def _pem_blocks(text: str) -> list[tuple[int, int, bool]]:
     ]
 
 
-def _splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
-    """*text* with each ``(start, end, replacement)`` of *pieces*, in order, put in."""
+def splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
+    """*text* with each ``(start, end, replacement)`` of *pieces*, in order, put in.
+
+    One join, not a copy of the text per piece. The pieces are used as given, not
+    sorted or merged: a caller whose places can overlap joins them first.
+    """
     parts: list[str] = []
     kept_from = 0
     for start, end, replacement in pieces:
@@ -214,7 +229,7 @@ def _splice(text: str, pieces: list[tuple[int, int, str]]) -> str:
 def _redact_codes(text: str) -> tuple[str, int]:
     """Pass 4 of :func:`redact_secrets`: the codes next to a keyword."""
     spans = _code_spans(text)
-    return _splice(text, [(start, end, REDACTED) for start, end in spans]), len(spans)
+    return splice(text, [(start, end, REDACTED) for start, end in spans]), len(spans)
 
 
 def _code_spans(text: str) -> list[tuple[int, int]]:

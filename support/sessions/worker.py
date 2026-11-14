@@ -11,8 +11,8 @@ import sys
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.redaction import redact_secrets, redacted
 
 if TYPE_CHECKING:
     from localmelo.melo.agent import Agent
@@ -23,13 +23,7 @@ if TYPE_CHECKING:
 
 def redact_worker(value: Any) -> Any:
     """Redact text throughout a JSON-shaped worker record."""
-    if isinstance(value, str):
-        return redact_secrets(value)[0]
-    if isinstance(value, dict):
-        return {redact_worker(key): redact_worker(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [redact_worker(item) for item in value]
-    return value
+    return redacted(value)
 
 
 def sensitive_read(

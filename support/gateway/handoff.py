@@ -42,8 +42,8 @@ from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import cue
 from localmelo.melo.agent._checkpoint import standing
-from localmelo.melo.checker.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.attachments import words_before_files
+from localmelo.melo.contracts.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.sign_in import spent
 from localmelo.melo.contracts.task_files import written_paths
 from localmelo.melo.schema import (

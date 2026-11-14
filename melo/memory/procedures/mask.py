@@ -1,9 +1,10 @@
 """A minimal mask for credentials in what procedural memory keeps.
 
 ``procedures.db`` keeps each routine's query text and each tool call's
-label. Both pass :func:`~localmelo.melo.checker.redaction.redact_secrets`
-(key shapes, bearer tokens, one-time codes) and then
-:func:`mask_credentials`, which also replaces with :data:`MASK`:
+label. Both go through :func:`redact_and_mask`:
+:func:`~localmelo.melo.contracts.redaction.redact_secrets` (key shapes, bearer
+tokens, one-time codes), then :func:`mask_credentials`, which also replaces
+with :data:`MASK`:
 
 - a URL's password: ``postgres://app:pw@host`` becomes
   ``postgres://app:<redacted>@host``; the user name stays;
@@ -22,6 +23,8 @@ from __future__ import annotations
 
 import re
 from typing import Final
+
+from localmelo.melo.contracts.redaction import redact_secrets
 
 MASK: Final = "<redacted>"
 
@@ -47,3 +50,8 @@ def mask_credentials(text: str) -> str:
         return text
     text = _URL_PASSWORD.sub(lambda match: f"{match.group(1)}{MASK}@", text)
     return _NAMED_SECRET.sub(lambda match: f"{match.group(1)}{MASK}", text)
+
+
+def redact_and_mask(text: str) -> str:
+    """*text* through :func:`redact_secrets`, then :func:`mask_credentials`."""
+    return mask_credentials(redact_secrets(text)[0])

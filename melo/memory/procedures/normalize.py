@@ -24,9 +24,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.memory.bm25 import BM25Index
-from localmelo.melo.memory.procedures.mask import mask_credentials
+from localmelo.melo.memory.procedures.mask import redact_and_mask
 
 DATE: Final = "<date>"
 TIME: Final = "<time>"
@@ -169,20 +168,17 @@ def key_for_routine(name: str, query: str = "") -> RoutineKey:
 def query_text_of(query: str) -> str:
     """The text a routine keeps for *query*.
 
-    Secrets are redacted (:func:`redact_secrets`, then
-    :func:`~.mask.mask_credentials`) before normalizing, whose lowercasing
-    and date masks would hide a key's shape, and again after; the text is
-    cut to :data:`MAX_QUERY_TEXT` characters. The key still hashes the
-    query without redaction.
+    Secrets are redacted (:func:`~.mask.redact_and_mask`) before normalizing,
+    whose lowercasing and date masks would hide a key's shape, and again after;
+    the text is cut to :data:`MAX_QUERY_TEXT` characters. The key still hashes
+    the query without redaction.
     """
-    redacted, _ = redact_secrets(query)
-    return stored_query_text(normalize_query(mask_credentials(redacted)))
+    return stored_query_text(normalize_query(redact_and_mask(query)))
 
 
 def stored_query_text(normalized: str) -> str:
     """*normalized* as a routine keeps it: redacted, masked, then cut."""
-    redacted, _ = redact_secrets(normalized)
-    return mask_credentials(redacted)[:MAX_QUERY_TEXT]
+    return redact_and_mask(normalized)[:MAX_QUERY_TEXT]
 
 
 def run_place(root: str | None) -> str:

@@ -657,7 +657,7 @@ async def main_async(
             if choice.warning:
                 out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
             if factory.mcp_error:
-                from localmelo.melo.checker.redaction import redact_secrets
+                from localmelo.melo.contracts.redaction import redact_secrets
 
                 problem = redact_secrets(factory.mcp_error)[0]
                 out.print(

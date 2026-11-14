@@ -59,8 +59,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import FileStamp, edited_files
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.gateway.front_rules import asks_tests
 from localmelo.support.sessions.store import SessionStore, StoredEvent, iter_events
 from localmelo.support.words import LANGUAGES, t_in

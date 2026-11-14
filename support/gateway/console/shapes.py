@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import request_gist
 from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
@@ -19,6 +18,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.events import json_safe_payload
 from localmelo.melo.contracts.folders import OutsideAccess
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.review import ActionReview, review_title
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions import display

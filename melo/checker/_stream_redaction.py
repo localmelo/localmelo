@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker.redaction import (
+from localmelo.melo.contracts.redaction import (
     BEARER_WORD,
     PEM_BEGIN,
     PEM_END,

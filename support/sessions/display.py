@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import POINT_TYPING, WEB_PORTS
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
 from localmelo.support.words import said, said_in

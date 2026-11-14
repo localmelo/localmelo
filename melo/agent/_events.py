@@ -14,10 +14,10 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.checker.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.approvals import call_key
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
 from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.contracts.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.tools import NO_EFFECT
 from localmelo.melo.executor.models import ExecutionOutcome
 from localmelo.melo.executor.preview import call_preview

@@ -20,9 +20,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts import shell_lexer
-from localmelo.melo.memory.procedures.mask import mask_credentials
+from localmelo.melo.memory.procedures.mask import redact_and_mask
 
 READ: Final = "R"
 WRITE: Final = "W"
@@ -372,10 +371,9 @@ def label_for(tool_name: str, arguments: Any) -> str:
 def clean_label(label: str) -> str:
     """*label* redacted and masked, on one line, cut to :data:`MAX_LABEL` characters.
 
-    See :func:`redact_secrets` and :func:`~.mask.mask_credentials`.
+    See :func:`~.mask.redact_and_mask`.
     """
-    redacted, _ = redact_secrets(" ".join(label.split()))
-    return mask_credentials(redacted)[:MAX_LABEL]
+    return redact_and_mask(" ".join(label.split()))[:MAX_LABEL]
 
 
 def target_for(tool_name: str, arguments: Any, label: str) -> str | None:

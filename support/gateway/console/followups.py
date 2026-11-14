@@ -69,7 +69,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.support.gateway.i18n import said, t_in
 from localmelo.support.sessions.store import (
     SessionBusyError,

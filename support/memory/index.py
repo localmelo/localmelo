@@ -39,7 +39,7 @@ from typing import Any, Final, NamedTuple
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.checker.redaction import redact_secrets, secret_spans
+from localmelo.melo.contracts.redaction import redact_secrets, secret_spans, splice
 from localmelo.melo.contracts.sign_in import password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
@@ -315,13 +315,7 @@ def _places(text: str) -> list[tuple[int, int]]:
 def _left_out(text: str, spans: list[tuple[int, int]]) -> str:
     """*text* with each of *spans* (merged where they overlap) replaced by the mark
     :data:`_LEFT_OUT`."""
-    parts: list[str] = []
-    kept_from = 0
-    for start, end in _merged(spans):
-        parts += [text[kept_from:start], _LEFT_OUT]
-        kept_from = end
-    parts.append(text[kept_from:])
-    return "".join(parts)
+    return splice(text, [(start, end, _LEFT_OUT) for start, end in _merged(spans)])
 
 
 def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:

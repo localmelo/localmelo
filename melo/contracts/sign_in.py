@@ -74,7 +74,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from localmelo.melo.contracts.attachments import is_file_tag
-from localmelo.melo.contracts.redaction import REDACTED, secret_spans
+from localmelo.melo.contracts.redaction import REDACTED, secret_spans, splice
 
 # The words that say a value is a password.
 CUES: Final = ("password", "passwd", "pwd", "pw", "密码", "口令")
@@ -348,15 +348,10 @@ def _values(text: str) -> list[tuple[int, int]]:
 
 
 def _splice(text: str, spans: Sequence[tuple[int, int]], marks: Sequence[str]) -> str:
-    """*text* with each span, in order, replaced by its mark: one join, not a copy
-    of the text per span."""
-    parts: list[str] = []
-    at = 0
-    for (start, end), mark in zip(spans, marks, strict=True):
-        parts += (text[at:start], mark)
-        at = end
-    parts.append(text[at:])
-    return "".join(parts)
+    """*text* with each span, in order, replaced by its mark (see :func:`splice`)."""
+    return splice(
+        text, [(a, b, mark) for (a, b), mark in zip(spans, marks, strict=True)]
+    )
 
 
 def merged_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:

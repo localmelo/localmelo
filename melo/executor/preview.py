@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 
 # Characters a preview keeps; a longer one ends in "...".
 PREVIEW_CHARS = 200

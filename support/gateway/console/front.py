@@ -73,9 +73,9 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import TOOL_ASK
 from localmelo.melo.contracts.attachments import words_before_files
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.review import TITLES
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (

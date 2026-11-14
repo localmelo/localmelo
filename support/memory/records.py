@@ -46,7 +46,7 @@ from typing import Any, Final
 
 import numpy as np
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import SPENT, password_spans
 from localmelo.melo.memory.bm25 import tokenize
 from localmelo.melo.memory.hippo.policy import (
@@ -588,7 +588,7 @@ def number_spans(text: str) -> list[tuple[int, int]]:
     without both: an expiry date, a security code or an order number may stand next to
     a card. The part kept holds 13 to 19 digits and no line break, and with more than
     one group starts with a group of four or more digits. It is for a reader that
-    takes text out by its place, as :func:`~localmelo.melo.checker.redaction.secret_spans`
+    takes text out by its place, as :func:`~localmelo.melo.contracts.redaction.secret_spans`
     is: a number alone on a line, or one that crosses a line, belongs to no sentence.
 
     A dot or a dash separates a card's digits only in the form

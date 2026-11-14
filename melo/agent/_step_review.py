@@ -48,7 +48,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
 
-from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import has_cjk
 from localmelo.melo.checker.review.model import (
     CHAT_REQUESTS,
@@ -86,6 +85,7 @@ from localmelo.melo.checker.review.posting import (
 )
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.attachments import words_before_files
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     DIRENV_SUBJECT,
@@ -374,7 +374,7 @@ def holds_secret(arguments: Mapping[str, Any], preview: str = "") -> bool:
     """Whether a step's *arguments* or *preview* hold a secret by melo's detectors.
 
     A key or token shape, a bearer token, a code next to its word or a private
-    key (:func:`~localmelo.melo.checker.redaction.redact_secrets`), and an
+    key (:func:`~localmelo.melo.contracts.redaction.redact_secrets`), and an
     address's password or a value named as a secret (``token=…``,
     :func:`~localmelo.melo.memory.procedures.mask.mask_credentials`).
     """

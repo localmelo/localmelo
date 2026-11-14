@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Final
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.redaction import redact_secrets
 from localmelo.melo.schema import split_thinking
 
 # The newest turns the block shows, and the characters of each side of a turn.
