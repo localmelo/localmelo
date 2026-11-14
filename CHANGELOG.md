@@ -104,6 +104,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 - Finished tasks no longer pile up under the main chat: only work that is still going is kept in sight there.
 - Settings says less: a row is its title and its control, and the layout explains it; only what a person must know before choosing (where search words go, what still asks, what a missing helper blocks) stays in words.
+- A switch in Settings takes the click anywhere on it. Before, only a spot at its top-left corner reacted, so a switch could look stuck.
 - After an update, the app and `melo` no longer keep using the gateway of the version before: an idle one is replaced when they start, and one with work in it is left until it is idle.
 - The web console and the macOS app speak 简体中文, with times and dates written the Chinese way.
 - Melo the Akita lives in the app, the console and on your desktop: it wakes, types, rests and plays, and raises a paw when something waits for you.

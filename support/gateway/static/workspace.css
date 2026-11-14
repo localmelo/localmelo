@@ -2612,7 +2612,10 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-test p[data-state="error"] { color: var(--error); }
 /* The switch is a checkbox: the track is drawn beside it, and the checkbox keeps the focus and the state. */
 .st-switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
-.st-switch input { position: absolute; inset: -10px -6px; width: auto; height: auto; margin: 0; opacity: 0; cursor: pointer; }
+/* The checkbox takes the click for the whole switch and a margin around it. It needs a width and a height (a
+   checkbox keeps its own small size when only its edges are set) and it lies above the track, which comes after
+   it and is positioned too: without either, only a corner outside the track reacts. */
+.st-switch input { position: absolute; z-index: 1; top: -10px; left: -6px; width: calc(100% + 12px); height: calc(100% + 20px); margin: 0; opacity: 0; cursor: pointer; }
 .st-track { position: relative; width: 40px; height: 24px; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); transition: background-color var(--motion), border-color var(--motion); }
 .st-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform var(--motion), background-color var(--motion); }
 .st-switch input:checked + .st-track { border-color: var(--accent); background: var(--accent); }
