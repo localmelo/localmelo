@@ -40,7 +40,7 @@ import aiosqlite
 import numpy as np
 
 from localmelo.melo.contracts.redaction import redact_secrets, secret_spans, splice
-from localmelo.melo.contracts.sign_in import password_spans
+from localmelo.melo.contracts.sign_in import merged_spans, password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
     create_private_file,
@@ -308,25 +308,17 @@ _PASSES: Final = 8
 
 def _places(text: str) -> list[tuple[int, int]]:
     """The place of every secret in *text* as given, in order: a password's value, what
-    the redaction replaces, a card or ID number. Overlapping places are one."""
-    return _merged([*password_spans(text), *secret_spans(text), *number_spans(text)])
+    the redaction replaces, a card or ID number. Places that overlap or touch are one.
+    """
+    return merged_spans(
+        [*password_spans(text), *secret_spans(text), *number_spans(text)]
+    )
 
 
 def _left_out(text: str, spans: list[tuple[int, int]]) -> str:
-    """*text* with each of *spans* (merged where they overlap) replaced by the mark
+    """*text* with each of *spans* (joined where they overlap or touch) replaced by the mark
     :data:`_LEFT_OUT`."""
-    return splice(text, [(start, end, _LEFT_OUT) for start, end in _merged(spans)])
-
-
-def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """*spans* in order, each run of overlapping ones as one span."""
-    merged: list[tuple[int, int]] = []
-    for start, end in sorted(spans):
-        if merged and start < merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-    return merged
+    return splice(text, [(start, end, _LEFT_OUT) for start, end in merged_spans(spans)])
 
 
 def _clean_once(text: str) -> str:
@@ -373,7 +365,7 @@ def _title_once(title: str, named: bool) -> str:
     """One pass of :func:`cleaned_title`: the places of the title's secrets, and with
     *named* what a title that names a password or a code may give of it, are cut."""
     found = [*_places(title), *(named_secret_spans(title) if named else ())]
-    places = _merged([place for place in found if place[0] < place[1]])
+    places = merged_spans([place for place in found if place[0] < place[1]])
     # The reader of passwords takes a mark for a value and gives part of it
     # ("[left"): a place that reaches into a mark holds the whole mark, so the
     # mark stays one.
