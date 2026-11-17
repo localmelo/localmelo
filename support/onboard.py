@@ -15,9 +15,11 @@ from localmelo.support import config, hosted, hosted_check, keychain, melo_serve
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_family import (
     LOCAL_BACKENDS,
+    LOCAL_ROWS,
     LOCAL_SERVERS,
     USUAL_URL,
 )
+from localmelo.support.backends.registry import row_in_use
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
 from localmelo.support.server_setup import listing, run, terminal
 from localmelo.support.words import t_in
@@ -65,12 +67,12 @@ def _confirm(prompt: str = "Save and continue?") -> bool:
 
 # ── Backend choice lists ──
 
-# The local servers are the rows of backends/openai_family.py; a hosted service
-# is a preset (support/hosted.py).
+# The local servers are the rows of backends/openai_family.py (oMLX and vLLM
+# are two rows of the vllm backend); a hosted service is a preset (support/hosted.py).
 _LOCAL = {server.key: server for server in LOCAL_SERVERS}
 
 CHAT_BACKENDS: list[tuple[str, str]] = [
-    *[(server.key, server.menu) for server in LOCAL_SERVERS],
+    *LOCAL_ROWS,
     *[(p.id, p.label) for p in hosted.PRESETS if p.id == p.backend],
 ]
 
@@ -82,7 +84,7 @@ SETUP_CHOICES: list[tuple[str, str]] = [
 ]
 
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
-    *[(server.key, server.menu) for server in LOCAL_SERVERS],
+    *LOCAL_ROWS,
     ("none", "None (no search by meaning)"),
 ]
 
@@ -93,14 +95,15 @@ EMBEDDING_BACKENDS: list[tuple[str, str]] = [
 def _onboard_local(cfg: config.Config, key: str) -> bool:
     """Local (OpenAI-compatible) chat backend setup: URL and model name.
 
-    The defaults are the section's current values, else the backend's.
+    *key* is a row of the server list. The defaults are the section's current
+    values, else the backend's.
     """
-    server, section = _LOCAL[key], getattr(cfg, key)
+    server = _LOCAL[config.backend_key(key)]
+    section = getattr(cfg, server.key)
     default_url = section.chat_url or server.url
     default_model = section.chat_model or server.chat_model
 
-    name = "oMLX or vLLM" if key == "vllm" else key
-    print(f"\n  -- {name} (local endpoint) --\n")
+    print(f"\n  -- {dict(LOCAL_ROWS)[key]} --\n")
 
     url = _ask("Base URL", default_url)
     model = _ask("Chat model name", default_model)
@@ -285,7 +288,7 @@ def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
 # ── Chat backend setup dispatch ──
 
 _CHAT_SETUP: dict[str, Callable[[config.Config], bool]] = {
-    key: partial(_onboard_local, key=key) for key in _LOCAL
+    key: partial(_onboard_local, key=key) for key, _ in LOCAL_ROWS
 }
 _CHAT_SETUP.update(
     {p.id: partial(_onboard_hosted, preset_id=p.id) for p in hosted.PRESETS}
@@ -317,9 +320,11 @@ def backend_defaults() -> dict[str, dict[str, str]]:
 def _onboard_embedding_local(cfg: config.Config, key: str) -> None:
     """Set up a local embedding endpoint: URL and model name.
 
-    The defaults are the section's current values, else the backend's.
+    *key* is a row of the server list. The defaults are the section's current
+    values, else the backend's.
     """
-    server, section = _LOCAL[key], getattr(cfg, key)
+    server = _LOCAL[config.backend_key(key)]
+    section = getattr(cfg, server.key)
     default_url = section.embedding_url or server.url
     default_model = section.embedding_model or server.embedding_model
 
@@ -428,7 +433,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     # The default is the saved backend (a hosted one by its service: DeepSeek,
     # not the openai backend it shares); with none saved, the declined server's
     # kind, as the first run would save it (see _with_chat_server).
-    default_chat = cfg.chat_backend
+    default_chat = row_in_use(cfg)
     saved_section = getattr(cfg, default_chat, None)
     saved_service = (
         hosted.preset_for(default_chat, saved_section)
@@ -439,13 +444,15 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         default_chat = saved_service.id
     if default_chat not in chat_keys and declined is not None:
         ollama = asyncio.run(discovery.is_ollama(declined.url))
-        default_chat = "ollama" if ollama else "vllm"
+        omlx = discovery.is_omlx(declined.url)
+        default_chat = "ollama" if ollama else config.OMLX_ALIAS if omlx else "vllm"
     current_chat = chat_keys.index(default_chat) + 1 if default_chat in chat_keys else 1
     choice = _ask_choice("Chat backend", chat_display, default=current_chat)
     selected_chat_key = SETUP_CHOICES[choice - 1][0]
     service = hosted.get(selected_chat_key)
     # A hosted service is saved in its backend's section (DeepSeek in openai).
-    selected_backend = service.backend if service is not None else selected_chat_key
+    row = service.backend if service is not None else selected_chat_key
+    selected_backend = config.backend_key(row)
 
     handler = _CHAT_SETUP.get(selected_chat_key)
     if handler is None:
@@ -464,15 +471,14 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     # ── 2. Embedding backend ──
     # The chat backend is needed before the embedding question: its own
     # server's listed models become extra options.
-    cfg.chat_backend = selected_backend
+    cfg.pick(row)
     emb_keys = [key for key, _ in EMBEDDING_BACKENDS]
     choices: list[EmbeddingChoice] = []
     if cfg.has_embedding:
         # A working embedding setup keeps today's menu and defaults, and
         # sends no listing: the saved model may not be on the chat server.
-        current_emb = (
-            cfg.embedding_backend if cfg.embedding_backend in emb_keys else "none"
-        )
+        in_use = row_in_use(cfg, embedding=True)
+        current_emb = in_use if in_use in emb_keys else "none"
         default_emb = emb_keys.index(current_emb) + 1
     else:
         models: list[str] = []
@@ -511,7 +517,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         else:
             print("\n  No embedding: melo remembers across chats by words.")
 
-    cfg.embedding_backend = selected_emb_key
+    cfg.pick(selected_emb_key, embedding=True)
 
     if not _run_probes(cfg, retry=lambda: handler(cfg)):
         return None

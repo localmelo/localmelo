@@ -10,7 +10,8 @@ Adding a local backend: a row below, and a ``LocalBackendConfig`` field of the
 same name on :class:`localmelo.support.config.Config`. Adding a hosted one: a
 :class:`~localmelo.support.hosted.Preset` whose id is its backend, and a
 ``CloudVendorConfig`` field. A server that needs its own behaviour (Ollama's
-native chat, oMLX's label) subclasses :class:`LocalBackend`.
+native chat, oMLX's label) subclasses :class:`LocalBackend`. :data:`LOCAL_ROWS` are
+the lines a person picks a local server by: one per server, two for ``vllm``.
 
 This module stays light: the config imports it, so the HTTP providers are
 imported where a provider is built.
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
 
 # What a label or an error calls a server of the OpenAI-compatible kind.
 OPENAI_COMPATIBLE_NAME: Final = "OpenAI-compatible server"
+# The oMLX row's key: the config file's other spelling of "vllm" (one backend,
+# one [vllm] section).
+OMLX_ALIAS: Final = "omlx"
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,11 @@ class LocalBackend(BaseBackend):
     chat_model: str = ""
     embedding_model: str = ""
     template_kwargs: bool = False
+
+    @property
+    def rows(self) -> tuple[tuple[str, str], ...]:
+        """``(key, menu line)`` of each row a person picks this server by."""
+        return ((self.key, self.menu),)
 
     @property
     def detect_url(self) -> str:
@@ -160,10 +169,22 @@ class OllamaBackend(LocalBackend):
 
 
 class VllmBackend(LocalBackend):
-    """The key ``vllm`` stands for oMLX, vLLM and every other OpenAI-compatible server.
+    """oMLX, vLLM and every other OpenAI-compatible server: two rows, one backend.
 
-    ``chat_backend = "omlx"`` is the same backend, spelled so.
+    The oMLX row is ``chat_backend = "omlx"``, the vLLM row (any other such
+    server) ``"vllm"``; both edit the ``[vllm]`` section.
     """
+
+    @property
+    def rows(self) -> tuple[tuple[str, str], ...]:
+        return ((OMLX_ALIAS, "oMLX (local endpoint)"), *super().rows)
+
+    def row(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The oMLX row when the label says oMLX, so a row never contradicts it."""
+        from localmelo.support.backends import discovery
+
+        named = self.label(cfg, embedding=embedding) == discovery.OMLX_NAME
+        return OMLX_ALIAS if named else self.key
 
     def label(self, cfg: Config, *, embedding: bool = False) -> str:
         """``oMLX`` when the config says so or a listing of the server did."""
@@ -175,7 +196,7 @@ class VllmBackend(LocalBackend):
             declared = cfg.embedding_alias
         else:
             url, declared = section.chat_url, cfg.chat_alias
-        return discovery.server_name(url, declared=declared == "omlx")
+        return discovery.server_name(url, declared=declared == OMLX_ALIAS)
 
 
 class MeloServeBackend(LocalBackend):
@@ -263,12 +284,10 @@ LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
         chat_model="qwen3:8b",
         embedding_model="nomic-embed-text",
     ),
-    # A menu is drawn before any server is chosen, so its line cannot tell oMLX
-    # from vLLM; a banner can (see discovery.server_name).
     VllmBackend(
         "vllm",
         OPENAI_COMPATIBLE_NAME,
-        "oMLX or vLLM (OpenAI-compatible, local)",
+        "vLLM (local endpoint)",
         "http://localhost:8000/v1",
         template_kwargs=True,
     ),
@@ -290,6 +309,7 @@ LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
     ),
 )
 LOCAL_BACKENDS: Final = tuple(server.key for server in LOCAL_SERVERS)
+LOCAL_ROWS: Final = tuple(row for server in LOCAL_SERVERS for row in server.rows)
 # The address to suggest when no server was found: the OpenAI-compatible row's.
 USUAL_URL: Final = next(s for s in LOCAL_SERVERS if s.key == "vllm").detect_url
 

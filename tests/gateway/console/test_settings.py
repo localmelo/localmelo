@@ -76,12 +76,14 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
         {
             "key": key,
             "label": label,
-            "kind": "local" if key in LOCAL_BACKENDS else "cloud",
+            "kind": "cloud" if key in CLOUD_BACKENDS else "local",
+            "section": config.backend_key(key),
         }
         for key, label in onboard.CHAT_BACKENDS
     ]
     assert body["choices"]["embedding_backends"] == [
-        {"key": key, "label": label} for key, label in onboard.EMBEDDING_BACKENDS
+        {"key": key, "label": label, "section": config.backend_key(key)}
+        for key, label in onboard.EMBEDDING_BACKENDS
     ]
     assert body["errors"]
 
@@ -337,6 +339,41 @@ def test_put_settings_saves_a_backend_that_serves_its_own_model_with_none(
     saved = config.load().melo_serve
     assert (saved.chat_url, saved.chat_model) == (url, "")
     assert (saved.embedding_url, saved.embedding_model) == (url, "")
+
+
+@pytest.mark.parametrize(("before", "row"), [("vllm", "omlx"), ("omlx", "vllm")])
+def test_put_settings_writes_the_spelling_of_the_row_it_picks(
+    client: TestClient, isolated_config: Path, workspace: str, before: str, row: str
+) -> None:
+    """oMLX and vLLM are two rows of the vllm backend: only the spelling changes."""
+    url = "http://127.0.0.1:9/v1"
+    cfg = Config(
+        vllm=LocalBackendConfig(
+            chat_url=url, chat_model="m", embedding_url=url, embedding_model="e"
+        ),
+        gateway=GatewayConfig(workspace=workspace),
+    )
+    cfg.pick(before)
+    cfg.pick(before, embedding=True)
+    config.save(cfg)
+    text = isolated_config.read_text(encoding="utf-8")
+    resp = client.put(
+        "/api/settings",
+        json={
+            "chat_backend": "vllm",
+            "chat_choice": row,
+            "embedding_backend": "vllm",
+            "embedding_choice": row,
+            "workspace": workspace,
+            "sections": {},
+            "revision": client.get("/api/settings").json()["revision"],
+        },
+    )
+    assert resp.status_code == 200
+    assert (resp.json()["chat_choice"], resp.json()["embedding_choice"]) == (row, row)
+    assert isolated_config.read_text(encoding="utf-8") == text.replace(
+        f'"{before}"', f'"{row}"'
+    )
 
 
 def test_put_settings_conflict_on_stale_revision(

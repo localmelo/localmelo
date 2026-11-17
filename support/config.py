@@ -30,7 +30,11 @@ from localmelo.melo.schema import (
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
 )
-from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
+from localmelo.support.backends.openai_family import (
+    CLOUD_BACKENDS,
+    LOCAL_BACKENDS,
+    OMLX_ALIAS,
+)
 
 
 class ConfigError(Exception):
@@ -59,8 +63,6 @@ def config_path() -> str:
 # ``[<key>]`` section of Config.
 VALID_CHAT_BACKENDS = (*LOCAL_BACKENDS, *CLOUD_BACKENDS)
 VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
-# Another spelling of "vllm" that a config file may use for either backend.
-OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "compress")
 # Removed values of agent.reasoning: a config file that holds one reads as "legacy".
 REMOVED_REASONING_MODES = ("drop", "replay", "compress+replay")
@@ -637,6 +639,14 @@ class Config:
             return backend.has_embedding(self)
         except KeyError:
             return False
+
+    def pick(self, row: str, *, embedding: bool = False) -> None:
+        """Use the backend of the server-list *row* (``omlx``: ``vllm`` spelled so)."""
+        alias = row if row == OMLX_ALIAS else ""
+        if embedding:
+            self.embedding_backend, self.embedding_alias = backend_key(row), alias
+        else:
+            self.chat_backend, self.chat_alias = backend_key(row), alias
 
     def use_chat_server(
         self,
@@ -1573,8 +1583,8 @@ def _load_file() -> Config:
     # everything reads "vllm", and save() writes the spelling back.
     raw_chat = data.get("chat_backend", "")
     raw_emb = data.get("embedding_backend", "")
-    cfg.chat_backend = _backend_key(raw_chat)
-    cfg.embedding_backend = _backend_key(raw_emb)
+    cfg.chat_backend = backend_key(raw_chat)
+    cfg.embedding_backend = backend_key(raw_emb)
     cfg.chat_alias = raw_chat if raw_chat == OMLX_ALIAS else ""
     cfg.embedding_alias = raw_emb if raw_emb == OMLX_ALIAS else ""
 
@@ -1594,8 +1604,8 @@ def _load_file() -> Config:
     return cfg
 
 
-def _backend_key(raw: Any) -> Any:
-    """The backend a config file names; the ``omlx`` spelling reads as ``vllm``."""
+def backend_key(raw: Any) -> Any:
+    """The backend a config file or a server-list row names: ``omlx`` reads as ``vllm``."""
     return "vllm" if raw == OMLX_ALIAS else raw
 
 

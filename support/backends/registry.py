@@ -84,6 +84,13 @@ def in_use(cfg: Config, key: str, *, embedding: bool = False) -> tuple[str, str]
     return backend.in_use(cfg, embedding=embedding)
 
 
+def row_in_use(cfg: Config, *, embedding: bool = False) -> str:
+    """The server-list row *cfg* uses for the chat (or the embedding): a key or ``omlx``."""
+    key = cfg.embedding_backend if embedding else cfg.chat_backend
+    backend = find(key)
+    return key if backend is None else backend.row(cfg, embedding=embedding)
+
+
 def list_backends() -> list[BaseBackend]:
     """Return all registered backends in insertion order."""
     ensure_defaults_registered()

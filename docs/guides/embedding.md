@@ -126,7 +126,7 @@ python -m sglang.launch_server --model-path Qwen/Qwen3-Embedding-0.6B --is-embed
 curl -sS http://127.0.0.1:30001/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen/Qwen3-Embedding-0.6B", "input": "ping"}'
-melo setup    # Embedding backend: 4 (SGLang); URL http://localhost:30001/v1
+melo setup    # Embedding backend: 5 (SGLang); URL http://localhost:30001/v1
 ```
 
 MLC needs a compiled embedding artifact; a chat artifact does not serve embeddings. With `<artifact>` as the compiled Qwen3-Embedding directory:

@@ -323,6 +323,8 @@ file's revision.
 {
   "chat_backend": "mlc",
   "embedding_backend": "none",
+  "chat_choice": "mlc",
+  "embedding_choice": "none",
   "workspace": "~/localmelo-workspace",
   "sections": {
     "mlc": {"chat_url": "http://127.0.0.1:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "", "embedding_model": ""},
@@ -336,8 +338,8 @@ file's revision.
   },
   "errors": [],
   "choices": {
-    "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no search by meaning)"}],
+    "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local", "section": "mlc"}, {"key": "omlx", "label": "oMLX (local endpoint)", "kind": "local", "section": "vllm"}, {"key": "vllm", "label": "vLLM (local endpoint)", "kind": "local", "section": "vllm"}, {"key": "openai", "label": "OpenAI", "kind": "cloud", "section": "openai"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "section": "mlc"}, {"key": "none", "label": "None (no search by meaning)", "section": "none"}],
     "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
@@ -370,6 +372,11 @@ file's revision.
   `preset` (the id of the hosted service the section is).
 - `key` is also `address` when the key belongs to another service or address than the section sends to: it is then never read or sent.
 - `services` is what each hosted service you used remembers (`chat_model`, and `base_url` for `other`) and, under `local`, the last local server (`backend`); it is `{}` until a hosted service is involved. `keyed` lists the ids of the services that have a key now (their own variable or a keychain item), so the page knows whether the chat models are one list without asking.
+- `choices.chat_backends` and `choices.embedding_backends` are the rows of the
+  server lists; `section` is the backend a row saves and the `sections` entry it
+  edits. oMLX (`omlx`) and vLLM (`vllm`) are two rows of the `vllm` backend.
+  `chat_choice` and `embedding_choice` are the rows in use: `omlx` when the file
+  says `omlx` or the server's model listing names oMLX, else the backend.
 - `choices.hosted` lists the hosted services (the example shows one of six):
   their address, suggested models, the variable that held the key before the
   keychain, the reference a saved key gets, and whether the service has a
@@ -416,6 +423,11 @@ sessions.
   must not resolve to `/` or the home folder (including through a symlink);
   otherwise 400 `invalid_request`. `api_key_set` is not accepted in
   `sections`.
+- `chat_choice` and `embedding_choice` are optional: the row picked, which must
+  be a row of `chat_backend` (or `embedding_backend`; otherwise 400
+  `invalid_request`). It decides how the file spells the backend (`omlx` or
+  `vllm`), except that a server whose model listing names oMLX is written
+  `omlx`. Omitted, the file's `omlx` stays while the chat server is the same.
 - A cloud section may carry `api_key`, which must be empty or a
   `keychain:localmelo.<name>` reference (otherwise 400 `invalid_request`), and
   `thinking`, which must be `""`, `"on"` or `"off"`. The key itself is never

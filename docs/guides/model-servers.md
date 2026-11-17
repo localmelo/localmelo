@@ -118,7 +118,7 @@ To make oMLX your default, run `melo` in a terminal before any configuration is 
 With a configuration saved already, run step 5 first, so the model is loaded, then `melo setup`:
 
 - In default mode it offers the server it finds, with the first run's questions.
-- In the full menu (after `Use another server`, or in developer mode), choose oMLX or vLLM (`3`), enter `http://127.0.0.1:8000/v1` and the model id, and choose `5` (None) for embeddings unless oMLX also serves an embedding model.
+- In the full menu (after `Use another server`, or in developer mode), choose oMLX (`3`), enter `http://127.0.0.1:8000/v1` and the model id, and choose `7` (None) for embeddings unless oMLX also serves an embedding model.
 - [oMLX configuration](model-servers.md#omlx) shows the file it saves and the table that turns off a Qwen3 model's thinking; the web workspace then uses that model.
 
 ## Serve a model with Ollama
@@ -140,7 +140,7 @@ ollama pull qwen3:8b
 |---|---|---|---|---|
 | `ollama` | local | [Ollama](https://ollama.com) | `http://localhost:11434` (wizard) | yes |
 | `mlc` | local | [MLC LLM](https://llm.mlc.ai) | `http://localhost:8400/v1` (wizard) | yes |
-| `vllm` | local | [oMLX](https://github.com/jundot/omlx), [vLLM](https://docs.vllm.ai) or another OpenAI-compatible server | `http://localhost:8000/v1` (wizard) | yes |
+| `vllm` | local | [oMLX](https://github.com/jundot/omlx), [vLLM](https://docs.vllm.ai) or another OpenAI-compatible server: two rows in setup and Settings, oMLX (saved as `omlx`) and vLLM (any other such server) | `http://localhost:8000/v1` (wizard) | yes |
 | `sglang` | local | [SGLang](https://docs.sglang.ai) | `http://localhost:30000/v1` (wizard) | yes |
 | `melo_serve` | local | [melo_serve](https://github.com/localmelo/melo_serve) | `http://127.0.0.1:8321/v1` | yes |
 | `openai` | cloud | OpenAI API | `https://api.openai.com/v1` | no |

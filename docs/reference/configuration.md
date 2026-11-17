@@ -36,7 +36,7 @@ before the run with a plain message (see
 
 | Key | Table | Default | Description |
 |---|---|---|---|
-| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. `melo_serve` uses the [melo_serve](../guides/model-servers.md#melo_serve) daemon. Required. |
+| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). `omlx` is the oMLX row of setup and Settings and `vllm` the vLLM row, which also stands for any other OpenAI-compatible server: both load as the `vllm` backend with the one `[vllm]` table and are saved as written; first-run setup writes `omlx` for a server that names itself oMLX. `melo_serve` uses the [melo_serve](../guides/model-servers.md#melo_serve) daemon. Required. |
 | `embedding_backend` | top level | not set | `mlc`, `ollama`, `vllm`, `sglang`, `melo_serve` or `none`; `omlx` is accepted as `vllm`. Required. |
 | `request_timeout_s` | top level | not set | Chat request timeout in seconds; see [Chat request timeout](#chat-request-timeout). |
 | `chat_url` | local backend | not set | The model server's URL. |

@@ -245,11 +245,11 @@ server?`); choose `Use another server` for the full menu, which developer mode
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | Your server type, such as `2. Ollama (local endpoint)`: move with ↑ ↓ and press Enter, or press the number (piped: type it). The saved backend is selected first, else MLC (`1`). For oMLX or another OpenAI-compatible server, choose oMLX or vLLM (`3`). |
+| `Chat backend` | Your server type, such as `2. Ollama (local endpoint)`: move with ↑ ↓ and press Enter, or press the number (piped: type it). The saved backend is selected first, else MLC (`1`). For oMLX, choose oMLX (`3`); for vLLM or another OpenAI-compatible server, choose vLLM (`4`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Save these settings?` | Press Enter on `Save and continue`, or choose `Cancel setup` (piped: `Save and continue? [Y]:`). |
-| `Embedding backend` | `5. None (no search by meaning)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first selected; choosing one is enough. |
+| `Embedding backend` | `7. None (no search by meaning)`. Without a saved embedding, the chat server's own embedding models are appended as `8`, `9`, … with the first selected; choosing one is enough. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
 For a cloud API, choose the vendor. The wizard then asks for

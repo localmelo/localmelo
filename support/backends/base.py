@@ -41,6 +41,10 @@ class BaseBackend(abc.ABC):
         """
         return self.display_name
 
+    def row(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The key of the server-list row *cfg* uses this backend by."""
+        return self.key
+
     def welcome_note(self, label: str) -> str:
         """Words the terminal's welcome row shows beside the model; empty for none.
 
