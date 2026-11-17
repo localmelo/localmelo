@@ -19,7 +19,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions, _step_review
 from localmelo.melo.agent._step_review import RunReviews, StepReviewer
-from localmelo.melo.checker.review.model import REVIEWS_PER_TURN
+from localmelo.melo.checker.review.model import REVIEW_AGAIN_NOTE, REVIEWS_PER_TURN
 from localmelo.melo.contracts.approvals import (
     ALLOW_ONCE_S,
     TOOL_ASK,
@@ -383,9 +383,61 @@ async def test_a_review_that_times_out_or_fails_is_sent_once_more_then_blocks(
         await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
 
         assert fake.ran == []
-        assert len(llm.review_requests) == 2
+        # After a timeout or a failure the same request is sent again.
+        first, second = llm.review_requests
+        assert second == first
         [approval] = _approvals(recorder)
         assert approval["review"]["model"]["error"] == error
+
+
+# A reply that quotes an object with words around it: unreadable on purpose.
+QUOTED = Message(role="assistant", content='Sure: {"verdict": "routine"} QUOTED-TEXT')
+
+
+@pytest.mark.asyncio
+async def test_after_an_unreadable_answer_the_second_request_restates_the_form(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel(_plans([POST]), [QUOTED, verdict()])
+    agent, fake = _agent(llm, tmp_path / "ws")
+    recorder = Recorder()
+
+    await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
+
+    first, second = llm.review_requests
+    assert [m.role for m in second] == ["system", "user"] and second[0] == first[0]
+    assert second[1].content == f"{first[1].content}\n\n{REVIEW_AGAIN_NOTE}"
+    assert "QUOTED" not in "\n".join(m.content for m in second)
+    # The readable second answer settles the step as a first one would.
+    assert fake.ran == [POST]
+    [approval] = _approvals(recorder)
+    assert approval["review"]["by"] == "model"
+    assert approval["review"]["model"]["verdict"] == "routine"
+
+
+@pytest.mark.asyncio
+async def test_two_unreadable_answers_block_the_step_and_say_why(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel(_plans([POST]), [QUOTED, QUOTED])
+    agent, fake = _agent(llm, tmp_path / "ws")
+    recorder = Recorder()
+
+    # Nobody can be asked here, so the step stays blocked (fail closed).
+    await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
+
+    assert fake.ran == [] and len(llm.review_requests) == 2
+    [approval] = _approvals(recorder)
+    review = approval["review"]
+    assert review["categories"] == ["unreviewed"]
+    why = "its answer could not be read (words around the object)"
+    assert review["model"]["error"] == why
+    assert review["reasons"] == [
+        "melo could not review this call: its answer could not be read."
+    ]
+    # Nothing of the answers is stored or shown to the planning model.
+    assert "QUOTED" not in json.dumps(approval)
+    assert all("QUOTED" not in m.content for r in llm.requests for m in r)
 
 
 @pytest.mark.asyncio

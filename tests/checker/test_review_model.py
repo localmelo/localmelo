@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
 from localmelo.melo.checker.review.model import (
@@ -9,9 +11,11 @@ from localmelo.melo.checker.review.model import (
     MAX_REQUEST_CHARS,
     SYSTEM_PROMPT,
     ReviewInputs,
+    Unreadable,
     action_text,
     names,
     parse_reply,
+    read_reply,
     shares_a_name,
     step_names,
     user_message,
@@ -260,6 +264,27 @@ def test_each_message_draws_a_new_nonce() -> None:
 )
 def test_the_reply_is_read_strictly(reply: str, expected: ModelAnswer | None) -> None:
     assert parse_reply(reply) == expected
+
+
+@pytest.mark.parametrize(
+    ("reply", "kind"),
+    [
+        ("", "empty"),
+        ("<think>it reads a file</think>", "empty"),
+        ("Sure, that looks fine!", "not JSON"),
+        ('{"verdict": "routine", "reason": "cut off', "not JSON"),
+        ('Here: {"verdict": "ask"} done', "words around the object"),
+        ('{"verdict": "routine"} {"verdict": "ask"}', "words around the object"),
+        ('["routine"]', "not an object"),
+        ('{"verdict": "maybe"}', "no verdict"),
+    ],
+)
+def test_an_unreadable_reply_is_named_by_one_word_of_a_closed_set(
+    reply: str, kind: str
+) -> None:
+    # Only the word is kept: nothing of the reply reaches the record.
+    assert read_reply(reply) == kind and kind in get_args(Unreadable)
+    assert parse_reply(reply) is None
 
 
 def test_a_long_reason_is_cut() -> None:

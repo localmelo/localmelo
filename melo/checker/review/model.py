@@ -23,7 +23,7 @@ import re
 import secrets
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import ModelAnswer
@@ -52,7 +52,8 @@ MAX_RECALLED_CHARS: Final = 1_500
 REVIEWS_PER_TURN: Final = 12
 REVIEW_TIMEOUT_S: Final = 20.0
 # Requests one review makes before it counts as failed: a request that times
-# out, fails or answers in a form melo cannot read is sent once more.
+# out, fails or answers in a form melo cannot read is sent once more (after
+# an unreadable answer with REVIEW_AGAIN_NOTE added).
 REVIEW_TRIES: Final = 2
 # Earlier calls of the turn and earlier blocks of the chat the prompt lists.
 EARLIER_CALLS: Final = 5
@@ -138,6 +139,20 @@ Reply with one JSON object and nothing else:
  "user_asked": "yes" | "no",
  "reason": "<one sentence for the user, at most 160 characters, saying what the \
 action does>"}"""
+
+# Added to the user message when it is sent again after an answer that could
+# not be read: the format SYSTEM_PROMPT asks for, and nothing of that answer
+# (it can carry text of the action or a page).
+REVIEW_AGAIN_NOTE: Final = (
+    "Your last answer could not be read: reply with one JSON object and nothing "
+    "else, in the form given above."
+)
+
+# Why a reply could not be read, from a closed set: the record keeps this word,
+# never anything of the reply itself.
+Unreadable = Literal[
+    "empty", "not JSON", "words around the object", "not an object", "no verdict"
+]
 
 _VERDICTS: Final = frozenset({"routine", "ask"})
 _FITS: Final = frozenset({"yes", "no", "unclear"})
@@ -250,28 +265,36 @@ def user_message(inputs: ReviewInputs, nonce: str | None = None) -> str:
 
 
 def parse_reply(text: str) -> ModelAnswer | None:
-    """The reply as an answer, or ``None`` unless it is one JSON object.
+    """The reply as an answer, or ``None`` when it cannot be read (see :func:`read_reply`)."""
+    answer = read_reply(text)
+    return answer if isinstance(answer, ModelAnswer) else None
 
-    A ``<think>`` block and a code fence around the object are skipped;
-    anything else around it makes the reply unreadable (it could be an
-    object quoted from the action). ``verdict`` must be ``routine`` or
-    ``ask``; a missing or unknown ``fits_request`` reads ``unclear`` and a
-    missing or unknown ``user_asked`` reads ``no``, so neither can let a
-    call run by accident.
+
+def read_reply(text: str) -> ModelAnswer | Unreadable:
+    """The reply as an answer, or the word (:data:`Unreadable`) for why it cannot be read.
+
+    Only one JSON object reads. A ``<think>`` block and a code fence around
+    the object are skipped; anything else around it makes the reply
+    unreadable (it could be an object quoted from the action). ``verdict``
+    must be ``routine`` or ``ask``; a missing or unknown ``fits_request``
+    reads ``unclear`` and a missing or unknown ``user_asked`` reads ``no``,
+    so neither can let a call run by accident.
     """
     text = _THINK.sub("", text or "").strip()
     fenced = _FENCE.match(text)
     if fenced:
         text = fenced.group(1).strip()
+    if not text:
+        return "empty"
     try:
         value = json.loads(text)
     except (ValueError, RecursionError):
-        return None
+        return _not_one_value(text)
     if not isinstance(value, dict):
-        return None
+        return "not an object"
     verdict = value.get("verdict")
     if verdict not in _VERDICTS:
-        return None
+        return "no verdict"
     fits = value.get("fits_request")
     asked = value.get("user_asked")
     reason = " ".join(str(value.get("reason") or "").split())
@@ -284,6 +307,22 @@ def parse_reply(text: str) -> ModelAnswer | None:
         user_asked=str(asked) if asked in _ASKED else "no",
         reason=reason,
     )
+
+
+def _not_one_value(text: str) -> Unreadable:
+    """Why *text*, which is not one JSON value, cannot be read.
+
+    ``words around the object`` when an object starts at its first ``{``
+    (only a word for the record: such a reply never reads), else ``not JSON``.
+    """
+    start = text.find("{")
+    if start < 0:
+        return "not JSON"
+    try:
+        json.JSONDecoder().raw_decode(text, start)
+    except (ValueError, RecursionError):
+        return "not JSON"
+    return "words around the object"
 
 
 # Words of code and commands that name no target the user could have meant.
@@ -453,13 +492,16 @@ __all__ = [
     "MAX_ACTION_CHARS",
     "MAX_REQUEST_CHARS",
     "REVIEWS_PER_TURN",
+    "REVIEW_AGAIN_NOTE",
     "REVIEW_TIMEOUT_S",
     "REVIEW_TRIES",
     "SYSTEM_PROMPT",
     "ReviewInputs",
+    "Unreadable",
     "action_text",
     "names",
     "parse_reply",
+    "read_reply",
     "shares_a_name",
     "step_names",
     "user_message",
