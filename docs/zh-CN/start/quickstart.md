@@ -170,11 +170,11 @@ melo serve
 
 | 提示 | 输入内容 |
 |---|---|
-| `Chat backend` | 你的服务器类型，例如 `2. Ollama (local endpoint)`：用 ↑ ↓ 移动并按 Enter，或直接按数字键（管道输入时键入编号）。默认选中已保存的后端，否则为 MLC（`1`）。对于 oMLX 或其他 OpenAI 兼容服务器，选择 oMLX 或 vLLM（`3`）。 |
+| `Chat backend` | 你的服务器类型，例如 `2. Ollama (local endpoint)`：用 ↑ ↓ 移动并按 Enter，或直接按数字键（管道输入时键入编号）。默认选中已保存的后端，否则为 MLC（`1`）。对于 oMLX，选择 oMLX（`3`）；对于 vLLM 或其他 OpenAI 兼容服务器，选择 vLLM（`4`）。 |
 | `Base URL` | 服务器的 URL。按 Enter 接受方括号中显示的默认值：已保存的 URL，否则为该后端的常用地址。 |
 | `Chat model name` | 模型，例如 `qwen3:8b`。 |
 | `Save these settings?` | 在 `Save and continue` 上按 Enter，或选择 `Cancel setup`（管道输入时为 `Save and continue? [Y]:`）。 |
-| `Embedding backend` | `5. None (no search by meaning)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `6`、`7` 等追加，默认选中第一个；选择一个即可。 |
+| `Embedding backend` | `7. None (no search by meaning)`。尚未保存嵌入配置时，对话服务器自身的嵌入模型会作为 `8`、`9` 等追加，默认选中第一个；选择一个即可。 |
 | `Embedding endpoint URL`, `Embedding model name` | 仅当选择固定嵌入后端 `1`–`4` 之一，而不是检测到的模型时询问。 |
 
 对于云端 API，选择提供方。向导会改为询问 `API key env var`（你导出的变量名称）和 `Chat model`，而不是 `Base URL` 和 `Chat model name`。

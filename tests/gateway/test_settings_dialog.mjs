@@ -24,8 +24,10 @@ function fixture(overrides = {}) {
   return {
     chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws', revision: 'rev1', errors: [],
     choices: {
-      chat_backends: [{key: 'mlc', label: 'MLC', kind: 'local'}, {key: 'vllm', label: 'vLLM', kind: 'local'}, {key: 'openai', label: 'OpenAI', kind: 'cloud'}],
-      embedding_backends: [{key: 'mlc', label: 'MLC'}, {key: 'vllm', label: 'vLLM'}, {key: 'none', label: 'None'}],
+      chat_backends: [{key: 'mlc', label: 'MLC', kind: 'local'}, {key: 'omlx', label: 'oMLX', kind: 'local', section: 'vllm'},
+        {key: 'vllm', label: 'vLLM', kind: 'local', section: 'vllm'}, {key: 'openai', label: 'OpenAI', kind: 'cloud'}],
+      embedding_backends: [{key: 'mlc', label: 'MLC'}, {key: 'omlx', label: 'oMLX', section: 'vllm'}, {key: 'vllm', label: 'vLLM', section: 'vllm'},
+        {key: 'none', label: 'None'}],
       hosted: PRESETS,
     },
     sections: {
@@ -159,12 +161,13 @@ test('load, discover, save and notify with revision and only writable selected f
   await flush();
   assert.deepEqual(pickValues(h), ['first', 'second', ''], 'the server was asked without a click');
   await change(h, 's-chat-model', 'manual-model');
-  await change(h, 's-embed-backend', 'vllm', 'change');
+  // The oMLX row edits the vllm section and names itself as the row picked.
+  await change(h, 's-embed-backend', 'omlx', 'change');
   await change(h, 's-embed-model', 'manual-embedding');
   await change(h, 's-workspace', '/typed/but/not/used');
   await h.element('create-btn').emit('click');
   assert.deepEqual(h.calls.at(-1), {path: '/settings', options: {method: 'PUT', body: {
-    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '~/ws', revision: 'rev1', mode: 'default',
+    chat_backend: 'mlc', chat_choice: 'mlc', embedding_backend: 'vllm', embedding_choice: 'omlx', workspace: '~/ws', revision: 'rev1', mode: 'default',
     sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'manual-model'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'manual-embedding'}},
   }}}, 'the folder is saved by the Chats section, never with the connection');
   assert.equal(h.saved[0].revision, 'rev2');
@@ -456,7 +459,7 @@ test('connection test sends unsaved candidate and reports probe and request fail
   await change(h, 's-embed-backend', 'vllm', 'change');
   await h.element('settings-test').emit('click');
   assert.deepEqual(h.calls.at(-1), {path: '/settings/test', options: {method: 'POST', body: {
-    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '~/ws',
+    chat_backend: 'mlc', chat_choice: 'mlc', embedding_backend: 'vllm', embedding_choice: 'vllm', workspace: '~/ws',
     sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'draft'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'embed'}},
   }}});
   assert.equal(h.element('settings-test-status').textContent, 'Connected. Both models answered just now.');

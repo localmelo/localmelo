@@ -839,8 +839,8 @@ class TestRequestTimeoutConfig:
         import localmelo.support.onboard as onboard
 
         with (
-            # 2 = ollama in CHAT_BACKENDS, 6 = none in EMBEDDING_BACKENDS
-            mock.patch.object(onboard, "_ask_choice", side_effect=[2, 6]),
+            # 2 = ollama in CHAT_BACKENDS, 7 = none in EMBEDDING_BACKENDS
+            mock.patch.object(onboard, "_ask_choice", side_effect=[2, 7]),
             mock.patch.dict(onboard._CHAT_SETUP, {"ollama": setup_ollama}),
             mock.patch.object(onboard, "_run_probes", return_value=True),
             mock.patch("builtins.print"),
@@ -868,8 +868,8 @@ class TestRequestTimeoutConfig:
         import localmelo.support.onboard as onboard
 
         with (
-            # 3 = vllm in CHAT_BACKENDS, 6 = none in EMBEDDING_BACKENDS
-            mock.patch.object(onboard, "_ask_choice", side_effect=[3, 6]),
+            # 4 = vllm in CHAT_BACKENDS, 7 = none in EMBEDDING_BACKENDS
+            mock.patch.object(onboard, "_ask_choice", side_effect=[4, 7]),
             # Keep the saved [vllm] section as it is.
             mock.patch.dict(onboard._CHAT_SETUP, {"vllm": lambda cfg: True}),
             # "[r]etry, [s]ave anyway, [N]o" is answered with its default, No.
@@ -1272,6 +1272,8 @@ class TestOmlxSpelling:
 
     def test_it_is_saved_as_written(self, config_path: Path) -> None:
         config_path.write_text(_OMLX_FILE, encoding="utf-8")
+        save(load())
+        assert config_path.read_text(encoding="utf-8") == _OMLX_FILE
         cfg = load()
         cfg.vllm.chat_model = "Qwen3-32B-4bit"  # what /model does
         save(cfg)

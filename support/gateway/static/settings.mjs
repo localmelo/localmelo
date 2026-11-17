@@ -128,7 +128,10 @@ export function setupSettings({
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`),
     ...BROWSER_DRIVERS.map((name) => `s-browser-${name}`)];
   let settings = null;
+  // The drafts by section; a row of the server list edits its `section` (oMLX and vLLM both edit "vllm").
   let sections = {};
+  let homes = {};
+  const home = (key) => homes[key] ?? key;
   let generation = 0;
   let discoveryVersion = 0;
   let keyVersion = 0;
@@ -282,7 +285,7 @@ export function setupSettings({
   }
 
   function section(key) {
-    return sections[key] || (sections[key] = {});
+    return sections[home(key)] || (sections[home(key)] = {});
   }
 
   function drafts(loaded) {
@@ -292,12 +295,14 @@ export function setupSettings({
     replacing = false;
     removeArmed = null;
     // Only writable fields go back to the server; never copy api_key_set.
+    const rows = [...loaded.choices.chat_backends, ...loaded.choices.embedding_backends];
+    homes = Object.fromEntries(rows.map((choice) => [choice.key, choice.section ?? choice.key]));
     const local = loaded.choices.chat_backends.filter((choice) => choice.kind !== "cloud");
     for (const choice of local) {
       const fields = ["chat_url", "chat_model", "embedding_url", "embedding_model"];
-      const saved = loaded.sections[choice.key] || {};
-      const defaults = loaded.defaults[choice.key] || {};
-      sections[choice.key] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
+      const saved = loaded.sections[home(choice.key)] || {};
+      const defaults = loaded.defaults[home(choice.key)] || {};
+      sections[home(choice.key)] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
     }
     const on = savedPreset(loaded);
     for (const item of presets) {
@@ -320,11 +325,11 @@ export function setupSettings({
       };
     }
     if (on && KEY_STATES[sectionOf(loaded, on).key]) keychain.set(on.id, KEY_STATES[sectionOf(loaded, on).key]);
-    options(chat, [], on?.id ?? loaded.chat_backend, loaded.chat_backend ? "" : t("settings.chooseServer"), [
+    options(chat, [], on?.id ?? (loaded.chat_choice || loaded.chat_backend), loaded.chat_backend ? "" : t("settings.chooseServer"), [
       {label: t("settings.choose.local"), choices: local},
       {label: t("settings.choose.hosted"), choices: presets.map((item) => ({key: item.id, label: item.label}))},
     ]);
-    options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
+    options(embedding, loaded.choices.embedding_backends, loaded.embedding_choice || loaded.embedding_backend || "none");
     offered = "";
     offeredChat = [];
   }
@@ -498,26 +503,28 @@ export function setupSettings({
   function candidate() {
     const chatData = section(chat.value);
     const item = preset();
-    const selectedSections = {[item ? item.backend : chat.value]: item
+    const backend = item ? item.backend : home(chat.value);
+    const embed = home(embedding.value);
+    const selectedSections = {[backend]: item
       ? Object.fromEntries(CLOUD_FIELDS.map((field) => [field, String(chatData[field] ?? "")]))
       : {chat_url: chatData.chat_url, chat_model: chatData.chat_model}};
     if (embedding.value !== "none") {
       const data = section(embedding.value);
-      selectedSections[embedding.value] = {
-        ...selectedSections[embedding.value],
+      selectedSections[embed] = {
+        ...selectedSections[embed],
         embedding_url: data.embedding_url,
         embedding_model: data.embedding_model,
       };
     }
-    return {chat_backend: item ? item.backend : chat.value, embedding_backend: embedding.value, workspace: settings.workspace, sections: selectedSections};
+    return {chat_backend: backend, chat_choice: item ? item.backend : chat.value, embedding_backend: embed,
+      embedding_choice: embedding.value, workspace: settings.workspace, sections: selectedSections};
   }
 
   // Whether the form holds the connection that is saved now, field for field.
   function draftIsSaved() {
     if (!settings || !chat.value) return false;
-    const {chat_backend: backend, embedding_backend: embed, sections: fields} = candidate();
-    const now = savedConnection(settings);
-    return JSON.stringify([backend, embed, fields]) === JSON.stringify([now.chat_backend, now.embedding_backend, now.sections]);
+    const connection = (c) => JSON.stringify([c.chat_backend, c.chat_choice, c.embedding_backend, c.embedding_choice, c.sections]);
+    return connection(candidate()) === connection(savedConnection(settings));
   }
 
   // The connection as `loaded` saved it, for Undo: its writable fields only.
@@ -528,7 +535,8 @@ export function setupSettings({
     const pick = (data, names) => Object.fromEntries(names.map((name) => [name, String(data?.[name] ?? "")]));
     const out = {[backend]: pick(loaded.sections[backend], fields)};
     if (embed !== "none") out[embed] = {...out[embed], ...pick(loaded.sections[embed], ["embedding_url", "embedding_model"])};
-    return {chat_backend: backend, embedding_backend: embed, sections: out};
+    return {chat_backend: backend, chat_choice: loaded.chat_choice || backend, embedding_backend: embed,
+      embedding_choice: loaded.embedding_choice || embed, sections: out};
   }
 
   // --- what each section shows ------------------------------------------------------------------------------
@@ -573,7 +581,7 @@ export function setupSettings({
     else if (tested?.failed === "embedding") state("s-embed-state", "error", said("notAnswering"), {text: embedName, mono: true}, ago(tested.at));
     else state("s-embed-state", "busy", said("notChecked"), {text: embedName, mono: true});
 
-    const choice = settings.choices.chat_backends.find((item) => item.key === backend);
+    const choice = settings.choices.chat_backends.find((item) => item.key === (settings.chat_choice || backend));
     const hosted = savedPreset();
     $("s-server-address").textContent = !backend ? t("settings.server.none") : hosted ? saved.base_url || hosted.base_url || t("settings.server.ownAddress") : saved.chat_url || "";
     $("s-server-kind").textContent = !choice ? t("settings.server.chooseBelow")
@@ -1431,7 +1439,7 @@ export function setupSettings({
       modelStatus.textContent = words.needUrl;
       return;
     }
-    const params = new URLSearchParams({backend: chat.value, url: $("s-chat-url").value, model: $("s-chat-model").value});
+    const params = new URLSearchParams({backend: home(chat.value), url: $("s-chat-url").value, model: $("s-chat-model").value});
     discover.disabled = true;
     modelStatus.textContent = t("settings.discovering");
     try {

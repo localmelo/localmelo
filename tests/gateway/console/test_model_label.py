@@ -1,18 +1,19 @@
 """What the web console calls the model server: oMLX when it is one.
 
 ``model.backend_label`` of ``GET /api/health`` and the settings dropdown's
-entry for the ``vllm`` backend. Every request goes to an
+oMLX and vLLM rows of the ``vllm`` backend. Every request goes to an
 ``httpx.MockTransport``, so nothing reaches a model server.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from localmelo.support import onboard
+from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.config import Config, LocalBackendConfig
@@ -87,14 +88,34 @@ async def test_the_health_probes_listing_makes_the_label_omlx(
     assert model_json(cfg)["backend_label"] == "oMLX"
 
 
-def test_the_settings_dropdown_names_omlx_beside_vllm() -> None:
-    choices = settings_json()["choices"]
-    entry = "oMLX or vLLM (OpenAI-compatible, local)"
-    assert {"key": "vllm", "label": entry, "kind": "local"} in choices["chat_backends"]
-    assert {"key": "vllm", "label": entry} in choices["embedding_backends"]
-    # The other entries are unchanged.
+@pytest.mark.parametrize(
+    ("spelling", "listed", "row"),
+    [("omlx", False, "omlx"), ("vllm", False, "vllm"), ("vllm", True, "omlx")],
+    ids=["omlx-file", "vllm-file", "vllm-file-of-a-server-listed-as-omlx"],
+)
+def test_omlx_and_vllm_are_two_rows_of_one_section_and_one_is_in_use(
+    monkeypatch: pytest.MonkeyPatch, spelling: str, listed: bool, row: str
+) -> None:
+    path = Path(config.config_path())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'chat_backend = "{spelling}"\nembedding_backend = "{spelling}"\n\n'
+        f'[vllm]\nchat_url = "{URL}"\nchat_model = "m"\n'
+        f'embedding_url = "{URL}"\nembedding_model = "e"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(discovery, "is_omlx", lambda url: listed)
+    body = settings_json()
+    # The backend stays vllm; the row in use agrees with the label.
+    assert (body["chat_backend"], body["chat_choice"]) == ("vllm", row)
+    assert (body["embedding_backend"], body["embedding_choice"]) == ("vllm", row)
+    omlx = {"key": "omlx", "label": "oMLX (local endpoint)", "section": "vllm"}
+    vllm = {"key": "vllm", "label": "vLLM (local endpoint)", "section": "vllm"}
+    chat = body["choices"]["chat_backends"]
+    assert chat[2:4] == [{**omlx, "kind": "local"}, {**vllm, "kind": "local"}]
+    assert body["choices"]["embedding_backends"][2:4] == [omlx, vllm]
     assert {"key": "ollama", "label": "Ollama (local endpoint)", "kind": "local"} in (
-        choices["chat_backends"]
+        [{k: v for k, v in c.items() if k != "section"} for c in chat]
     )
 
 
@@ -103,16 +124,15 @@ def test_the_generic_kind_reads_in_the_page_s_language_and_names_stay_names() ->
         assert model_json(_cfg())["backend_label"] == "兼容 OpenAI 的服务器"
         assert model_json(_cfg(chat_alias="omlx"))["backend_label"] == "oMLX"
         choices = settings_json()["choices"]
-        entry = "oMLX 或 vLLM（兼容 OpenAI，本地）"
-        assert {"key": "vllm", "label": entry, "kind": "local"} in choices[
-            "chat_backends"
-        ]
-        assert {"key": "openai", "label": "OpenAI", "kind": "cloud"} in (
-            choices["chat_backends"]
+        labels = {c["key"]: c["label"] for c in choices["chat_backends"]}
+        assert (labels["omlx"], labels["vllm"]) == (
+            "oMLX（本地服务器）",
+            "vLLM（本地服务器）",
         )
-        assert {"key": "none", "label": "无（不按含义搜索）"} in choices[
-            "embedding_backends"
-        ]
+        assert labels["openai"] == "OpenAI"
+        assert {"key": "none", "label": "无（不按含义搜索）", "section": "none"} in (
+            choices["embedding_backends"]
+        )
     # A client that asks for no language, and the terminal's setup, read English.
     assert model_json(_cfg())["backend_label"] == GENERIC
     choices = settings_json()["choices"]

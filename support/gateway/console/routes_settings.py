@@ -47,7 +47,7 @@ from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.model_offer import check_chat_model, offer
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
-from localmelo.support.backends.registry import get_backend, in_use
+from localmelo.support.backends.registry import get_backend, in_use, row_in_use
 from localmelo.support.browser import chrome, desktop, driver_for_on
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
@@ -110,6 +110,11 @@ class _SettingsBaseBody(BaseModel):
 
     chat_backend: StrictStr
     embedding_backend: StrictStr
+    # The server-list row picked for the backend (``omlx`` or ``vllm`` for the
+    # vllm backend): it says how the file spells it. Absent keeps the spelling
+    # while the server is the same.
+    chat_choice: StrictStr | None = None
+    embedding_choice: StrictStr | None = None
     sections: dict[StrictStr, Any] = Field(default_factory=dict)
 
 
@@ -459,6 +464,9 @@ def settings_json() -> dict[str, Any]:
     return {
         "chat_backend": cfg.chat_backend,
         "embedding_backend": cfg.embedding_backend,
+        # The rows of choices.*_backends in use (oMLX and vLLM share a backend).
+        "chat_choice": row_in_use(cfg),
+        "embedding_choice": row_in_use(cfg, embedding=True),
         "workspace": ws or DEFAULT_WORKSPACE,
         "sections": sections,
         # What each hosted service remembers: its last model (and "Other"'s address).
@@ -472,12 +480,18 @@ def settings_json() -> dict[str, Any]:
                 {
                     "key": key,
                     "label": _choice_label(key, label),
-                    "kind": "local" if key in LOCAL_BACKENDS else "cloud",
+                    "kind": "cloud" if key in CLOUD_BACKENDS else "local",
+                    # The backend, and the section of ``sections`` the row edits.
+                    "section": config.backend_key(key),
                 }
                 for key, label in onboard.CHAT_BACKENDS
             ],
             "embedding_backends": [
-                {"key": key, "label": _choice_label(key, label)}
+                {
+                    "key": key,
+                    "label": _choice_label(key, label),
+                    "section": config.backend_key(key),
+                }
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
             "hosted": _hosted_choices(),
@@ -665,6 +679,15 @@ def _build_candidate(
     candidate.services = hosted.last_models(candidate)
     candidate.chat_backend = body.chat_backend
     candidate.embedding_backend = body.embedding_backend
+    for embedding, kind in ((False, "chat"), (True, "embedding")):
+        row = getattr(body, f"{kind}_choice")
+        if row is None:
+            continue
+        if config.backend_key(row) != getattr(body, f"{kind}_backend"):
+            raise ApiError(
+                400, "invalid_request", f"{kind}_choice: Not a row of {kind}_backend."
+            )
+        candidate.pick(row, embedding=embedding)
     candidate.gateway.workspace = body.workspace
     candidate.ui.mode = mode or _ui_mode(candidate)
     across = getattr(body, "across_chats", None)
@@ -719,14 +742,17 @@ def _build_candidate(
     return before, candidate
 
 
-def _spell_server(before: config.Config, candidate: config.Config) -> None:
+def _spell_server(
+    before: config.Config, candidate: config.Config, *, chosen: bool
+) -> None:
     """Spell a ``vllm`` chat backend ``omlx`` as the terminal's first run does.
 
-    The file's ``omlx`` stays only while the chat server is the one it named,
-    and a server whose last model listing named oMLX is written so.
+    A *chosen* row gave the spelling; without one, the file's ``omlx`` stays
+    only while the chat server is the one it named. A server whose last model
+    listing named oMLX is written so either way.
     """
     server = (candidate.chat_backend, candidate.vllm.chat_url)
-    if server != (before.chat_backend, before.vllm.chat_url):
+    if not chosen and server != (before.chat_backend, before.vllm.chat_url):
         candidate.chat_alias = ""
     onboard.spell_omlx(candidate)
 
@@ -1015,7 +1041,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.put("/api/settings")
     async def api_put_settings(body: SettingsPutBody) -> JSONResponse:
         before, candidate = _build_candidate(body, check_revision=body.revision)
-        _spell_server(before, candidate)
+        _spell_server(before, candidate, chosen=body.chat_choice is not None)
         changed = _changed_fields(before, candidate)
         await apply_settings(console, candidate, ",".join(changed) or "none")
         return JSONResponse(content=await asyncio.to_thread(settings_json))

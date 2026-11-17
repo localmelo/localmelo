@@ -89,7 +89,7 @@ def test_the_backend_list_starts_on_the_current_backend(
     with typed(monkeypatch, keys) as drawn:
         assert onboard._ask_choice("Chat backend", names, default=3) == chosen
     text = seen(drawn)
-    assert "Chat backend" in text and "❯ 3. oMLX or vLLM" in text
+    assert "Chat backend" in text and "❯ 3. oMLX (local endpoint)" in text
     assert "↑↓ select · enter confirm · esc cancel" in text
 
 

@@ -1074,11 +1074,11 @@ def test_enter_at_every_wizard_question_keeps_the_config(config_path: Path) -> N
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
     assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
     assert answers.prompts == [
-        "  Chat backend [3]: ",
+        "  Chat backend [4]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
         "  Save and continue? [Y]: ",
-        "  Embedding backend [6]: ",
+        "  Embedding backend [7]: ",
     ]
     assert not any("key" in prompt.lower() for prompt in answers.prompts)
 
@@ -1090,7 +1090,7 @@ def test_the_wizard_offers_the_chat_servers_embedding_model(
         return_value=["Qwen3-8B", "nomic-embed-text", "Qwen3-Embedding-0.6B"]
     )
     config.save(_configured())
-    answers = _Answers("", "", "", "", "7")
+    answers = _Answers("", "", "", "", "8")
     with (
         mock.patch("builtins.input", answers),
         mock.patch.object(onboard, "_run_probes", return_value=True),
@@ -1099,19 +1099,19 @@ def test_the_wizard_offers_the_chat_servers_embedding_model(
         cfg = run_backend_setup()
     assert cfg is not None
     assert answers.prompts == [
-        "  Chat backend [3]: ",
+        "  Chat backend [4]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
         "  Save and continue? [Y]: ",
-        "  Embedding backend [7]: ",
+        "  Embedding backend [8]: ",
     ]
     listing.assert_awaited_once_with("vllm", URL)
     assert (cfg.embedding_backend, cfg.vllm.embedding_url) == ("vllm", URL)
     assert cfg.vllm.embedding_model == "Qwen3-Embedding-0.6B"
     out = capsys.readouterr().out
     assert (
-        f"    [7] Qwen3-Embedding-0.6B on this server ({URL})\n"
-        f"    [8] nomic-embed-text on this server ({URL})\n"
+        f"    [8] Qwen3-Embedding-0.6B on this server ({URL})\n"
+        f"    [9] nomic-embed-text on this server ({URL})\n"
     ) in out
 
 
@@ -1126,7 +1126,7 @@ def test_the_wizard_saves_a_backend_that_serves_its_own_model_with_none(
             melo_serve=LocalBackendConfig(chat_url=URL),
         )
     )
-    answers = _Answers("", "", "", "", "7")  # the listed embedding model
+    answers = _Answers("", "", "", "", "8")  # the listed embedding model
     with (
         mock.patch("builtins.input", answers),
         mock.patch.object(onboard, "_run_probes", return_value=True),
@@ -1173,7 +1173,7 @@ def test_the_wizard_default_without_a_candidate_is_none(
     ):
         cfg = run_backend_setup()
     assert cfg is not None and cfg.embedding_backend == "none"
-    assert answers.prompts[4] == "  Embedding backend [6]: "
+    assert answers.prompts[4] == "  Embedding backend [7]: "
 
 
 def test_the_wizard_falls_back_when_the_listing_fails(
@@ -1192,11 +1192,11 @@ def test_the_wizard_falls_back_when_the_listing_fails(
         cfg = run_backend_setup()
     assert cfg is not None and cfg.embedding_backend == "none"
     assert answers.prompts == [
-        "  Chat backend [3]: ",
+        "  Chat backend [4]: ",
         f"  Base URL [{URL}]: ",
         "  Chat model name [Qwen3-8B]: ",
         "  Save and continue? [Y]: ",
-        "  Embedding backend [6]: ",
+        "  Embedding backend [7]: ",
     ]
     assert "Traceback" not in capsys.readouterr().out
 
@@ -1205,7 +1205,7 @@ def test_a_failed_wizard_embedding_probe_does_not_save_the_model(
     config_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config.save(_configured())
-    answers = _Answers("", "", "", "", "7")
+    answers = _Answers("", "", "", "", "8")
     with (
         mock.patch("builtins.input", answers),
         mock.patch.object(onboard, "probe_chat", mock.AsyncMock()),
@@ -1279,7 +1279,7 @@ def test_the_embedding_question_defaults_to_the_configs_backend(
 def test_without_a_config_the_wizard_offers_the_backends_defaults(
     config_path: Path,
 ) -> None:
-    answers = _Answers("3", "", "m", "", "")
+    answers = _Answers("4", "", "m", "", "")
     with (
         mock.patch("builtins.input", answers),
         mock.patch.object(onboard, "_run_probes", return_value=True),
@@ -1289,7 +1289,7 @@ def test_without_a_config_the_wizard_offers_the_backends_defaults(
         "  Chat backend [1]: ",
         "  Base URL [http://localhost:8000/v1]: ",
     ]
-    assert answers.prompts[4] == "  Embedding backend [6]: "
+    assert answers.prompts[4] == "  Embedding backend [7]: "
 
 
 def _probe_failure(status: int | None = None) -> ProbeError:
@@ -1307,7 +1307,7 @@ def test_retry_asks_again_with_what_was_typed(config_path: Path) -> None:
     chat = mock.AsyncMock(side_effect=[_probe_failure(), None])
     answers = _Answers(
         *(
-            "3",
+            "4",
             "http://127.0.0.1:9000/v1",
             "typo",
             "",
@@ -1534,7 +1534,7 @@ def test_the_cloud_wizard_offers_the_configs_key_and_model(config_path: Path) ->
     )
     # A variable the config already names stays the default key choice.
     assert answers.prompts[:4] == [
-        "  Chat backend [6]: ",
+        "  Chat backend [7]: ",
         "  API key [2]: ",
         "  API key env var [MY_OPENAI_KEY]: ",
         "  Chat model [1]: ",
@@ -1691,7 +1691,7 @@ def test_a_guided_reconfigure_shows_the_full_menu_after_no(
     cfg = _guided(answers, found=FoundServer(url=URL, models=["Qwen3-8B"]))
     assert cfg is not None
     assert answers.prompts[0] == "Use it? [Y/n]: "
-    assert answers.prompts[1] == "  Chat backend [3]: "
+    assert answers.prompts[1] == "  Chat backend [4]: "
     assert "  Save and continue? [Y]: " in answers.prompts
 
 
@@ -1709,7 +1709,7 @@ def test_a_guided_reconfigure_with_no_server_uses_the_full_backend_menu(
     answers = _Answers(*[""] * 10)
     cfg = _guided(answers, found=None)
     assert cfg is not None and cfg.chat_backend == "vllm"
-    assert answers.prompts[0] == "  Chat backend [3]: "
+    assert answers.prompts[0] == "  Chat backend [4]: "
     assert config_path.read_bytes() == before
     detect.assert_not_called()
     out = capsys.readouterr().out
@@ -1719,7 +1719,7 @@ def test_a_guided_reconfigure_with_no_server_uses_the_full_backend_menu(
 
 @pytest.mark.parametrize(
     ("saved", "ollama", "default"),
-    [(False, False, "3"), (False, True, "2"), (True, True, "3")],
+    [(False, False, "4"), (False, True, "2"), (True, True, "4")],
 )
 def test_a_declined_server_is_the_menus_default_unless_a_backend_is_saved(
     config_path: Path, saved: bool, ollama: bool, default: str
@@ -1738,31 +1738,34 @@ def test_a_declined_server_is_the_menus_default_unless_a_backend_is_saved(
 
 # ── oMLX in the menus and the saved file ──
 
-_VLLM_ENTRY = "oMLX or vLLM (OpenAI-compatible, local)"
 
-
-def test_the_backend_menus_name_omlx_with_vllm() -> None:
-    assert dict(onboard.CHAT_BACKENDS)["vllm"] == _VLLM_ENTRY
-    assert dict(onboard.EMBEDDING_BACKENDS)["vllm"] == _VLLM_ENTRY
-    assert dict(onboard.CHAT_BACKENDS)["ollama"] == "Ollama (local endpoint)"
-    assert dict(onboard.EMBEDDING_BACKENDS)["mlc"] == "MLC (local endpoint)"
-
-
-def test_the_wizard_shows_the_vllm_entry_as_omlx_or_vllm(
-    config_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("number", "spelling", "name"), [("3", "omlx", "oMLX"), ("4", "vllm", "vLLM")]
+)
+def test_the_wizard_saves_the_spelling_of_the_row_it_picks(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    number: str,
+    spelling: str,
+    name: str,
 ) -> None:
-    answers = _Answers("3", "", "m", "", "")
+    # The chat row, its address and model, Save, then the same row for embeddings.
+    answers = _Answers(number, "", "m", "", number, "", "e")
     with (
         mock.patch("builtins.input", answers),
         mock.patch.object(onboard, "_run_probes", return_value=True),
     ):
         run_backend_setup()
     out = capsys.readouterr().out
-    # The chat menu and the embedding menu both list it as entry 3.
-    assert out.count(f"    [3] {_VLLM_ENTRY}\n") == 2
-    assert "  -- oMLX or vLLM (local endpoint) --\n" in out
-    assert "[3] vLLM (local endpoint)" not in out
-    assert "-- vllm (local endpoint) --" not in out
+    # The chat menu and the embedding menu both list the two rows.
+    assert out.count("    [3] oMLX (local endpoint)\n") == 2
+    assert out.count("    [4] vLLM (local endpoint)\n") == 2
+    assert f"  -- {name} (local endpoint) --\n" in out
+    text = config_path.read_text(encoding="utf-8")
+    assert text.startswith(
+        f'chat_backend = "{spelling}"\nembedding_backend = "{spelling}"\n'
+    )
+    assert "\n[vllm]\n" in text and "[omlx]" not in text
 
 
 def test_the_other_local_backends_keep_their_wizard_heading(
@@ -1774,7 +1777,7 @@ def test_the_other_local_backends_keep_their_wizard_heading(
         mock.patch.object(onboard, "_run_probes", return_value=True),
     ):
         run_backend_setup()
-    assert "  -- mlc (local endpoint) --\n" in capsys.readouterr().out
+    assert "  -- MLC (local endpoint) --\n" in capsys.readouterr().out
 
 
 _OMLX_FILE = (
@@ -1965,7 +1968,7 @@ def _typed_secret(*keys: str) -> mock.Mock:
 
 def test_the_setup_list_offers_every_hosted_preset() -> None:
     names = [name for _, name in onboard.SETUP_CHOICES]
-    assert names[5:] == HOSTED_ROWS
+    assert names[6:] == HOSTED_ROWS
     for key, _ in onboard.SETUP_CHOICES:
         assert key in onboard._CHAT_SETUP, key
 
@@ -1976,7 +1979,7 @@ def test_the_setup_picker_saves_deepseek_with_its_key_in_the_keychain(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     answers = _Answers(
-        "10",  # Chat backend: DeepSeek
+        "11",  # Chat backend: DeepSeek
         "",  # API key: paste (the default, nothing saved yet)
         "",  # Chat model: deepseek-flash
         "",  # Save and continue?
@@ -2011,7 +2014,7 @@ def test_the_setup_picker_asks_the_address_of_other_and_the_model_by_name(
     config_path: Path, fake_keychain: Any
 ) -> None:
     answers = _Answers(
-        "11",  # Chat backend: Other (OpenAI format)
+        "12",  # Chat backend: Other (OpenAI format)
         "",  # the address: asked again when empty
         "https://llm.example.com/v1",
         "",  # API key: paste
@@ -2207,7 +2210,7 @@ def test_the_setup_picker_starts_on_the_saved_hosted_service(
         mock.patch("builtins.print"),
     ):
         run_backend_setup()
-    assert answers.prompts[0] == "  Chat backend [10]: "
+    assert answers.prompts[0] == "  Chat backend [11]: "
 
 
 @pytest.mark.parametrize(

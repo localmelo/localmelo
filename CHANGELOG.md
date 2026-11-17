@@ -159,6 +159,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - melo_serve is a local model server, and its model can be switched from every surface.
 - `melo serve` just works after the first run, and can run at login on macOS.
 - oMLX is supported and recommended on Apple silicon.
+- oMLX and vLLM are two rows in the server list of Settings and `melo setup`; the vLLM row also covers any other OpenAI-compatible server, and a saved config file stays as it is.
 
 ### Security
 
