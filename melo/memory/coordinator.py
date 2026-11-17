@@ -26,8 +26,6 @@ from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
 from localmelo.melo.schema import (
     SHORT_TERM_MAX,
-    TOOL_SEARCH_TOP_K,
-    Message,
     StepRecord,
     TaskRecord,
     ToolDef,
@@ -154,7 +152,6 @@ class Hippo:
         self,
         embedding: BaseEmbeddingProvider | None = None,
         short_term_max: int = SHORT_TERM_MAX,
-        tool_search_top_k: int = TOOL_SEARCH_TOP_K,
         *,
         history: History | None = None,
         long: LongTerm | None = None,
@@ -175,7 +172,6 @@ class Hippo:
         self.staged = StagedCandidates()
         self.policy = HippoPolicy()
         self._checker = Checker()
-        self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
         self.working = WorkingMemory(
             max_len=short_term_max,
@@ -603,54 +599,3 @@ class Hippo:
         await self.history.forget_all()
         await self.long.forget_all()
         self.staged.clear()
-
-    # ── Tool hint extraction (the model's tool calls only) ──
-
-    def extract_tool_hints(self, messages: list[Message]) -> list[str]:
-        """Return the names of the tools called in *messages*, in order.
-
-        Only structured tool calls count. A message that merely names a
-        tool — user text, a tool result, a memory or a reflection — adds
-        nothing, so a run's own text cannot expose a tool to the model.
-        This is a read-only scan — no tools are resolved or executed.
-        """
-        tool_hints: list[str] = []
-        for msg in messages:
-            for tc in msg.tool_calls:
-                if tc.tool_name and tc.tool_name not in tool_hints:
-                    tool_hints.append(tc.tool_name)
-        return tool_hints
-
-    # ── Level 2: Tool Resolution (BM25 over registry) ──
-
-    def resolve_tools(
-        self,
-        query: str,
-        hints: list[str] | None = None,
-        *,
-        exclude: Collection[str] = (),
-    ) -> list[ToolDef]:
-        """Return the registered tools that *hints* name, then BM25's matches.
-
-        The hinted tools come first, in hint order. Then come the best
-        ``tool_search_top_k`` matches of a BM25 search over *query*, less
-        the ones hinted already. The tools named in *exclude* take no part:
-        no hint resolves to them, and the search ranks the other tools
-        among themselves.
-        """
-        results: dict[str, ToolDef] = {}
-
-        for name in hints or []:
-            if name in exclude:
-                continue
-            td = self.tools.get(name)
-            if td:
-                results[td.name] = td
-
-        for td in self.tools.search(
-            query, top_k=self._tool_search_top_k, exclude=exclude
-        ):
-            if td.name not in results:
-                results[td.name] = td
-
-        return list(results.values())

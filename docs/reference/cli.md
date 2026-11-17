@@ -93,7 +93,6 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--context-window` | `-X agent.context_window=VALUE` |
 | `--output-reserve` | `-X agent.output_reserve=VALUE` |
 | `--safety-margin` | `-X agent.safety_margin=VALUE` |
-| `--tool-exposure` | `-X agent.tool_exposure=VALUE` |
 | `--retriever` | `-X retrieval.retriever=VALUE` |
 | `--recall-at` | `-X retrieval.recall_at=VALUE` |
 | `--recall-k` | `-X retrieval.k=VALUE` |
@@ -122,10 +121,10 @@ dot. `melo -h all` lists the keys with their defaults.
 - A key that has an old option becomes that option before parsing (see the table
   above): `-X retrieval.k=5` is `--recall-k 5`, with the same checks and refusals. Any
   other key (`cli.stream`, `scheduler.policy`...) overrides the config this process
-  loads, and a bad value exits 2 naming what the key allows. Eight settings are for one
+  loads, and a bad value exits 2 naming what the key allows. Seven settings are for one
   run only, so `-X` takes them and the file does not: `agent.attempt_policy`,
-  `agent.tool_exposure`, `memory.dir`, `memory.keep_decision_text`,
-  `retrieval.extra_body`, `endpoint.embedding_url`, `endpoint.embedding_model` and
+  `memory.dir`, `memory.keep_decision_text`, `retrieval.extra_body`,
+  `endpoint.embedding_url`, `endpoint.embedding_model` and
   `endpoint.reasoning_field`.
 - Five settings were removed, with their options: `agent.fixed_prefix`
   (`--fixed-prefix`), `agent.reflect_tool_guard` (`--reflect-tool-guard`),
@@ -137,6 +136,8 @@ dot. `melo -h all` lists the keys with their defaults.
   `memory.followup_query` was removed the same way (it has no option) and behaves as its
   default `"recent"` did. So were `agent.brief_items` (`--brief-items`),
   `agent.lean_output` and `agent.thinking_steps`: a run behaves as it did with the default.
+  `agent.tool_exposure` (`--tool-exposure`) was removed too: every step offers every
+  registered tool (see [How tools are offered](tools.md#how-tools-are-offered)).
 - `agent.answer_on_stop` is on by default (`-X agent.answer_on_stop=off` turns it off): it
   also answers a run whose request the server refused for a
   budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends
@@ -356,7 +357,6 @@ two equal.
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
 | `--note-writer` | experimental | #183 |
-| `--tool-exposure` | experimental | #3 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -435,10 +435,9 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `100` | The most planning steps the whole run may take (also `-s N`). |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts of `agent.steps_per_attempt` steps (50) with a reflection after each. `none`: one attempt of `--max-steps` steps, no reflection. `[agent] reflection = false` (**Reflect when stuck after many steps** in Settings, or `-X agent.reflection=off` for one run) gives `none` to every run that reads the config; this option keeps its say over it. |
-| `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
 | `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
-| `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
+| `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run, in the reasoning modes other than `legacy`; a `legacy` run has none. |
 | `--memory-dir DIR` | not set | Save history and procedural memory as SQLite files in `DIR`: `history.db` and `procedures.db`, and `long_term.db` in the reasoning modes other than `legacy`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
@@ -481,15 +480,14 @@ accepts the options named in [Interactive UI](#interactive-ui).
   is kept to ask once, without tools, for the final answer from the evidence, so the
   run sends `N - 1` requests and then that one. Both appear in `melo -h all`, and
   [Run results](run-results.md#statuses) says what the record holds.
-- `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
   `file_write`, `list_files`, `python_exec` and `shell_exec`. A direct run's default set
   leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
   it back on, and it then runs without an approval, because direct mode has
   no policy. `recall` is accepted only with `--recall-at tool`, which
   registers it; without that trigger it is a usage error.
-- `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
-  or `--tool-exposure`. See [Tools and MCP](../guides/tools-mcp.md#add-tools-from-mcp-servers).
+- `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`.
+  See [Tools and MCP](../guides/tools-mcp.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment
   variables say. `~` is expanded. See
   [Memory](../guides/memory.md#keep-memory-between-runs).
@@ -585,9 +583,8 @@ These options apply to `melo` without a task.
   win over the saved `[agent]` and `[retrieval]` defaults; retrieval settings
   stay inert in `legacy`, and explicit retrieval flags there are errors.
   A `--base-url` session takes these values from flags, not saved defaults.
-  `--tool-exposure` (the UI offers every tool), `--timeout`,
-  `--output-format`, `--progress`, `--routine` and `--keep-decision-text`
-  are usage errors; `--mcp-config` and `--mcp-only` are accepted.
+  `--timeout`, `--output-format`, `--progress`, `--routine` and
+  `--keep-decision-text` are usage errors; `--mcp-config` and `--mcp-only` are accepted.
 - For example, `melo --reasoning compress --retriever bm25 --note-writer heuristic`
   starts a session with short notes and recall. There is no `/reasoning`
   command: choose the mode when starting the process. `/model` and `/backend`
@@ -691,15 +688,15 @@ These are usage errors:
   with one line and no usage summary:
   `melo: --workspace: not a directory: DIR`;
 - options that cannot be combined: `--mcp-only` without `--mcp-config`,
-  `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
+  `--mcp-only` with `--builtins`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
 - a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
   or with `melo ""` (except `--builtins`, which the loop takes for its
   turns), reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
-  task, only those the interactive UI cannot use (`--tool-exposure`,
-  `--timeout`, `--output-format`, `--progress`, `--routine`);
+  task, only those the interactive UI cannot use (`--timeout`,
+  `--output-format`, `--progress`, `--routine`);
 - `-c` with `-r`, reported as `-c and -r cannot be combined`;
 - `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;

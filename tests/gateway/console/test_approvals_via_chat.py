@@ -111,7 +111,6 @@ async def chat_console(
             llm,
             mode="gateway",
             builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
         )
         agent.executor.register("python_exec", ran.python_exec, requires_approval=True)
         return agent

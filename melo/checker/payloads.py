@@ -45,10 +45,9 @@ class SessionTransition:
 
 @dataclass
 class ToolResolutionResult:
-    """Result of tool resolution (BM25 / hint-based)."""
+    """Result of tool resolution: the names of the tools a step offers."""
 
     query: str = ""
-    hints: list[str] = field(default_factory=list)
     resolved_tool_names: list[str] = field(default_factory=list)
 
 

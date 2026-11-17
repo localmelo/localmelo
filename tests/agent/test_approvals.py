@@ -1,8 +1,8 @@
 """Approval policies in a run (Agent.run_task's approval) — no real model.
 
 Every run is scripted. ``deploy`` is a custom tool that requires approval
-and ``status`` one that does not, both offered on every step
-(``tool_exposure="all"``); history is in memory.
+and ``status`` one that does not, both offered on every step; history is in
+memory.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
     AllowAllPolicy,
@@ -298,7 +297,6 @@ def _agent(
 ) -> tuple[Agent, Tools]:
     """An agent with ``deploy`` (marked) and ``status``, and no waits."""
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     agent = Agent(llm=llm, options=AgentOptions(**options), tool_providers=providers)
     tools = tools or Tools()
     agent.hippo.register_tool(DEPLOY)
@@ -629,43 +627,6 @@ class TestWhoIsAsked:
         assert result.status == "completed"
         assert [request.tool_name for request in policy.requests] == ["browser_type"]
         assert ran == []
-
-    @pytest.mark.asyncio
-    async def test_retrieve_mode_asks_about_builtins_and_offered_tools_only(
-        self, tmp_path: Path
-    ) -> None:
-        # The query names no tool. Since C1 every step offers the built-ins,
-        # so file_write reaches the policy; release, which retrieval did not
-        # offer, is refused before anyone is asked.
-        target = tmp_path / "notes.txt"
-        write = {"path": str(target), "content": "hi"}
-        provider = ReleaseTools()
-        llm = ScriptedLLM(
-            [
-                _calls(
-                    ("file_write", write, "c1"), ("release", {"version": "2"}, "c2")
-                ),
-                _answer("done"),
-            ]
-        )
-        policy = Policy(ApprovalDecision(True))
-        agent = Agent(
-            llm=llm,
-            options=AgentOptions(tool_exposure="retrieve"),
-            tool_providers=[provider],
-        )
-
-        result = await agent.run_task("Tidy up", approval=policy)
-
-        assert result.status == "completed"
-        assert llm.offered[0] == sorted(DEFAULT_BUILTINS["python"])
-        assert [r.tool_name for r in policy.requests] == ["file_write"]
-        assert target.read_text() == "hi"
-        assert provider.ran == []
-        assert llm.tool_messages(1) == [
-            f"Written 2 bytes to {target}",
-            "Error: Tool 'release' was not offered in this step.",
-        ]
 
 
 # ── The request ─────────────────────────────────────────────────────────────

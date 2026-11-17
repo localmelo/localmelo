@@ -46,7 +46,6 @@ FLAG_OPTIONS: Final = (
     _flag("window_messages"),
     _flag("max_steps"),
     _flag("attempt_policy"),
-    _flag("tool_exposure"),
     _flag("memory", convert=_on),
     _flag("memory_dir"),
     _flag("timeout", "timeout_s"),

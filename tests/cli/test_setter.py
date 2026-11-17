@@ -46,7 +46,6 @@ ROWS: list[tuple[str, str, list[str], list[str]]] = [
     ("agent.context_window", "8192", ["--context-window", "8192"], []),
     ("agent.output_reserve", "512", ["--output-reserve", "512"], []),
     ("agent.safety_margin", "256", ["--safety-margin", "256"], []),
-    ("agent.tool_exposure", "all", ["--tool-exposure", "all"], []),
     ("retrieval.retriever", "bm25", ["--retriever", "bm25"], []),
     ("retrieval.recall_at", '["start", "step"]', ["--recall-at", "start,step"], []),
     ("retrieval.k", "2", ["--recall-k", "2"], []),
@@ -319,7 +318,7 @@ def test_keys_lists_value_default_and_source(
 def test_keys_lists_every_key_once_and_marks_one_run_only(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code, out, _ = _config(["keys", "-X", "agent.tool_exposure=all"], capsys)
+    code, out, _ = _config(["keys", "-X", "agent.attempt_policy=none"], capsys)
     names = [line.split()[0] for line in out.splitlines()[1:]]
     assert (
         code == 0
@@ -327,9 +326,9 @@ def test_keys_lists_every_key_once_and_marks_one_run_only(
         and len(set(names)) == len(names)
     )
     row = next(
-        r.split() for r in out.splitlines() if r.startswith("agent.tool_exposure")
+        r.split() for r in out.splitlines() if r.startswith("agent.attempt_policy")
     )
-    assert row[1:] == ['"all"', '"retrieve"', "-X", "(one", "run", "only)"]
+    assert row[1:] == ['"none"', '"reflect"', "-X", "(one", "run", "only)"]
     assert "chat_backend" not in names and "cli.reasoning_tags" not in names
 
 

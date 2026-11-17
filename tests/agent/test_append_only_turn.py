@@ -93,7 +93,6 @@ def _agent(tmp_path: Path, provider: Script, **options: Any) -> Agent:
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=True,
-            tool_exposure="all",
             attempt_policy="none",
             **options,
         ),

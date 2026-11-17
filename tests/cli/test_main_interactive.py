@@ -316,7 +316,6 @@ def test_the_ui_flags_are_refused_outside_the_ui(
     [
         (["--timeout", "5"], "--timeout"),
         (["--output-format", "json"], "--output-format"),
-        (["--tool-exposure", "all"], "--tool-exposure"),
         (["--progress", "off"], "--progress"),
         (["--routine", "daily"], "--routine"),
         (

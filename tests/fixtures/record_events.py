@@ -767,7 +767,7 @@ async def scenario_cancelled(env: Env) -> list[StoredEvent]:
         ),
         say("All three commands ran.", prompt=200),
     ]
-    async with session(env, replies, provider=provider, tool_exposure="all") as (
+    async with session(env, replies, provider=provider) as (
         _agent,
         runner,
         _llm,
@@ -788,7 +788,6 @@ async def scenario_images(env: Env) -> list[StoredEvent]:
             say("I took a screenshot of the page.", prompt=190, completion=12),
         ],
         provider=provider,
-        tool_exposure="all",
     ) as (_agent, runner, _llm):
         await runner.run_turn("Take a screenshot of the demo page.")
     return await recorded(env, runner)
@@ -821,7 +820,6 @@ async def scenario_escapes(env: Env) -> list[StoredEvent]:
             say("The page printed escape sequences.", prompt=190, completion=12),
         ],
         provider=provider,
-        tool_exposure="all",
     ) as (_agent, runner, _llm):
         await runner.run_turn("Print the demo page's raw output.")
     return await recorded(env, runner)
@@ -978,7 +976,6 @@ async def scenario_other_stop(env: Env) -> list[StoredEvent]:
         env,
         [reply(call(HOLD_TOOL, {}, "call_1"), prompt=140)],
         provider=provider,
-        tool_exposure="all",
     ) as (_agent, runner, _llm):
         await runner.start_turn("Run the long check.")
         await provider.hold_started.wait()

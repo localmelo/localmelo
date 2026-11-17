@@ -182,7 +182,6 @@ class TestToolResolution:
     def test_valid_resolution(self) -> None:
         r = ToolResolutionResult(
             query="list files",
-            hints=["file"],
             resolved_tool_names=["shell_exec", "file_read"],
         )
         result = validate_tool_resolution(r)

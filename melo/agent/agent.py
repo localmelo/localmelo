@@ -1107,11 +1107,10 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
 
     The providers of a config file come from
     :func:`localmelo.support.backends.providers_for`. ``options=AgentOptions(...)``
-    sets step budgets, the attempt policy, tool exposure, the built-in tools,
-    memory and a run timeout; the defaults keep the behavior from before
-    options existed,
-    except that every step now offers all registered built-ins and runs only
-    the tools it offered, and that a reflection decides on its own checks
+    sets step budgets, the attempt policy, the built-in tools, memory and a
+    run timeout; the defaults keep the behavior from before options existed,
+    except that every step offers every registered tool and runs only the
+    tools it offered, and that a reflection decides on its own checks
     whether the next attempt starts, a reply without a reflection does not
     stop the run, and an over-long reflection is trimmed (see
     :meth:`_run_reflective_attempts`).
@@ -1206,8 +1205,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         self._tools_failure: str | None = None
         # The names of the tools that the setup registered (see list_tools).
         self._provided_names: frozenset[str] = frozenset()
-        # Of those, the ones in a group, which "retrieve" offers on every step.
-        self._grouped_names: frozenset[str] = frozenset()
         # Of those, melo's own browser tools that ask their questions themselves:
         # the only calls the approval gate does not ask a second question about.
         self._self_asking_names: frozenset[str] = frozenset()
@@ -1756,9 +1753,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                     ),
                 )
             self._provided_names = frozenset(tool.definition.name for tool in provided)
-            self._grouped_names = frozenset(
-                tool.definition.name for tool in provided if tool.group
-            )
             # Both the provider's word and melo's list: a name alone does not
             # count, and a flag on any other name does nothing.
             self._self_asking_names = frozenset(
@@ -1902,16 +1896,12 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
     ) -> tuple[list[Message], list[ToolDef], str | None]:
         """Stage 1+2: resolve tools and run boundary checks.
 
-        With ``tool_exposure="retrieve"`` the tools are every registered
-        built-in, sorted by name, then the other tools that the model's
-        tool calls and BM25 resolve among themselves, also sorted by name;
-        with ``"all"`` they are every registered tool, sorted by name.
-        Either way, a tool the run's caller hides (``hide_tools``) and a tool
-        whose result said it takes no more calls in this run
-        (``ToolResult.no_more_calls``, the run's ``withdrawn`` set) are left
-        out. The second changes the tools part of the request once, at the
-        first step after the result: the prefix a server caches ends before it
-        from then on, which is accepted.
+        The tools are every registered tool, sorted by name. A tool the run's
+        caller hides (``hide_tools``) and a tool whose result said it takes no
+        more calls in this run (``ToolResult.no_more_calls``, the run's
+        ``withdrawn`` set) are left out. The second changes the tools part of
+        the request once, at the first step after the result: the prefix a
+        server caches ends before it from then on, which is accepted.
 
         The window is returned whole: the planning request is fitted on a
         copy when it is sent (see :class:`Chat`).
@@ -1937,50 +1927,17 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             run.boundary_block = block
         short_window = self.hippo.working.get_window()
 
-        tool_hints: list[str] = []
-        if self.options.tool_exposure == "all":
-            # The same list on every step, so the tools part of the request
-            # stays byte-stable for prefix caching; a withdrawn tool leaves it
-            # once, below (see the docstring).
-            if run is not None:
-                if run.fixed_tools is None:
-                    run.fixed_tools = copy.deepcopy(
-                        sorted(self.hippo.list_tools(), key=lambda t: t.name)
-                    )
-                tools = copy.deepcopy(run.fixed_tools)
-            else:
-                tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
-        else:
-            # Every registered built-in, sorted by name, on every step. Hints
-            # and BM25 choose among the other tools only, which follow,
-            # sorted by name too: the list stays byte-identical for as long
-            # as the chosen set does not change, whatever the hint order.
-            builtins = self._builtin_names
-            # A provider's tool group is offered like the built-ins, after them.
-            offered = builtins | self._grouped_names
-            # Hints are the model's tool calls, which live in the window.
-            tool_hints = [
-                name
-                for name in self.hippo.extract_tool_hints(short_window)
-                if name not in offered
-            ]
-            tools = sorted(
-                (t for t in self.hippo.list_tools() if t.name in builtins),
-                key=lambda t: t.name,
-            )
-            if self._grouped_names:
-                tools += sorted(
-                    (
-                        t
-                        for t in self.hippo.list_tools()
-                        if t.name in self._grouped_names
-                    ),
-                    key=lambda t: t.name,
+        # The same list on every step, so the tools part of the request stays
+        # byte-stable for prefix caching; a withdrawn tool leaves it once, below
+        # (see the docstring).
+        if run is not None:
+            if run.fixed_tools is None:
+                run.fixed_tools = copy.deepcopy(
+                    sorted(self.hippo.list_tools(), key=lambda t: t.name)
                 )
-            tools += sorted(
-                self.hippo.resolve_tools(query, hints=tool_hints, exclude=offered),
-                key=lambda t: t.name,
-            )
+            tools = copy.deepcopy(run.fixed_tools)
+        else:
+            tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
         if run is not None and (gone := run.hidden | run.withdrawn):
             tools = [t for t in tools if t.name not in gone]
         if run is not None and not run.acts:
@@ -1990,7 +1947,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(
                 query=query,
-                hints=tool_hints,
                 resolved_tool_names=[t.name for t in tools],
             )
         )
@@ -2029,7 +1985,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         :meth:`_count_sent`); in ``compress`` both are zero; in ``legacy``
         neither counter is used. An explicit-mode reply's inline
         ``<think>`` block is moved into thinking before the run reads it,
-        so the result and tool-hint scan see the clean answer.
+        so the result sees the clean answer.
 
         Returns (response, fail_reason).
         """
@@ -4784,7 +4740,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             "attempt_policy": opts.attempt_policy,
             "steps_per_attempt": opts.steps_per_attempt,
             "max_attempts": opts.max_attempts,
-            "tool_exposure": opts.tool_exposure,
             "mode": opts.mode,
             "builtins": sorted(builtins),
             "memory": opts.memory,

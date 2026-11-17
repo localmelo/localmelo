@@ -138,7 +138,6 @@ async def test_a_site_stopped_as_not_asked_for_asks_on_the_card(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -232,7 +231,6 @@ async def test_a_site_declined_on_the_card_is_not_asked_about_again_in_the_turn(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -266,7 +264,6 @@ async def test_a_site_card_nobody_answered_says_why_in_the_calls_record(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -326,7 +323,6 @@ async def test_a_card_ended_by_the_persons_message_leaves_a_step_record_and_no_b
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[opener],
@@ -355,7 +351,6 @@ def _acting_agent(llm: FakeModel, root: Path, tool: ActsOnSite) -> Agent:
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(root),
         ),
         tool_providers=[tool],
@@ -653,7 +648,6 @@ async def test_a_destructive_or_system_step_never_runs_without_a_click(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset({"shell_exec"}),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
     )

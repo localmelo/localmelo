@@ -98,7 +98,7 @@ def _agent(llm: ScriptedLLM, resolver: Any, **provider: Any) -> Agent:
     fetcher = WebFetcher(resolver=resolver, allow=_allow)
     return Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[WebFetchProvider(fetcher=fetcher, **provider)],
     )
 
@@ -140,7 +140,7 @@ async def test_a_subdomain_of_a_named_site_asks_once(server: dict[str, Any]) -> 
     )
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[
             WebFetchProvider(fetcher=WebFetcher(resolver=resolver, allow=allow))
         ],
@@ -451,7 +451,7 @@ async def test_auto_mode_reviews_a_site_s_plain_pages_once(
     fetcher = WebFetcher(resolver=_resolver(server), allow=_allow)
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[WebFetchProvider(fetcher=fetcher)],
     )
     try:
@@ -486,7 +486,7 @@ async def test_auto_mode_never_reads_an_address_its_review_finds_holds_a_key(
     fetcher = WebFetcher(resolver=_resolver(server), allow=_allow)
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[WebFetchProvider(fetcher=fetcher)],
     )
     policy = ChatPolicy(person.ask, mode="auto")

@@ -54,7 +54,6 @@ async def test_prefix_frozen_across_steps_and_runs(
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
-            tool_exposure="all",
         ),
     )
     try:
@@ -70,9 +69,8 @@ async def test_prefix_frozen_across_steps_and_runs(
     assert provider.requests[0][1] == provider.requests[1][1]
 
 
-@pytest.mark.parametrize("exposure", ["all", "retrieve"])
 async def test_tool_schema_behavior_when_registry_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exposure: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)"
@@ -99,7 +97,6 @@ async def test_tool_schema_behavior_when_registry_changes(
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
-            tool_exposure=exposure,  # type: ignore[arg-type]
         ),
     )
     provider.agent = agent
@@ -109,13 +106,9 @@ async def test_tool_schema_behavior_when_registry_changes(
     finally:
         await agent.close()
     later = [tool.name for tool in (provider.requests[1][1] or [])]
-    if exposure == "all":
-        assert provider.requests[0][1] == provider.requests[1][1]
-        assert "later" not in later
-        assert result.to_dict()["prefix_cache"]["schema_changes"] == 0
-    else:
-        assert "later" in later
-        assert result.to_dict()["prefix_cache"]["schema_changes"] == 1
+    assert provider.requests[0][1] == provider.requests[1][1]
+    assert "later" not in later
+    assert result.to_dict()["prefix_cache"]["schema_changes"] == 0
 
 
 @pytest.mark.parametrize("kind", ["openai", "ollama"])
@@ -140,7 +133,6 @@ async def test_provider_wire_preserves_common_prefix(
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
-            tool_exposure="all",
         ),
     )
     try:
@@ -388,7 +380,6 @@ async def test_run_freezes_day_across_midnight_and_dst(
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
-            tool_exposure="all",
         ),
     )
     try:

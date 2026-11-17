@@ -157,7 +157,7 @@ def test_every_everyday_command_is_a_command_the_full_help_explains() -> None:
     [
         ["--reasoning", "compress", "--retriever", "bm25", "--recall-k", "2", "q"],
         ["--window-eviction", "chunk", "--window-messages", "64", "q"],
-        ["--attempt-policy", "none", "--tool-exposure", "all", "q"],
+        ["--attempt-policy", "none", "q"],
         ["--progress", "off", "--builtins", "none", "--memory-dir", "m", "q"],
     ],
 )
@@ -206,8 +206,8 @@ def test_an_experimental_setting_names_its_issue() -> None:
 
 def test_every_setting_flag_is_a_parser_option_with_a_tier() -> None:
     assert {item.flag for item in SETTINGS} <= set(OPTION_TIERS)
-    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 23
-    assert sum(not item.file for item in SETTINGS) == 8
+    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 22
+    assert sum(not item.file for item in SETTINGS) == 7
 
 
 @pytest.mark.parametrize("topic", [[], ["all"]])

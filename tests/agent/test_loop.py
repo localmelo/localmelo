@@ -10,7 +10,6 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
-from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     Message,
     ToolCall,
@@ -251,7 +250,6 @@ class TestBlockedToolCall:
             options=AgentOptions(
                 mode="gateway",
                 builtins=frozenset({"shell_exec"}),
-                tool_exposure="all",
             ),
         )
         result = await agent.run("delete the marker")
@@ -316,47 +314,6 @@ class TestPromptAssembly:
         assert (
             len(matches) == 1
         ), f"Expected user query exactly once, found {len(matches)}"
-
-
-class TestRetrievalSeparation:
-    """Retrieval results must not include tool resolution artefacts."""
-
-    @pytest.mark.asyncio
-    async def test_extract_tool_hints_is_separate(self) -> None:
-        """extract_tool_hints is a pure scan, separate from retrieval."""
-        hippo = Hippo(embedding=None)
-        hippo.register_tool(
-            ToolDef(name="shell_exec", description="run shell", parameters={})
-        )
-
-        msgs = [
-            Message(role="system", content="an earlier note: used shell_exec"),
-            Message(
-                role="assistant",
-                content="run a command",
-                tool_call=ToolCall(tool_name="shell_exec", arguments={}),
-            ),
-        ]
-        hints = hippo.extract_tool_hints(msgs)
-        assert hints == ["shell_exec"]
-
-    @pytest.mark.asyncio
-    async def test_text_that_names_a_tool_adds_no_hint(self) -> None:
-        """Only the model's tool calls count; a text names nothing."""
-        hippo = Hippo(embedding=None)
-        hippo.register_tool(
-            ToolDef(name="web_fetch", description="fetch a page", parameters={})
-        )
-        hippo.register_tool(
-            ToolDef(name="shell_exec", description="run shell", parameters={})
-        )
-
-        msgs = [
-            Message(role="user", content="use web_fetch for the docs"),
-            Message(role="tool", content="[called web_fetch] ok", tool_call_id="c1"),
-            Message(role="system", content="an earlier note: shell_exec worked"),
-        ]
-        assert hippo.extract_tool_hints(msgs) == []
 
 
 class TestMaxStepsTermination:

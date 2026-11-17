@@ -141,6 +141,9 @@ The reasoning values ``drop``, ``replay`` and ``compress+replay`` and ``agent.re
 field to the URL provider for those values, applies the config's turn count, or resets it
 when ``compress`` becomes ``compress+replay``, and has a new hash again; the requests of a
 run with the defaults, and of ``legacy`` and ``compress``, are the same.
+``--tool-exposure`` and ``agent.tool_exposure`` were removed (every run offers every tool),
+so ``_direct_options`` no longer sets the option for ``--mcp-only`` and has a new hash; the
+requests of a run with the defaults are the same, as the legacy A/B checks.
 ``_check_args`` is not pinned.
 """
 
@@ -168,7 +171,7 @@ PINNED = {
     "_ExitSignals": "f172fbb9c2d03681cdc7c6dbc7fcf22afd0d254f9c8c194d112ee34e7abf90d9",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "75d050739b74c5b80e7af4136de127695669800ae6b074d97dcb94e2db5b3b20",
+    "_direct_options": "f9bc63af9bc05515074727474f8230d26c6287ab2e5c82e852cba38927a8c48d",
     "_parse_builtins": "93c1b46e6db728f4114df712300ae06fccffd830e5d6e5df49da47abaa3fc460",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

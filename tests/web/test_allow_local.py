@@ -727,7 +727,7 @@ async def _finished(
     llm = ScriptedLLM([_fetch_message(url) for url in urls])
     agent = Agent(
         llm=llm,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        options=AgentOptions(builtins=frozenset()),
         tool_providers=[provider],
     )
     found: list[Any] = []

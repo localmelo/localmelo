@@ -145,7 +145,6 @@ it; the option shown still works. A comparison names the issue that decides it.
   agent.reflection             true
   agent.steps_per_attempt      unset        (#185)
   agent.attempt_policy         reflect     --attempt-policy (#185)
-  agent.tool_exposure          retrieve    --tool-exposure (#3)
   retrieval.retriever          auto        --retriever (#4)
   retrieval.recall_at          []          --recall-at (#4)
   retrieval.k                  3           --recall-k (#4)

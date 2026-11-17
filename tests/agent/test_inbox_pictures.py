@@ -118,7 +118,6 @@ def agent_for(llm: ScriptedLLM) -> Agent:
         options=AgentOptions(
             attempt_policy="none",
             builtins=frozenset(),
-            tool_exposure="all",
             record_answers=True,
         ),
     )

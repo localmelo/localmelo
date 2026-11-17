@@ -496,7 +496,6 @@ class _Memory:
 
 def _agent(llm: _Scripted, **options: Any) -> tuple[Agent, _Memory]:
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     options.setdefault("retriever", "off")
     options.setdefault("attempt_policy", "none")
     agent = Agent(llm=llm, options=AgentOptions(**options))

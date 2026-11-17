@@ -394,8 +394,8 @@ melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: 
 - **Cause:** `Tool '<name>' was not offered in this step.` is a tool's
   error, seen in history, not a run status. The model called a tool that the
   step did not offer, so the call did not run.
-- **Fix:** usually none: a later step can offer that tool. To offer every
-  tool on every step, use `--tool-exposure all`.
+- **Fix:** usually none: the refusal is in the history and the model goes
+  on with the tools it was offered.
 
 ## Gateway
 

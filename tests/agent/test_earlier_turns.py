@@ -128,7 +128,6 @@ def _agent(model: SubjectModel, **options: Any) -> Agent:
         "steps_per_attempt": 5,
         "max_steps": 5,
         "window_messages": 10,
-        "tool_exposure": "all",
         **options,
     }
     agent = Agent(llm=model, options=AgentOptions(**settings))

@@ -6,7 +6,9 @@ the benchmark's, the macOS app's and a worker launcher's command lines, abbrevia
 that mean something, and values that are errors. Each case holds the namespace
 (changed fields only) or the error text of both parsers. A new spelling may add a way
 to say something; it may not change what an old one meant, so the benchmark, the app
-and the launchers need no new baseline.
+and the launchers need no new baseline. ``--tool-exposure`` is not in the parser any
+more: ``all`` is still accepted before the parser runs and does nothing
+(``tests/cli/test_removed_settings.py``), so its cases are not in the file.
 """
 
 from __future__ import annotations

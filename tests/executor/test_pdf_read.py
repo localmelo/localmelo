@@ -171,7 +171,6 @@ async def test_a_model_that_cannot_see_pictures_is_told_which_pages_it_did_not_r
         llm=llm,
         options=AgentOptions(
             attempt_policy="none",
-            tool_exposure="all",
             builtins=frozenset({"file_read"}),
             workspace_root=str(root),
         ),

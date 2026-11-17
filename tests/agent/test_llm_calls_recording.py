@@ -308,7 +308,6 @@ def _agent(
 ) -> Agent:
     """An agent with echo and gate offered on every step, and no retry waits."""
     options.setdefault("builtins", frozenset())
-    options.setdefault("tool_exposure", "all")
     if memory_dir is not None:
         options["memory_dir"] = str(memory_dir)
     agent = Agent(llm=llm, options=AgentOptions(**options))

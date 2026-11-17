@@ -103,7 +103,6 @@ async def _run(
         options=AgentOptions(
             builtins=frozenset(),
             attempt_policy="none",
-            tool_exposure="all",
             **{"answer_on_stop": False, **options},
         ),
         tool_providers=[tools],

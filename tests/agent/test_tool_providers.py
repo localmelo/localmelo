@@ -156,7 +156,7 @@ def _agent(
 
 def _provided_only(**kwargs: Any) -> AgentOptions:
     """No built-ins and every tool offered on every step."""
-    return AgentOptions(builtins=frozenset(), tool_exposure="all", **kwargs)
+    return AgentOptions(builtins=frozenset(), **kwargs)
 
 
 def _call(name: str, text: str) -> Message:

@@ -21,7 +21,6 @@
       "attempt_policy": "reflect",
       "steps_per_attempt": 1,
       "max_attempts": 5,
-      "tool_exposure": "retrieve",
       "mode": "python",
       "builtins": [
         "file_read",

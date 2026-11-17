@@ -175,8 +175,6 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | tool, built-in tool, tool call | 工具，内置工具，工具调用 |
 | tool provider | 工具提供方 |
 | MCP server | MCP 服务器 |
-| tool exposure | 工具暴露方式 |
-| retrieve mode | 检索模式 |
 | permission tier | 权限级别 |
 | offered tools (of a step) | 本步提供的工具 |
 | checker, check | 检查器，检查 |
@@ -238,7 +236,6 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | `--chat-model NAME` | chat model | 对话模型 |
 | `--max-steps N` | step budget | 步数上限 |
 | `--attempt-policy reflect\|none` | attempt policy | 尝试策略 |
-| `--tool-exposure retrieve\|all` | tool exposure | 工具暴露方式 |
 | `--builtins all\|none\|NAME,...` | built-in tools to register | 启用的内置工具 |
 | `--mcp-config PATH` | MCP config file | MCP 配置文件 |
 | `--mcp-only` | MCP tools only | 仅使用 MCP 工具 |

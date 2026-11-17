@@ -30,7 +30,6 @@ def test_defaults_equal_the_schema_constants() -> None:
     assert opts.max_attempts == MAX_ATTEMPTS
     assert opts.attempt_policy == "reflect"
     assert opts.answer_on_stop is True
-    assert opts.tool_exposure == "retrieve"
     assert opts.builtins is None
     assert opts.mode == "python"
     assert opts.memory is True
@@ -50,7 +49,6 @@ def test_valid_values_are_kept() -> None:
         attempt_policy="none",
         steps_per_attempt=2,
         max_attempts=1,
-        tool_exposure="all",
         builtins=frozenset({"file_read"}),
         mode="gateway",
         memory=False,
@@ -61,7 +59,6 @@ def test_valid_values_are_kept() -> None:
     assert opts.attempt_policy == "none"
     assert opts.steps_per_attempt == 2
     assert opts.max_attempts == 1
-    assert opts.tool_exposure == "all"
     assert opts.builtins == frozenset({"file_read"})
     assert opts.mode == "gateway"
     assert opts.memory is False
@@ -126,8 +123,6 @@ def test_normalized_options_compare_and_hash_equal() -> None:
         ("attempt_policy", "reflection"),
         ("attempt_policy", ""),
         ("attempt_policy", None),
-        ("tool_exposure", "some"),
-        ("tool_exposure", None),
         ("mode", "shell"),
         ("mode", None),
         ("mode", "DIRECT"),

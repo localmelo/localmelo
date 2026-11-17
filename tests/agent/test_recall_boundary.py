@@ -122,7 +122,6 @@ async def test_a_legacy_system_prompt_has_no_data_note() -> None:
         AgentOptions(
             builtins=frozenset(),
             attempt_policy="none",
-            tool_exposure="all",
             max_steps=1,
         ),
     )

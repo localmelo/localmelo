@@ -414,7 +414,6 @@ async def _stub_run(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             window_eviction=mode,  # type: ignore[arg-type]
             max_steps=max_steps,
             steps_per_attempt=steps_per_attempt,
@@ -596,7 +595,6 @@ async def test_an_overflow_retry_moves_the_held_cut_on(fit_only: None) -> None:
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             window_eviction="chunk",
             max_steps=20,
             steps_per_attempt=20,

@@ -82,7 +82,6 @@ def _agent(tmp_path: Path, llm: FakeModel, box: PasswordBox) -> Agent:
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(tmp_path / "ws"),
         ),
         tool_providers=[box],

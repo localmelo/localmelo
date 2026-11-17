@@ -127,7 +127,7 @@ def _agent(
     agent = Agent(
         llm=llm,
         embedding=embedding,
-        options=AgentOptions(builtins=frozenset(), tool_exposure="all", **options),
+        options=AgentOptions(builtins=frozenset(), **options),
         tool_providers=[provider] if provider is not None else [],
     )
     agent.hippo.history = RecordingHistory(events)

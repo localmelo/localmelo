@@ -20,6 +20,7 @@ from typing import Any, NamedTuple, NoReturn
 
 from localmelo.support import config
 from localmelo.support.option_tiers import (
+    NO_OP_VALUES,
     OLD_SPELLINGS,
     OPTION_ROWS,
     REMOVED_SETTINGS,
@@ -133,25 +134,36 @@ def option_for(name: str) -> str | None:
     return None
 
 
-def refuse_removed(words: Sequence[str]) -> None:
+def refuse_removed(words: Sequence[str]) -> list[str]:
     """Exit 2 on the option of a removed setting, or a removed value, in *words*.
 
-    Only the words before ``--`` count.
+    Returns *words* without the options that carry the value a removed setting still
+    accepts and ignores (:data:`NO_OP_VALUES`). Only the words before ``--`` count.
     """
     gone = {spelled(name): name for name in REMOVED_SETTINGS}
     values = {
         (spelled(name), value): why for (name, value), why in REMOVED_VALUES.items()
     }
-    for n, word in enumerate(words):
+    ignored = {(spelled(name), value) for name, value in NO_OP_VALUES.items()}
+    kept: list[str] = []
+    n = 0
+    while n < len(words):
+        word = words[n]
         if word == "--":
-            return
+            return [*kept, *words[n:]]
         option, equals, value = word.partition("=")
-        if option in gone:
-            fail(f"{option} was removed: {REMOVED_SETTINGS[gone[option]]}.")
         if not equals and n + 1 < len(words):
             value = words[n + 1]
+        if (option, value) in ignored:
+            n += 1 if equals else 2
+            continue
+        if option in gone:
+            fail(f"{option} was removed: {REMOVED_SETTINGS[gone[option]]}.")
         if (option, value) in values:
             fail(f"{option} {value} was removed: {values[option, value]}.")
+        kept.append(word)
+        n += 1
+    return kept
 
 
 def refuse_removed_value(name: str, value: Any) -> None:
@@ -276,15 +288,17 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
     is False, becomes an override of the config this process loads.
     """
     rest, pairs = scan(argv)
-    refuse_removed(rest)
+    rest = refuse_removed(rest)
     found: list[str] = []
     values: dict[str, Any] = {}
     for pair in pairs:
         name, equals, text = pair.partition("=")
         if not equals:
             fail(f"-X needs KEY=VALUE, got {pair!r}")
-        key = lookup(name.strip())
         value = parse_value(text)
+        if NO_OP_VALUES.get(name.strip()) == value:
+            continue  # a removed setting's one accepted value does nothing
+        key = lookup(name.strip())
         refuse_removed_value(key.name, value)
         if not (options and key.flag):
             values[key.name] = check(key, coerce(key, value, text))

@@ -150,7 +150,6 @@ async def _run(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             max_steps=80,
             steps_per_attempt=80,
             **{"memory": False, **BUDGET, **options},

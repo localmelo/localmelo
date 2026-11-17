@@ -276,7 +276,6 @@ async def test_an_auto_call_cannot_write_outside_its_folder_even_unreviewed(
                 llm=llm,
                 options=AgentOptions(
                     builtins=frozenset({"python_exec"}),
-                    tool_exposure="all",
                     workspace_root=str(ws),
                     tool_env={"TARGET": str(target)},
                 ),
@@ -331,7 +330,6 @@ async def test_a_step_the_person_allowed_may_write_the_path_it_names(
             llm=FakeModel(_plans_of(code), [verdict()]),
             options=AgentOptions(
                 builtins=frozenset({"python_exec"}),
-                tool_exposure="all",
                 workspace_root=str(ws),
                 tool_env={"OTHER": str(other)},
                 confine_writes=True,

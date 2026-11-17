@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from localmelo.melo.agent import Agent
 from localmelo.melo.memory.notes import ReasoningNote
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
@@ -12,7 +11,6 @@ from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     Message,
-    ToolDef,
 )
 
 from .test_compress import FakeLLM, _agent, _answer, _call_reply, _options
@@ -137,56 +135,3 @@ async def test_compress_replay_keeps_all_thinking_and_sends_it() -> None:
         for message in agent.conversation()
         if message.role == "assistant"
     ] == [""]
-
-
-@pytest.mark.asyncio
-async def test_a_note_naming_a_tool_does_not_offer_it() -> None:
-    def _secret() -> ToolDef:
-        return ToolDef(
-            name="secret_tool",
-            description="does a secret thing",
-            parameters={"type": "object", "properties": {}},
-        )
-
-    def _build(mode: str) -> tuple[Agent, FakeLLM]:
-        server = FakeLLM(_answer())
-        agent = Agent(
-            llm=server,
-            options=_options(
-                reasoning=mode,
-                builtins=frozenset(),
-                tool_exposure="retrieve",
-            ),
-        )
-        agent.hippo.register_tool(_secret())
-        agent.load_conversation(
-            [
-                Message(
-                    role="assistant",
-                    content="<note>found: secret_tool would help here</note>",
-                )
-            ]
-        )
-        agent.load_notes(
-            [
-                NoteStoreEntry(
-                    alias="n1",
-                    kind="note",
-                    text="secret_tool would help here",
-                    note=_note("secret_tool would help here"),
-                )
-            ]
-        )
-        return agent, server
-
-    compress, compress_server = _build("compress")
-    await compress.run_task("q")
-    await compress.close()
-    # The query alone resolves nothing, and since #80 a tool hint is only a
-    # structured tool call: neither a window text nor a stored note offers it,
-    # in any mode.
-    legacy, legacy_server = _build("legacy")
-    await legacy.run_task("q")
-    await legacy.close()
-    assert "secret_tool" not in legacy_server.offers[0]
-    assert "secret_tool" not in compress_server.offers[0]

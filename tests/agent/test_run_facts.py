@@ -63,7 +63,6 @@ async def test_a_run_states_who_started_it_and_whether_its_model_reads_pictures(
         llm=FakeModel([_calls(("facts", {}, "c1")), _answer("done")]),
         options=AgentOptions(
             builtins=frozenset(),
-            tool_exposure="all",
             workspace_root=str(workspace),
             tool_images=images,  # type: ignore[arg-type]
         ),

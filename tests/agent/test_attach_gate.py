@@ -120,9 +120,7 @@ async def run_attach(
     plan += [_calls(("attach", {"file": file}, "c1")), _answer("done")]
     agent = Agent(
         llm=FakeModel(plan),
-        options=AgentOptions(
-            builtins=frozenset(), tool_exposure="all", workspace_root=str(workspace)
-        ),
+        options=AgentOptions(builtins=frozenset(), workspace_root=str(workspace)),
         tool_providers=[tool],
     )
     agent.chat.sleep = _no_wait

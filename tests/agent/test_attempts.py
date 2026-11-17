@@ -518,56 +518,6 @@ class TestReflectionReceivesPriorReflections:
         assert "approach A" in text
 
 
-class TestReflectionInfluencesRetrieval:
-    """A reflection's text must not add tools to the offered list."""
-
-    @pytest.mark.asyncio
-    async def test_reflection_text_does_not_add_a_tool(self) -> None:
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
-
-        llm = FakeLLM()
-        # Attempt 0: tool call
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content="try",
-                tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
-            )
-        )
-        # Reflection: continue, mention "web_fetch" in directions
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content=_reflection_json(
-                    "continue",
-                    summary="echo didn't help",
-                    directions=["try web_fetch instead"],
-                ),
-            )
-        )
-        # Attempt 1: direct answer
-        llm.enqueue(Message(role="assistant", content="done"))
-
-        agent = _make_echo_agent(llm, options=options)
-        # Also register web_fetch so that a hint from the reflection would
-        # offer it; only a tool call is a hint now.
-        agent.hippo.register_tool(
-            ToolDef(
-                name="web_fetch",
-                description="fetch a web page",
-                parameters={"type": "object", "properties": {}},
-            )
-        )
-        await agent.run("echo test")
-
-        # The planning call for attempt 1 offers the built-ins alone: the
-        # reflection names web_fetch in prose, which resolves nothing.
-        plan_call_2 = llm.calls[2]  # 0=plan, 1=reflect, 2=plan
-        tool_names = [t.name for t in plan_call_2.get("tools") or []]
-        assert "echo" in tool_names
-        assert "web_fetch" not in tool_names
-
-
 class TestPrePlanIncludesReflections:
     """Pre-plan size check must account for reflection content."""
 
