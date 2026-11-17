@@ -23,6 +23,7 @@ from localmelo.support.option_tiers import (
     OLD_SPELLINGS,
     OPTION_ROWS,
     REMOVED_SETTINGS,
+    REMOVED_VALUES,
     SETTINGS,
 )
 
@@ -133,14 +134,30 @@ def option_for(name: str) -> str | None:
 
 
 def refuse_removed(words: Sequence[str]) -> None:
-    """Exit 2 on the option of a removed setting in *words* (those before ``--``)."""
+    """Exit 2 on the option of a removed setting, or a removed value, in *words*.
+
+    Only the words before ``--`` count.
+    """
     gone = {spelled(name): name for name in REMOVED_SETTINGS}
-    for word in words:
+    values = {
+        (spelled(name), value): why for (name, value), why in REMOVED_VALUES.items()
+    }
+    for n, word in enumerate(words):
         if word == "--":
             return
-        option = word.partition("=")[0]
+        option, equals, value = word.partition("=")
         if option in gone:
             fail(f"{option} was removed: {REMOVED_SETTINGS[gone[option]]}.")
+        if not equals and n + 1 < len(words):
+            value = words[n + 1]
+        if (option, value) in values:
+            fail(f"{option} {value} was removed: {values[option, value]}.")
+
+
+def refuse_removed_value(name: str, value: Any) -> None:
+    """Exit 2 if *value* is a removed value of the setting *name*."""
+    if (name, str(value)) in REMOVED_VALUES:
+        fail(f"{name}={value} was removed: {REMOVED_VALUES[name, str(value)]}.")
 
 
 def lookup(name: str) -> Key:
@@ -268,6 +285,7 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
             fail(f"-X needs KEY=VALUE, got {pair!r}")
         key = lookup(name.strip())
         value = parse_value(text)
+        refuse_removed_value(key.name, value)
         if not (options and key.flag):
             values[key.name] = check(key, coerce(key, value, text))
         elif key.name not in _SWITCHES:
@@ -289,6 +307,14 @@ def removed_in(data: Mapping[str, Any]) -> list[str]:
         for name, why in REMOVED_SETTINGS.items()
         if name in held
     ]
+    for (name, value), why in REMOVED_VALUES.items():
+        section, _, field = name.rpartition(".")
+        table = data.get(section)
+        if isinstance(table, dict) and table.get(field) == value:
+            notes.append(
+                f'{name} = "{value}" was removed ({why}); '
+                f'it reads as "{catalog()[name].default}"'
+            )
     agent = data.get("agent")
     if isinstance(agent, dict) and agent.get("window_eviction") == "slide":
         # config._SPELLINGS reads it as "chunk".

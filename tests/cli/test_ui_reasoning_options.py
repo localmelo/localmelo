@@ -60,7 +60,6 @@ def test_launch_resolves_config_defaults_and_explicit_flags(
     cfg = configured()
     cfg.agent.reasoning = "compress"
     cfg.agent.note_writer = "heuristic"
-    cfg.agent.replay_turns = 4
     cfg.agent.tool_env = ["MELO_TEST_TOOL_VAR"]
     cfg.retrieval.retriever = "llm"
     cfg.retrieval.k = 7
@@ -71,7 +70,7 @@ def test_launch_resolves_config_defaults_and_explicit_flags(
     args = parser.parse_args(
         [
             "--reasoning",
-            "drop",
+            "legacy",
             "--note-writer",
             "auto",
             "--retriever",
@@ -104,9 +103,8 @@ def test_launch_resolves_config_defaults_and_explicit_flags(
             == 0
         )
     options = consumer.call_args.kwargs["options"]
-    assert options.reasoning == ("drop" if override else "compress")
+    assert options.reasoning == ("legacy" if override else "compress")
     assert options.note_writer == ("auto" if override else "heuristic")
-    assert options.replay_turns == 4
     assert options.retriever == ("bm25" if override else "llm")
     assert options.recall_k == (2 if override else 7)
     assert options.tool_env == {"MELO_TEST_TOOL_VAR": "synthetic"}
@@ -125,7 +123,7 @@ async def test_factory_forwards_provider_options_on_both_backend_paths(
             else url_backend("http://127.0.0.1:9/v1", "stub", source="--base-url")
         ),
         cfg=cfg,
-        options=AgentOptions(reasoning="replay", retriever="llm"),
+        options=AgentOptions(reasoning="compress", retriever="llm"),
         workspace=str(tmp_path),
         reasoning_field="auto",
         retrieval_extra_body={"temperature": 0.1},
@@ -137,7 +135,7 @@ async def test_factory_forwards_provider_options_on_both_backend_paths(
     assert build.call_args.kwargs["retrieval_extra_body"] == {"temperature": 0.1}
 
 
-@pytest.mark.parametrize("mode", ["legacy", "drop", "compress"])
+@pytest.mark.parametrize("mode", ["legacy", "compress"])
 async def test_console_uses_configured_mode_but_defaults_to_legacy(
     tmp_path: Path,
     mode: str,
@@ -173,8 +171,7 @@ async def test_console_uses_configured_mode_but_defaults_to_legacy(
             ["--memory", "off"],
             "embedding needs --memory on",
         ),
-        ("replay", "auto", [], "need a reasoning field"),
-        ("drop", "auto", [], "this backend requires reasoning replay"),
+        ("compress", "auto", [], "need a reasoning field"),
         (
             "compress",
             "auto",
@@ -201,9 +198,10 @@ def test_launch_refuses_invalid_effective_options_before_startup(
     cfg = configured()
     cfg.agent.reasoning = mode
     cfg.retrieval.retriever = retriever
-    if mode == "replay":
+    if error == "need a reasoning field":
         cfg.vllm.reasoning_field = ""
-    if mode == "drop" or "--recall-placement" in argv:
+        cfg.vllm.requires_reasoning_replay = True
+    if "--recall-placement" in argv:
         cfg.vllm.requires_reasoning_replay = True
     if "--memory" in argv:
         cfg.embedding_backend = "vllm"

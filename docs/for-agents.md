@@ -129,7 +129,6 @@ it; the option shown still works. A comparison names the issue that decides it.
   mcp_config                   ""
   request_timeout_s            unset       --request-timeout
   agent.reasoning              legacy      --reasoning (#183)
-  agent.replay_turns           unset       --replay-turns (#183)
   agent.note_writer            auto        --note-writer (#183)
   agent.tool_env               []
   agent.window_eviction        chunk       --window-eviction (#183)
@@ -137,14 +136,11 @@ it; the option shown still works. A comparison names the issue that decides it.
   agent.context_window         unset       --context-window
   agent.output_reserve         unset       --output-reserve
   agent.safety_margin          unset       --safety-margin
-  agent.captured_history       false       --captured-history (#4)
   agent.confine_writes         true
   agent.confine_direct_runs    false
   agent.answer_on_stop         true         (#185)
   agent.max_calls              unset
   agent.tool_images            auto
-  agent.tool_images_keep       3            (#280)
-  agent.tool_images_retire     2            (#280)
   agent.empty_reply_fallback   on
   agent.reflection             true
   agent.steps_per_attempt      unset        (#185)

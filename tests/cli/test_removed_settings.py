@@ -8,7 +8,7 @@ import pytest
 
 from localmelo import __main__ as cli
 from localmelo.support import config, config_cli
-from localmelo.support.option_tiers import REMOVED_SETTINGS
+from localmelo.support.option_tiers import REMOVED_SETTINGS, REMOVED_VALUES
 
 OLD_FILE = """\
 [agent]
@@ -21,6 +21,10 @@ window_messages = 32
 thinking_steps = "first_and_failed"
 lean_output = true
 brief_items = true
+captured_history = true
+replay_turns = 3
+tool_images_keep = 4
+tool_images_retire = 1
 
 [memory]
 admit_on_outcome = true
@@ -135,3 +139,77 @@ def test_a_file_with_one_removed_memory_key_loads_with_a_note_and_the_default(
     assert config_cli.main([]) == 0
     key = line.partition(" ")[0]
     assert f"note: memory.{key} was removed" in capsys.readouterr().err
+
+
+@pytest.fixture
+def removed_value_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "localmelo.support.config.CONFIG_PATH", str(tmp_path / "config.toml")
+    )
+    return tmp_path
+
+
+@pytest.mark.parametrize(("name", "value"), REMOVED_VALUES)
+def test_the_option_and_the_setter_of_a_removed_value_exit_2_and_say_so(
+    name: str, value: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    flag = "--" + name.rpartition(".")[2].replace("_", "-")
+    for argv in (
+        [flag, value, "list files"],
+        [f"{flag}={value}", "list files"],
+        ["-X", f"{name}={value}", "list files"],
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli._parse(argv)
+        assert exc.value.code == 2, argv
+        err = capsys.readouterr().err
+        assert f"{value} was removed: {REMOVED_VALUES[name, value]}." in err, argv
+
+
+@pytest.mark.parametrize(("name", "value"), REMOVED_VALUES)
+def test_melo_config_set_refuses_a_removed_value(
+    name: str,
+    value: str,
+    removed_value_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        config_cli.main(["set", name, value])
+    assert exc.value.code == 2
+    assert f"{name}={value} was removed" in capsys.readouterr().err
+    assert not (removed_value_home / "config.toml").exists()
+
+
+@pytest.mark.parametrize("value", ["legacy", "compress"])
+def test_the_values_that_stay_are_not_refused(value: str) -> None:
+    for argv in (
+        ["--reasoning", value, "list files"],
+        ["-X", f"agent.reasoning={value}", "list files"],
+    ):
+        _, args = cli._parse(argv)
+        assert args.reasoning == value
+
+
+@pytest.mark.parametrize(("name", "value"), REMOVED_VALUES)
+def test_a_file_that_holds_a_removed_value_loads_reads_the_default_and_is_named(
+    name: str,
+    value: str,
+    removed_value_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    section, _, key = name.rpartition(".")
+    (removed_value_home / "config.toml").write_text(
+        f'[{section}]\n{key} = "{value}"\n', encoding="utf-8"
+    )
+    default = getattr(getattr(config.Config(), section), key)
+    assert getattr(getattr(config.load(), section), key) == default
+    parser, args = cli._parse(["list files"])
+    assert cli._direct_options(parser, args).reasoning == default
+    assert config_cli.main([]) == 0
+    err = capsys.readouterr().err.splitlines()
+    assert [line for line in err if name in line] == [
+        f'melo: note: {name} = "{value}" was removed '
+        f"({REMOVED_VALUES[name, value]}); "
+        f'it reads as "{default}". Delete the line.'
+    ]

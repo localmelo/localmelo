@@ -426,7 +426,7 @@ What is written where:
 - Nothing here is written to `history.db` or `sessions.db` as a note. `history.db` keeps no notes table; it still keeps the model's raw reply in `steps` and in `llm_calls`. The only new session field is the turn's `note` column, which gets the last attempt digest of the turn.
 - No reasoning mode writes the raw per-step summary to long-term memory or promotes a run's final reflection there, and none recalls a run's own new summaries; `legacy` has no long-term memory at all.
 - The Python API's `Agent.notes()` and `Agent.load_notes()` read and replace the store in RAM; they are internal and experimental.
-- On session resume the current process's reasoning mode wins, not the mode stored on old outcomes. `pairs` restores user/answer pairs with no old thinking; `window` restores the checkpoint's retained, redacted thinking and can replay it in replay modes. `drop` and `compress` remove both its thinking field and any legacy inline copy from request copies; the stored window is not destroyed.
+- On session resume the current process's reasoning mode wins, not the mode stored on old outcomes. `pairs` restores user/answer pairs with no old thinking; `window` restores the checkpoint's retained, redacted thinking and can replay it to a provider that requires replay. Otherwise `compress` removes both its thinking field and any legacy inline copy from request copies; the stored window is not destroyed.
 - Neither resume path rebuilds the RAM-only note store from `turns.note`; a window can still contain the model's original `<note>` text. See [Resume](../guides/sessions.md#resume).
 
 ## Recall in the loop
@@ -473,7 +473,7 @@ plan: …
 | The counters | `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`. |
 | The record | Every block that is first sent is recorded in `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases, the kinds, each hit's `stage` (`fresh`, `rehearsed` or `superseded`), scores, the checked text, `ms` and the fallback. It is recorded once, on the first request that carries it; a later request carries it as sticky window text and does not repeat it. A hit's `origin_task_ids` names the task that produced it, so the bench can split same-exercise from cross-exercise hits. |
 | The schema | `history.db` is schema version 2; `recall_json` is `NULL` in `legacy`, in a non-planning call, and on a planning call that carried no new block. The `recall` event carries the same trigger, placement, retriever, query, hits, `chars`, `ms` and `fallback`, and no item text; `memory_stats.recall_log` is the compact record, which also has `v`, `k`, `candidates` and `boundary`. |
-| Legacy keeps its path | In `legacy` there is no plan, no retriever, no block, no data note and no `recall` tool; the planning and reflection requests, the JSON line, the window and the `tasks`/`steps` rows are the same as in a run without recall, and `llm_calls.recall_json` is `NULL`. `drop` and `replay` recall nothing by default and only turn recall on when the user names a retriever there. |
+| Legacy keeps its path | In `legacy` there is no plan, no retriever, no block, no data note and no `recall` tool; the planning and reflection requests, the JSON line, the window and the `tasks`/`steps` rows are the same as in a run without recall, and `llm_calls.recall_json` is `NULL`. |
 
 ## How memory works
 
@@ -501,4 +501,4 @@ plan: …
 
 **Reflections** are kept in working memory, one at a time: each new reflection replaces the last one. See [How localmelo works](how-it-works.md#reflection).
 
-**Memory notes and retrievers** can also participate in a run: the compress modes keep notes and use recall by default, while `drop` and `replay` recall only when a retriever is named (see [Recall in the loop](#recall-in-the-loop)). Separately, `melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers offline, over documents built from a run's model calls: notes on the model's reasoning, code drafts, reflections and chunks of its thinking. See [Offline retrieval](../reference/retrieval.md).
+**Memory notes and retrievers** can also participate in a run: `compress` keeps notes and uses recall by default (see [Recall in the loop](#recall-in-the-loop)). Separately, `melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers offline, over documents built from a run's model calls: notes on the model's reasoning, code drafts, reflections and chunks of its thinking. See [Offline retrieval](../reference/retrieval.md).

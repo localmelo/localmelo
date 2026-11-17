@@ -144,14 +144,13 @@ async def test_compress_adds_the_instruction_and_stores_notes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_and_drop_and_replay_keep_the_old_prompt() -> None:
-    for mode in ("legacy", "drop", "replay"):
-        server = FakeLLM(_answer())
-        agent = _agent(server, _options(reasoning=mode))
-        await agent.run_task("q")
-        await agent.close()
-        assert "write a short note" not in _system(server.requests[0])
-        assert agent.notes() == []
+async def test_legacy_keeps_the_old_prompt() -> None:
+    server = FakeLLM(_answer())
+    agent = _agent(server, _options(reasoning="legacy"))
+    await agent.run_task("q")
+    await agent.close()
+    assert "write a short note" not in _system(server.requests[0])
+    assert agent.notes() == []
 
 
 @pytest.mark.asyncio
@@ -167,23 +166,20 @@ async def test_the_instruction_is_stable_across_steps() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("turns", "sentence"),
-    [(1, "your last 1 step;"), (2, "your last 2 steps;")],
+    ("llm", "sentence"),
+    [
+        (FakeLLM, "kept for every step of this task."),
+        (ReplayRequired, "kept for every step in the window."),
+    ],
 )
 async def test_compress_replay_instruction_names_the_kept_turns(
-    turns: int, sentence: str
+    llm: type[FakeLLM], sentence: str
 ) -> None:
-    server = FakeLLM(_answer())
-    agent = _agent(
-        server,
-        _options(reasoning="compress+replay", replay_turns=turns),
-    )
+    server = llm(_answer())
+    agent = _agent(server, _options(reasoning="compress+replay"))
     await agent.run_task("q")
     await agent.close()
-    system = _system(server.requests[0])
-    assert sentence in system
-    if turns == 1:
-        assert "last 1 steps" not in system
+    assert sentence in _system(server.requests[0])
 
 
 @pytest.mark.asyncio

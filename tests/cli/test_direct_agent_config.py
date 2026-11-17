@@ -46,7 +46,6 @@ def _build(argv: list[str]) -> cli.Agent:
         # Not checked in a --base-url run before the one check.
         'reasoning = "summarize"',
         'note_writer = "mystery"',
-        "replay_turns = 0",
         'tool_env = ["not a name"]',
         "reflection = 2",
     ],

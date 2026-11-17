@@ -32,14 +32,8 @@ from .helpers import (
     tool_call,
 )
 
-MODES: tuple[ReasoningMode, ...] = (
-    "legacy",
-    "drop",
-    "replay",
-    "compress",
-    "compress+replay",
-)
-REPLAY_MODES = ("replay", "compress+replay")
+MODES: tuple[ReasoningMode, ...] = ("legacy", "compress", "compress+replay")
+REPLAY_MODES = ("compress+replay",)
 COMPRESS_MODES = ("compress", "compress+replay")
 # Hand-written test data, not a credential read from a user's environment.
 SYNTHETIC_KEY = "sk-" + "abc123feed" * 3
@@ -56,8 +50,8 @@ HOLDER = "testhost:1:aaaaaaaa"
 async def test_resume_uses_current_reasoning_mode_not_recorded_outcome(
     tmp_path: Path, mode: ReasoningMode, resume_mode: ResumeMode
 ) -> None:
-    """A real old turn records the opposite replay policy to the new process."""
-    recorded_mode: ReasoningMode = "drop" if mode in REPLAY_MODES else "replay"
+    """A real old turn records its replay mode; the new process may run another."""
+    recorded_mode: ReasoningMode = "compress+replay"
     clock = Clock(time.time())
     path = tmp_path / "sessions.db"
     root = tmp_path / "ws"
@@ -147,7 +141,7 @@ async def test_resume_uses_current_reasoning_mode_not_recorded_outcome(
         assert current.options.reasoning == mode
         [stored] = await store.list_turns(sid)
         assert stored.result is not None
-        assert stored.result["config"]["reasoning"] == recorded_mode != mode
+        assert stored.result["config"]["reasoning"] == recorded_mode
 
         outcome = await asyncio.wait_for(runner.run_turn(FOLLOW_UP), timeout=5)
         assert outcome.status == "completed"
@@ -157,7 +151,7 @@ async def test_resume_uses_current_reasoning_mode_not_recorded_outcome(
         assert any(m.role == "assistant" and m.content == OLD_ANSWER for m in request)
         expected_thinking = (
             [REDACTED_THINKING]
-            if resume_mode == "window" and mode not in ("drop", "compress")
+            if resume_mode == "window" and mode != "compress"
             else []
         )
         assert [m.thinking for m in request if m.thinking] == expected_thinking
@@ -168,7 +162,8 @@ async def test_resume_uses_current_reasoning_mode_not_recorded_outcome(
             [result] = [m for m in request if m.role == "tool"]
             assert result.tool_call_id == old_step.tool_calls[0].id
             assert "buy milk" in result.content
-            # Drop is a send transform, not destruction of the resumed window.
+            # Not sending thinking is a send transform, not destruction of the
+            # resumed window.
             assert [m.thinking for m in current.conversation() if m.thinking] == [
                 REDACTED_THINKING
             ]
@@ -232,7 +227,7 @@ async def test_window_resume_obeys_thinking_and_checkpoint_retention(
                 holder=HOLDER,
                 status="completed",
                 cause="run",
-                result=run_result(result=text, config={"reasoning": "replay"}),
+                result=run_result(result=text, config={"reasoning": "compress+replay"}),
                 answer=text,
                 window=checkpoint_messages,
             )
@@ -283,7 +278,7 @@ async def test_window_resume_obeys_thinking_and_checkpoint_retention(
         assert outcome.status == "completed"
         [request] = llm.requests
         assert [m.thinking for m in request if m.thinking] == (
-            [] if mode in ("drop", "compress") else [REDACTED_THINKING]
+            [] if mode == "compress" else [REDACTED_THINKING]
         )
         assert old_thinking not in repr(request)
         assert SYNTHETIC_KEY not in repr(request)
@@ -307,7 +302,7 @@ async def test_window_resume_obeys_thinking_and_checkpoint_retention(
         assert all("<think>" not in m.content for m in llm.requests[-1])
 
 
-@pytest.mark.parametrize("mode", ["drop", "compress"])
+@pytest.mark.parametrize("mode", ["compress"])
 async def test_non_replay_resume_does_not_send_legacy_inline_thinking(
     tmp_path: Path, mode: ReasoningMode
 ) -> None:

@@ -25,16 +25,13 @@ def configured(url: str = "http://127.0.0.1:9/v1") -> Config:
     )
 
 
-@pytest.mark.parametrize(
-    "mode", ["legacy", "drop", "replay", "compress", "compress+replay"]
-)
+@pytest.mark.parametrize("mode", ["legacy", "compress"])
 async def test_omitted_builder_options_honor_config_without_mutation(
     tmp_path: Path,
     mode: ReasoningMode,
 ) -> None:
     cfg = configured()
     cfg.agent.reasoning = mode
-    cfg.agent.replay_turns = 2
     cfg.agent.note_writer = "heuristic"
     cfg.retrieval.retriever = "bm25"
     cfg.retrieval.k = 7
@@ -44,7 +41,6 @@ async def test_omitted_builder_options_honor_config_without_mutation(
     )
     try:
         assert agent.options.reasoning == mode
-        assert agent.options.replay_turns == 2
         assert agent.options.note_writer == "heuristic"
         assert agent.options.replay_scope == "window"
         assert agent.options.retriever == ("auto" if mode == "legacy" else "bm25")
@@ -63,16 +59,16 @@ async def test_explicit_builder_options_win_over_config(tmp_path: Path) -> None:
         base_url=None,
         model=None,
         workspace=str(tmp_path),
-        options=AgentOptions(reasoning="drop", retriever="off"),
+        options=AgentOptions(reasoning="legacy", retriever="off"),
     )
     try:
-        assert agent.options.reasoning == "drop"
+        assert agent.options.reasoning == "legacy"
         assert agent.options.retriever == "off"
     finally:
         await agent.close()
 
 
-@pytest.mark.parametrize("mode", ["legacy", "drop", "compress"])
+@pytest.mark.parametrize("mode", ["legacy", "compress"])
 async def test_wrapped_non_replay_config_sends_no_reasoning_key(
     tmp_path: Path,
     mode: ReasoningMode,
@@ -116,7 +112,7 @@ async def test_url_builder_accepts_reasoning_field_and_retrieval_extra_body(
         base_url="http://127.0.0.1:9/v1",
         model="stub",
         workspace=str(tmp_path),
-        options=AgentOptions(reasoning="replay", retriever="llm"),
+        options=AgentOptions(reasoning="compress+replay", retriever="llm"),
         reasoning_field="reasoning",
         retrieval_extra_body={"temperature": 0.1},
     )

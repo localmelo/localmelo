@@ -133,6 +133,14 @@ the same.
 ``_ExitSignals``'s docstring says the reflections are cleared at an exit (nothing stores
 them since the default mode keeps no long-term store); only that sentence changed, so it
 has a new hash; the requests are the same.
+``agent.captured_history`` and ``--captured-history`` were removed, so ``_build_direct_mode_agent``
+no longer reads the config value and has a new hash again; the requests of a run with the defaults
+are the same, as ``tests/agent/test_default_request_digests.py`` checks.
+The reasoning values ``drop``, ``replay`` and ``compress+replay`` and ``agent.replay_turns``
+(``--replay-turns``) were removed, so ``_build_direct_mode_agent`` no longer passes a reasoning
+field to the URL provider for those values, applies the config's turn count, or resets it
+when ``compress`` becomes ``compress+replay``, and has a new hash again; the requests of a
+run with the defaults, and of ``legacy`` and ``compress``, are the same.
 ``_check_args`` is not pinned.
 """
 
@@ -155,7 +163,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "a2037735a8430c3559b3496e402110cd8ff32e0bfc17d990b0ae170a6e564e63",
+    "_build_direct_mode_agent": "b6605f1d0bb27e77f29d998d276e1005f350d0557a736e746b80d05973e54d40",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "f172fbb9c2d03681cdc7c6dbc7fcf22afd0d254f9c8c194d112ee34e7abf90d9",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

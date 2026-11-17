@@ -100,13 +100,13 @@ def providers_for(
     The two may refer to different backend adapters.
 
     *reasoning* is the reasoning mode of the Agent that gets them. The chat
-    section's reasoning field is only for replay (``compress`` too, on a
-    provider that requires it): in every other mode the provider sends none.
+    section's reasoning field is only for replay, which is ``compress`` on a
+    provider that requires it: in every other mode the provider sends none.
     Ollama keeps its fixed ``thinking`` field, whose native wire legacy
     already uses.
     """
     llm = get_backend(cfg.chat_backend).build_chat_provider(cfg)
-    replay = reasoning in ("replay", "compress+replay") or (
+    replay = reasoning == "compress+replay" or (
         reasoning == "compress" and llm.requires_reasoning_replay
     )
     if not replay and cfg.chat_backend != "ollama":

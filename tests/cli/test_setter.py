@@ -42,9 +42,7 @@ ROWS: list[tuple[str, str, list[str], list[str]]] = [
     ("agent.window_eviction", "boundary", ["--window-eviction", "boundary"], []),
     ("agent.window_messages", "64", ["--window-messages", "64"], []),
     ("agent.reasoning", "compress", ["--reasoning", "compress"], []),
-    ("agent.replay_turns", "2", ["--replay-turns", "2"], []),
     ("agent.note_writer", "heuristic", ["--note-writer", "heuristic"], []),
-    ("agent.captured_history", "on", ["--captured-history", "on"], []),
     ("agent.context_window", "8192", ["--context-window", "8192"], []),
     ("agent.output_reserve", "512", ["--output-reserve", "512"], []),
     ("agent.safety_margin", "256", ["--safety-margin", "256"], []),
@@ -98,9 +96,13 @@ def test_each_form_of_the_setter_is_the_option(form: list[str]) -> None:
 
 
 def test_booleans_read_true_on_false_and_off() -> None:
-    for word, flag in (("true", "on"), ("on", "on"), ("false", "off"), ("off", "off")):
-        assert _namespace(["-X", f"agent.captured_history={word}", "q"]) == _namespace(
-            ["--captured-history", flag, "q"]
+    for word in ("true", "on"):
+        assert _namespace(["-X", f"memory.keep_decision_text={word}", "q"]) == (
+            _namespace(["--keep-decision-text", "q"])
+        )
+    for word in ("false", "off"):
+        assert _namespace(["-X", f"memory.keep_decision_text={word}", "q"]) == (
+            _namespace(["q"])
         )
 
 
@@ -360,7 +362,7 @@ def test_keys_with_no_match_says_so(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_get_prints_one_value(capsys: pytest.CaptureFixture[str]) -> None:
     assert _config(["get", "scheduler.policy"], capsys)[:2] == (0, '"off"\n')
-    assert _config(["get", "agent.replay_turns"], capsys)[:2] == (0, "unset\n")
+    assert _config(["get", "agent.context_window"], capsys)[:2] == (0, "unset\n")
     assert _config(["get", "agent.attempt_policy"], capsys)[:2] == (0, '"reflect"\n')
     assert _config(["get", "retrieval.k", "-X", "retrieval.k=8"], capsys)[:2] == (
         0,
@@ -379,7 +381,7 @@ def test_set_checks_a_key_and_saves_it(
     assert config.load().retrieval.k == 4
     assert _config(["set", "cli.stream", "off"], capsys)[0] == 0
     assert config.load().cli.stream is False
-    assert _config(["set", "agent.replay_turns", "none"], capsys)[0] == 0
+    assert _config(["set", "agent.context_window", "none"], capsys)[0] == 0
     refused = _config(["set", "retrieval.k", "3", "-X", "cli.stream=on"], capsys)
     assert refused[0] == 2 and "-X does not apply to melo config set" in refused[2]
     before = path.read_text(encoding="utf-8")

@@ -32,7 +32,7 @@ The same three retrievers rank a run's own documents.
 
 | Setting | What it does |
 |---|---|
-| `--reasoning compress` (and `compress+replay`) | Recalls at `start`, `attempt` and `step` by default. |
+| `--reasoning compress` | Recalls at `start`, `attempt` and `step` by default. |
 | `--recall-at` | Replaces those triggers; `tool` adds the `recall` tool. |
 | `--retriever auto` | Takes `embedding` when one is configured; otherwise `llm` at `start`/`attempt` and `bm25` at `step`/`tool`. |
 | `--retriever off` | Turns recall off; a named retriever runs every trigger the user names. |

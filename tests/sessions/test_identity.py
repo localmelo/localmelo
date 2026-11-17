@@ -515,10 +515,9 @@ def memory_line(text: str) -> str:
         ({}, ""),  # a chat as it starts: no persistence
         ({"memory_dir": "m"}, ""),  # a legacy Agent opens no long-term store
         ({"memory_dir": "m", "memory": False}, ""),
-        ({"memory_dir": "m", "reasoning": "drop"}, KEPT_TYPED),
         ({"memory_dir": "m", "reasoning": "compress"}, KEPT_TYPED),
-        ({"memory_dir": "m", "reasoning": "drop", "retriever": "off"}, ""),
-        ({"memory_dir": "m", "reasoning": "drop", "memory": False}, ""),
+        ({"memory_dir": "m", "reasoning": "compress", "retriever": "off"}, ""),
+        ({"memory_dir": "m", "reasoning": "compress", "memory": False}, ""),
     ],
 )
 def test_what_a_chat_keeps_across_chats_follows_its_memory_settings(
@@ -533,7 +532,7 @@ def test_the_environment_switch_that_persists_memory_counts(
 ) -> None:
     monkeypatch.setenv("LOCALMELO_PERSIST_MEMORY", "1")
     assert kept_across_chats(AgentOptions()) == ""
-    assert kept_across_chats(AgentOptions(reasoning="drop")) == KEPT_TYPED
+    assert kept_across_chats(AgentOptions(reasoning="compress")) == KEPT_TYPED
 
 
 def test_a_chat_that_keeps_nothing_says_so_in_plain_words() -> None:
@@ -580,7 +579,7 @@ def with_embedding(url: str = URL) -> Config:
         # A legacy chat with an embedding backend keeps nothing past the chat.
         (with_embedding(), None, None, {"memory_dir": "m"}, ""),
         (local(), URL, URL, {"memory_dir": "m"}, ""),
-        (local(), None, None, {"memory_dir": "m", "reasoning": "drop"}, KEPT_TYPED),
+        (local(), None, None, {"memory_dir": "m", "reasoning": "compress"}, KEPT_TYPED),
     ],
 )
 async def test_a_session_agent_names_the_memory_it_was_built_with(

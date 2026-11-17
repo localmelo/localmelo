@@ -569,7 +569,7 @@ async def test_delete_store_failure_keeps_open_session(
 
 @pytest.mark.parametrize(
     ("mode", "kept"),
-    [(None, False), ("legacy", False), ("drop", True), ("compress", True)],
+    [(None, False), ("legacy", False), ("compress", True)],
 )
 def test_only_a_legacy_chat_runs_without_the_cores_long_term_memory(
     workspace: str, mode: str | None, kept: bool

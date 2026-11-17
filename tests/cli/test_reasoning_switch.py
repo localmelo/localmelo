@@ -25,7 +25,7 @@ from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
 
 @pytest.mark.parametrize("with_mcp", [False, True])
-async def test_drop_refusal_keeps_the_old_agent_backend_conversation_and_mcp(
+async def test_a_refused_switch_keeps_the_old_agent_backend_conversation_and_mcp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     with_mcp: bool,
@@ -37,11 +37,12 @@ async def test_drop_refusal_keeps_the_old_agent_backend_conversation_and_mcp(
         vllm=LocalBackendConfig(
             chat_url="http://127.0.0.1:9/v1",
             chat_model="old-model",
-            reasoning_field="reasoning_content",
             requires_reasoning_replay=True,
         ),
     )
-    options = AgentOptions(reasoning="drop", workspace_root=str(tmp_path))
+    options = AgentOptions(
+        reasoning="compress", retriever="off", workspace_root=str(tmp_path)
+    )
     old = Agent(llm=ScriptedLLM([]), options=options)
     await old.start()
     old.load_conversation(
@@ -92,10 +93,10 @@ async def test_drop_refusal_keeps_the_old_agent_backend_conversation_and_mcp(
         ):
             assert not await session._switch("needs-replay", url=None)
         assert "Could not start needs-replay:" in out.text()
-        assert "this backend requires reasoning replay" in out.text()
+        assert "need a reasoning field" in out.text()
         assert "Still using old-model." in out.text()
         assert session.agent is old
-        assert old.options.reasoning == "drop"
+        assert old.options.reasoning == "compress"
         assert old.conversation() == conversation
         assert factory.backend == backend
         assert factory.live_agents() == [old]
@@ -110,9 +111,7 @@ async def test_drop_refusal_keeps_the_old_agent_backend_conversation_and_mcp(
             await provider.close()
 
 
-@pytest.mark.parametrize(
-    "mode", ["legacy", "drop", "replay", "compress", "compress+replay"]
-)
+@pytest.mark.parametrize("mode", ["legacy", "compress", "compress+replay"])
 async def test_model_switch_keeps_the_process_mode_and_full_conversation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -128,7 +127,7 @@ async def test_model_switch_keeps_the_process_mode_and_full_conversation(
             reasoning_field="auto",
         ),
     )
-    options = AgentOptions(reasoning=mode, retriever="off", replay_turns=2)
+    options = AgentOptions(reasoning=mode, retriever="off")
     llm = ScriptedLLM([answer("The kept answer is established; verify it next.")])
     llm.reasoning_field = "auto"
     old = Agent(llm=llm, options=options)
@@ -174,7 +173,6 @@ async def test_model_switch_keeps_the_process_mode_and_full_conversation(
         assert await session._switch("new-model", url=None)
         assert session.agent is not old
         assert session.agent.options.reasoning == mode
-        assert session.agent.options.replay_turns == 2
         assert session.agent.options.replay_scope == "window"
         assert session.agent.conversation() == conversation
         assert session.agent.notes() == notes

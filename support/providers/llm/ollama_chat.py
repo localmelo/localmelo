@@ -197,8 +197,8 @@ class OllamaNativeChat(BaseLLMProvider):
     requires_reasoning_replay : bool
         Whether the server rejects requests that omit a reply's reasoning.
         This provider sends ``thinking`` back anyway when it is present;
-        the agent's ``drop`` mode strips it first, and is refused for a
-        provider that sets this. ``False`` by default.
+        the agent's ``compress`` mode strips it first, except on a provider
+        that sets this. ``False`` by default.
     """
 
     def __init__(

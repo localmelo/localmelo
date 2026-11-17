@@ -44,7 +44,6 @@ def _flag(
 FLAG_OPTIONS: Final = (
     _flag("window_eviction"),
     _flag("window_messages"),
-    _flag("captured_history", convert=_on),
     _flag("max_steps"),
     _flag("attempt_policy"),
     _flag("tool_exposure"),
@@ -52,7 +51,6 @@ FLAG_OPTIONS: Final = (
     _flag("memory_dir"),
     _flag("timeout", "timeout_s"),
     _flag("reasoning"),
-    _flag("replay_turns"),
     _flag("note_writer"),
     _flag("retriever"),
     _flag("recall_at"),

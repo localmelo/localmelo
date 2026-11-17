@@ -83,8 +83,8 @@ def configured_cache_options(
 
 # The three that make up the context budget: all set or none (AgentOptions).
 CONTEXT_SETTINGS: Final = ("context_window", "output_reserve", "safety_margin")
-# The settings of the pictures that tools return (AgentOptions.tool_images).
-IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
+# The setting of the pictures that tools return (AgentOptions.tool_images).
+IMAGE_SETTINGS: Final = ("tool_images",)
 # The setting of the model's thinking: what a turn that ends with only thinking
 # becomes (AgentOptions.empty_reply_fallback).
 FALLBACK_SETTINGS: Final = ("empty_reply_fallback",)
@@ -219,10 +219,8 @@ def configured_session_options(
         name: getattr(cfg.agent, name)
         for name in (
             "reasoning",
-            "replay_turns",
             "note_writer",
             *CACHE_SETTINGS,
-            "captured_history",
             *IMAGE_SETTINGS,
             *FALLBACK_SETTINGS,
         )
@@ -502,10 +500,7 @@ async def build_session_agent(
         timeout: dict[str, Any] = (
             {} if request_timeout_s is None else {"timeout": request_timeout_s}
         )
-        if (
-            agent_options.reasoning in ("replay", "compress+replay")
-            and reasoning_field is not None
-        ):
+        if agent_options.reasoning == "compress+replay" and reasoning_field is not None:
             timeout["reasoning_field"] = reasoning_field
         llm = OpenAICompatLLM(base_url=base_url, model=model or "default", **timeout)
         embedding = (

@@ -31,7 +31,9 @@ from localmelo.melo.schema import (
 
 AttemptPolicy = Literal["reflect", "none"]
 ToolExposure = Literal["retrieve", "all"]
-ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
+# "compress+replay" is not a choice: a provider that requires replay runs "compress"
+# as it (see Agent and the CLI).
+ReasoningMode = Literal["legacy", "compress", "compress+replay"]
 # The reasoning modes that compress each reply into a note: the reply's
 # ``<note>`` block is cut off its answer.
 NOTE_MODES: frozenset[ReasoningMode] = frozenset({"compress", "compress+replay"})
@@ -171,25 +173,19 @@ class AgentOptions:
     - ``reasoning``: how the run sends a reply's reasoning back.
       ``"legacy"``, the default, keeps the behavior before this option: an
       OpenAI-compatible provider sends none, Ollama native sends its own
-      field and inline copy. ``"drop"`` never sends it. ``"replay"`` sends
-      it on the assistant turns in scope, under the provider's one key.
-    - ``replay_turns``: with ``reasoning="replay"``, the newest K assistant
-      turns that carry reasoning are replayed; ``None`` keeps every turn in
-      scope. It is ignored in the other modes.
+      field and inline copy.
     - ``replay_scope``: ``"task"`` (default) replays only the current
       task's turns; ``"window"`` replays every turn in the window, earlier
-      tasks included. It is API-only in R2.
+      tasks included. It is API-only in R2, and applies where thinking is
+      replayed (``compress`` on a provider that requires it).
     - ``compress`` (R4): sends no thinking, asks the model for a short
       note before each tool call, keeps the notes and drafts in the
       working-memory note store, pins a pending draft once after its
       turn's tool results, and puts the attempt's notes in the reflection
-      request. ``compress+replay`` does the same and replays thinking as
-      ``replay`` does. A provider that requires replay runs ``compress``
-      as ``compress+replay``, and the effective mode is what the run
-      reports. Neither mode recalls anything yet (R5).
-    - ``captured_history``: opt in to a bounded, pattern-redacted history copy
-      of tool results, separate from the checked model preview. The option is
-      off by default; :meth:`Agent.run_tool` does not write history.
+      request. A provider that requires replay cannot omit thinking, so it
+      runs ``compress`` as ``compress+replay``: the same, with thinking
+      replayed on the assistant turns in scope under the provider's one
+      key. The effective mode is what the run reports.
     - ``note_writer``: who writes a reply's note in the compress modes:
       ``"auto"`` (default) parses the model's ``<note>`` block and falls
       back to the heuristic, ``"heuristic"`` always writes it from the
@@ -296,10 +292,8 @@ class AgentOptions:
       confine_writes`` is false. Default false: nothing changes.
     - ``tool_images``: whether the pictures that tools return reach the
       model. ``"off"`` names them in the tool message only, as before
-      this option. ``"on"`` also sends the pixels of the newest
-      ``tool_images_keep`` of them (up to ``tool_images_keep +
-      tool_images_retire - 1``; the oldest ``tool_images_retire`` retire
-      together) in each planning request, scaled to at most 1,280 pixels
+      this option. ``"on"`` also sends the pixels of the newest 3 of them
+      (up to 4; the oldest 2 retire together) in each planning request, scaled to at most 1,280 pixels
       wide once, when stored, and each counts toward the prompt cap (see
       ``melo/agent/_tool_images.py``). ``"auto"``, the default, is
       ``"on"`` when the provider says the model reads images
@@ -360,7 +354,6 @@ class AgentOptions:
     tool_timeout_s: float | None = None
     tool_env: Mapping[str, str] | None = None
     reasoning: ReasoningMode = "legacy"
-    replay_turns: int | None = None
     replay_scope: Literal["task", "window"] = "task"
     note_writer: NoteWriter = "auto"
     # R5's recall: the retriever plan, its triggers, hits, kinds, placement
@@ -379,7 +372,6 @@ class AgentOptions:
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
-    captured_history: bool = False
     window_eviction: WindowEviction = "chunk"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
@@ -387,8 +379,6 @@ class AgentOptions:
     confine_writes: bool = False
     identity: str | None = None
     tool_images: ToolImages = "auto"
-    tool_images_keep: int = 3
-    tool_images_retire: int = 2
     answer_on_stop: bool = True
     max_calls: int | None = None
     task_aids: bool = False
@@ -462,8 +452,6 @@ class AgentOptions:
             "max_steps",
             "steps_per_attempt",
             "max_attempts",
-            "tool_images_keep",
-            "tool_images_retire",
         ):
             value = getattr(self, name)
             if not _is_positive_int(value):
@@ -539,7 +527,6 @@ class AgentOptions:
 
         for name in (
             "keep_decision_text",
-            "captured_history",
             "answer_on_stop",
             "confine_writes",
             "task_aids",
@@ -578,12 +565,6 @@ class AgentOptions:
         if not isinstance(self.record_answers, bool):
             raise ValueError(
                 f"record_answers must be a bool, got {self.record_answers!r}"
-            )
-
-        if self.replay_turns is not None and not _is_positive_int(self.replay_turns):
-            raise ValueError(
-                "replay_turns must be None or an int >= 1, "
-                f"got {self.replay_turns!r}"
             )
 
         if self.tool_timeout_s is not None:
@@ -647,12 +628,7 @@ def reasoning_refusal(
     that requires replay: it keeps the behavior before this option, which
     may draw an HTTP 400 there.
     """
-    if mode == "drop" and requires_replay:
-        return (
-            "this backend requires reasoning replay, so drop is not possible: "
-            "use replay or compress+replay"
-        )
-    if mode in ("replay", "compress+replay") and not reasoning_field:
+    if mode == "compress+replay" and not reasoning_field:
         return (
             "replay and compress+replay need a reasoning field: give "
             "--reasoning-field (auto, reasoning_content or reasoning) with "
@@ -722,7 +698,7 @@ def retrieval_refusal(
         return "--retriever embedding needs an embedding provider"
     if mode == "embedding" and not memory:
         return "--retriever embedding needs --memory on"
-    if placement == "message" and reasoning in ("replay", "compress+replay"):
+    if placement == "message" and reasoning == "compress+replay":
         return "--recall-placement message is not available in replay modes"
     triggers: set[str] = set()
     enabled = getattr(plan, "enabled", None)

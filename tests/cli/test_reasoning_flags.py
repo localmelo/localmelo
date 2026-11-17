@@ -68,55 +68,6 @@ def _main(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     return exc.value.code
 
 
-def test_replay_with_base_url_needs_a_reasoning_field(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(
-            parser,
-            parser.parse_args(
-                ["--base-url", "http://127.0.0.1:1/v1", "--reasoning", "replay", "q"]
-            ),
-        )
-    assert exc.value.code == 2
-    assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: replay and compress+replay need a "
-        "reasoning field: give --reasoning-field (auto, reasoning_content or "
-        "reasoning) with --base-url, or set reasoning_field in the backend's "
-        "config"
-    )
-
-
-def test_the_configured_backend_needs_a_reasoning_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    path = tmp_path / "config.toml"
-    _write_config(path)
-    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
-    assert _main(["--reasoning", "replay", "q"], monkeypatch) == 2
-    assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: replay and compress+replay need a "
-        "reasoning field: set reasoning_field in the chat backend's config section"
-    )
-
-
-def test_drop_on_a_replay_required_backend_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    path = tmp_path / "config.toml"
-    _write_config(
-        path,
-        extra='reasoning_field = "auto"\nrequires_reasoning_replay = true\n',
-    )
-    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
-    assert _main(["--reasoning", "drop", "q"], monkeypatch) == 2
-    assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: this backend requires reasoning "
-        "replay, so drop is not possible: use replay or compress+replay"
-    )
-
-
 def test_reasoning_field_on_ollama_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -139,15 +90,7 @@ def test_invalid_reasoning_values_are_argparse_errors(
     assert exc.value.code == 2
     assert _error_line(capsys) == (
         "melo: error: argument --reasoning: invalid choice: 'summarize' "
-        "(choose from 'legacy', 'drop', 'replay', 'compress', "
-        "'compress+replay')"
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["--replay-turns", "0", "q"])
-    assert exc.value.code == 2
-    assert (
-        "argument --replay-turns: must be at least 1, got 0" in capsys.readouterr().err
+        "(choose from 'legacy', 'compress')"
     )
 
 
@@ -155,32 +98,26 @@ def test_the_agent_table_applies_only_when_the_flag_is_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "config.toml"
-    _write_config(
-        path,
-        extra='reasoning_field = "auto"\n',
-        agent='\n[agent]\nreasoning = "replay"\nreplay_turns = 2\n',
-    )
+    _write_config(path, agent='\n[agent]\nreasoning = "compress"\n')
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     parser, args = _parse(["q"])
     options = cli._direct_options(parser, args)
     with mock.patch.object(cli, "Agent") as agent_cls:
         cli._build_direct_mode_agent(args, options=options)
-    built = agent_cls.call_args.kwargs["options"]
-    assert (built.reasoning, built.replay_turns) == ("replay", 2)
+    assert agent_cls.call_args.kwargs["options"].reasoning == "compress"
 
-    parser, args = _parse(["--reasoning", "drop", "--replay-turns", "5", "q"])
+    parser, args = _parse(["--reasoning", "legacy", "q"])
     options = cli._direct_options(parser, args)
     with mock.patch.object(cli, "Agent") as agent_cls:
         cli._build_direct_mode_agent(args, options=options)
-    built = agent_cls.call_args.kwargs["options"]
-    assert (built.reasoning, built.replay_turns) == ("drop", 5)
+    assert agent_cls.call_args.kwargs["options"].reasoning == "legacy"
 
 
 def test_base_url_ignores_config_reasoning_but_reads_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "config.toml"
-    _write_config(path, agent='\n[agent]\nreasoning = "replay"\n')
+    _write_config(path, agent='\n[agent]\nreasoning = "compress"\n')
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     parser, args = _parse(["--base-url", "http://127.0.0.1:1/v1", "q"])
     options = cli._direct_options(parser, args)
@@ -194,28 +131,6 @@ def test_base_url_ignores_config_reasoning_but_reads_budget(
         cli._build_direct_mode_agent(args, options=options)
     load.assert_called_once()
     assert agent_cls.call_args.kwargs["options"].reasoning == "legacy"
-
-    parser, args = _parse(
-        [
-            "--base-url",
-            "http://127.0.0.1:1/v1",
-            "--reasoning",
-            "replay",
-            "--reasoning-field",
-            "auto",
-            "q",
-        ]
-    )
-    options = cli._direct_options(parser, args)
-    with (
-        mock.patch(
-            "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
-        ) as provider,
-        mock.patch.object(cli, "Agent") as agent_cls,
-    ):
-        cli._build_direct_mode_agent(args, options=options)
-    assert provider.call_args.kwargs["reasoning_field"] == "auto"
-    assert agent_cls.call_args.kwargs["options"].reasoning == "replay"
 
     parser, args = _parse(
         ["--base-url", "http://127.0.0.1:1/v1", "--reasoning-field", "auto", "q"]
@@ -245,14 +160,14 @@ def test_a_config_reasoning_field_is_inert_without_replay(
     assert agent_cls.call_args.kwargs["llm"].reasoning_field is None
 
 
-def test_replay_passes_the_section_field_to_the_provider(
+def test_compress_on_a_replay_required_backend_passes_the_section_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "config.toml"
     _write_config(
         path,
-        extra='reasoning_field = "reasoning_content"\n',
-        agent='\n[agent]\nreasoning = "replay"\n',
+        extra='reasoning_field = "reasoning_content"\nrequires_reasoning_replay = true\n',
+        agent='\n[agent]\nreasoning = "compress"\n',
     )
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     parser, args = _parse(["q"])
@@ -266,7 +181,7 @@ def test_replay_passes_the_section_field_to_the_provider(
     assert provider.call_args.kwargs["reasoning_field"] == "reasoning_content"
 
     parser, args = _parse(
-        ["--reasoning", "replay", "--reasoning-field", "reasoning", "q"]
+        ["--reasoning", "compress", "--reasoning-field", "reasoning", "q"]
     )
     options = cli._direct_options(parser, args)
     with mock.patch(
@@ -359,7 +274,7 @@ def test_the_json_line_reports_the_mode_and_counters(
             "--base-url",
             "http://x/v1",
             "--reasoning",
-            "drop",
+            "compress",
             "--output-format",
             "json",
             "q",
@@ -369,25 +284,25 @@ def test_the_json_line_reports_the_mode_and_counters(
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 1
     record = json.loads(out[0])
-    assert record["config"]["reasoning"] == "drop"
+    assert record["config"]["reasoning"] == "compress"
     assert record["usage"]["reasoning_chars"] == 5
     assert record["memory_stats"] == {
         "replayed_chars": 0,
         "replay_skipped": 0,
         "replay_stripped": 0,
-        "notes": 0,
+        "notes": 1,
         "notes_model": 0,
-        "notes_heuristic": 0,
-        "note_chars": 0,
+        "notes_heuristic": 1,
+        "note_chars": 11,
         "drafts": 0,
         "drafts_written": 0,
-        "candidates": 0,
+        "candidates": 4,
         "remember_model": 0,
-        "remember_heuristic": 0,
+        "remember_heuristic": 1,
         "candidates_refused": 0,
         "redactions": 0,
         "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
-        "digests": 0,
+        "digests": 1,
         "recalls": 0,
         "recalls_by_trigger": {"start": 0, "attempt": 0, "step": 0, "tool": 0},
         "recall_hits": 0,
@@ -399,7 +314,7 @@ def test_the_json_line_reports_the_mode_and_counters(
         "recall_fallbacks": 0,
         "recall_skipped": 0,
         "recall_refused": 0,
-        "recall_empty": 0,
+        "recall_empty": 1,
         "aux_retrieve_calls": 0,
         "retrieve_errors": 0,
         "retrieve_prompt_tokens": 0,
@@ -454,7 +369,6 @@ def test_the_interactive_help_lists_the_flags() -> None:
     for key, flag in (
         ("agent.reasoning", "--reasoning"),
         ("endpoint.reasoning_field", "--reasoning-field"),
-        ("agent.replay_turns", "--replay-turns"),
         ("agent.note_writer", "--note-writer"),
     ):
         assert re.search(rf"^  {key} .* {flag} \(#183\)$", text, re.M)
@@ -464,39 +378,18 @@ def test_a_config_refusal_leaves_no_memory_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "config.toml"
-    _write_config(path)
+    _write_config(path, extra="requires_reasoning_replay = true\n")
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     memory_dir = tmp_path / "memory"
     assert (
         _main(
-            ["--memory-dir", str(memory_dir), "--reasoning", "replay", "q"],
+            ["--memory-dir", str(memory_dir), "--reasoning", "compress", "q"],
             monkeypatch,
         )
         == 2
     )
     assert "replay and compress+replay need a reasoning field" in _error_line(capsys)
     assert not memory_dir.exists()
-
-
-def test_a_serve_conflict_wins_over_the_reasoning_field(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(
-            parser,
-            parser.parse_args(
-                [
-                    "--serve",
-                    "--base-url",
-                    "http://127.0.0.1:1/v1",
-                    "--reasoning",
-                    "replay",
-                ]
-            ),
-        )
-    assert exc.value.code == 2
-    assert "are for a task or the interactive UI" in _error_line(capsys)
 
 
 def test_the_interactive_ui_accepts_the_reasoning_field(
@@ -510,32 +403,6 @@ def test_the_interactive_ui_accepts_the_reasoning_field(
 
 
 # ── R4: compress modes and the note writer ──
-
-
-def test_compress_replay_with_base_url_needs_a_reasoning_field(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(
-            parser,
-            parser.parse_args(
-                [
-                    "--base-url",
-                    "http://127.0.0.1:1/v1",
-                    "--reasoning",
-                    "compress+replay",
-                    "q",
-                ]
-            ),
-        )
-    assert exc.value.code == 2
-    assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: replay and compress+replay need a "
-        "reasoning field: give --reasoning-field (auto, reasoning_content or "
-        "reasoning) with --base-url, or set reasoning_field in the backend's "
-        "config"
-    )
 
 
 def test_compress_with_base_url_needs_no_reasoning_field() -> None:
@@ -703,7 +570,7 @@ def test_compress_on_a_replay_required_backend_becomes_compress_replay(
     with mock.patch.object(cli, "Agent") as agent_cls:
         cli._build_direct_mode_agent(args, options=options)
     built = agent_cls.call_args.kwargs["options"]
-    assert (built.reasoning, built.replay_turns) == ("compress+replay", None)
+    assert built.reasoning == "compress+replay"
 
     path.write_text(
         CONFIG.format(backend="vllm", extra="requires_reasoning_replay = true\n")

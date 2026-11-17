@@ -119,29 +119,6 @@ def test_legacy_refuses_every_retrieval_flag(
     assert "do not give --recall-k" in _error_line(capsys)
 
 
-def test_message_placement_is_refused_in_replay_modes(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(
-            parser,
-            parser.parse_args(
-                [
-                    "--reasoning",
-                    "replay",
-                    "--reasoning-field",
-                    "auto",
-                    "--recall-placement",
-                    "message",
-                    "q",
-                ]
-            ),
-        )
-    assert exc.value.code == 2
-    assert "message is not available in replay modes" in _error_line(capsys)
-
-
 def test_the_tool_trigger_is_refused_with_mcp_only_or_without_recall(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -410,22 +387,6 @@ def test_the_extra_body_flag_reaches_the_provider_by_kind() -> None:
     assert provider.call_args.kwargs["extra_body_by_kind"] == {
         "retrieve": {"chat_template_kwargs": {"enable_thinking": False}}
     }
-
-
-def test_a_config_table_message_placement_is_refused_in_replay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    path = tmp_path / "config.toml"
-    _write_config(
-        path,
-        extra='reasoning_field = "auto"\n',
-        agent=(
-            '\n[agent]\nreasoning = "replay"\n' '\n[retrieval]\nplacement = "message"\n'
-        ),
-    )
-    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
-    assert _main(["q"], monkeypatch) == 2
-    assert "message is not available in replay modes" in _error_line(capsys)
 
 
 def test_a_config_retriever_off_refuses_a_recall_flag(

@@ -108,7 +108,7 @@ What to know about the runner:
 What the stored conversation holds:
 
 - Pairs contain no old thinking.
-- A window checkpoint includes redacted thinking until retention clears it: replay modes send the retained part, subject to their replay limits, while `drop` and `compress` strip both the thinking field and a legacy inline `<think>` copy from request copies. The stored conversation stays intact.
+- A window checkpoint includes redacted thinking until retention clears it: a provider that requires replay is sent the retained part, while `compress` otherwise strips both the thinking field and a legacy inline `<think>` copy from request copies. The stored conversation stays intact.
 - `turns.note` remains a stored digest, not a restored RAM-only note store; a window may retain the original model `<note>` text without reconstructing note entries.
 
 `pairs` stays the default until a benchmark decides between the two with `scripts/resume_ab.py`. `window` becomes the default only if, over 90 paired interrupted states:

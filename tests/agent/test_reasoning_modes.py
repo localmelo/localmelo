@@ -152,15 +152,15 @@ def _reflection(action: str = "continue") -> dict[str, Any]:
 
 def _options(**kwargs: Any) -> AgentOptions:
     kwargs.setdefault("builtins", frozenset())
+    kwargs.setdefault("retriever", "off")
+    kwargs.setdefault("tool_exposure", "all")
     return AgentOptions(**kwargs)
 
 
 def test_agent_options_validate_the_reasoning_fields() -> None:
-    with pytest.raises(ValueError, match="reasoning must be one of"):
-        AgentOptions(reasoning="summarize")  # type: ignore[arg-type]
-    for bad in (0, -1, 1.5, True):
-        with pytest.raises(ValueError, match="replay_turns must be"):
-            AgentOptions(replay_turns=bad)  # type: ignore[arg-type]
+    for removed in ("summarize", "drop", "replay"):
+        with pytest.raises(ValueError, match="reasoning must be one of"):
+            AgentOptions(reasoning=removed)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="note_writer must be one of"):
         AgentOptions(note_writer="mystery")  # type: ignore[arg-type]
     assert AgentOptions(reasoning="compress").note_writer == "auto"
@@ -171,15 +171,12 @@ def test_agent_options_validate_the_reasoning_fields() -> None:
 
 def test_reasoning_refusal_is_a_pure_capability_check() -> None:
     assert reasoning_refusal("legacy", None, True) is None
-    assert reasoning_refusal("drop", None, False) is None
-    assert reasoning_refusal("replay", "auto", False) is None
-    assert "need a reasoning field" in (reasoning_refusal("replay", None, False) or "")
+    assert reasoning_refusal("compress+replay", "auto", False) is None
     assert "need a reasoning field" in (
         reasoning_refusal("compress+replay", None, False) or ""
     )
     assert reasoning_refusal("compress", None, False) is None
     assert reasoning_refusal("compress", None, True) is None
-    assert "drop is not possible" in (reasoning_refusal("drop", "auto", True) or "")
 
 
 def _agent(
@@ -203,111 +200,13 @@ def _has_reasoning(message: dict[str, Any]) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_drop_equals_legacy_on_the_wire() -> None:
-    script = [
-        _reply("", thinking="draft one", calls=1),
-        _reply("", thinking="draft two"),
-        _reflection(),
-        _reply("done", thinking="draft four"),
-    ]
-    legacy_server = Scripted(*script)
-    legacy_llm = legacy_server.llm()
-    legacy = _agent(
-        legacy_llm,
-        _options(
-            reasoning="legacy",
-            attempt_policy="reflect",
-            steps_per_attempt=2,
-            max_attempts=2,
-        ),
-    )
-    legacy_result = await legacy.run_task("q")
-    await legacy.close()
-
-    drop_server = Scripted(*script)
-    drop_llm = drop_server.llm(reasoning_field="auto")
-    drop = _agent(
-        drop_llm,
-        _options(
-            reasoning="drop",
-            attempt_policy="reflect",
-            steps_per_attempt=2,
-            max_attempts=2,
-        ),
-    )
-    drop_result = await drop.run_task("q")
-    await drop.close()
-
-    assert legacy_result.status == drop_result.status == "completed"
-    for bodies in (legacy_server.bodies, drop_server.bodies):
-        assert len(bodies) == 4
-        assert any(
-            "Original task:" in body["messages"][-1]["content"] for body in bodies
-        )
-    assert legacy_server.bodies == drop_server.bodies
-    assert "memory_stats" not in legacy_result.to_dict()
-    assert drop_result.memory_stats == {
-        "replayed_chars": 0,
-        "replay_skipped": 0,
-        "replay_stripped": 0,
-        "notes": 0,
-        "notes_model": 0,
-        "notes_heuristic": 0,
-        "note_chars": 0,
-        "drafts": 0,
-        "drafts_written": 0,
-        "candidates": 0,
-        "remember_model": 0,
-        "remember_heuristic": 0,
-        "candidates_refused": 0,
-        "redactions": 0,
-        "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
-        "digests": 0,
-        "recalls": 0,
-        "recalls_by_trigger": {"start": 0, "attempt": 0, "step": 0, "tool": 0},
-        "recall_hits": 0,
-        "recall_same_task": 0,
-        "recall_cross_task": 0,
-        "recall_task_notes": 0,
-        "recall_chars": 0,
-        "recall_ms": 0,
-        "recall_fallbacks": 0,
-        "recall_skipped": 0,
-        "recall_refused": 0,
-        "recall_empty": 0,
-        "aux_retrieve_calls": 0,
-        "retrieve_errors": 0,
-        "retrieve_prompt_tokens": 0,
-        "retrieve_completion_tokens": 0,
-        "thought_chunks": 0,
-        "recall_log": [],
-        "admitted": {
-            "rehearsal": 0,
-            "user_request": 0,
-            "user_statement": 0,
-            "outcome": 0,
-            "sleep": 0,
-        },
-        "written": {
-            "semantic": 0,
-            "episodic": 0,
-            "profile": 0,
-            "reflection": 0,
-        },
-        "ignored": 0,
-    }
-    assert drop_result.config["reasoning"] == "drop"
-    assert "reasoning_chars" in drop_result.usage
-
-
-@pytest.mark.asyncio
 async def test_auto_sends_exactly_one_key_on_every_later_request() -> None:
     server = Scripted(
         _reply("", thinking="first", calls=1),
         _reply("done", thinking="second"),
     )
     llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay"))
+    agent = _agent(llm, _options(reasoning="compress+replay"))
     await agent.run_task("q")
     await agent.close()
 
@@ -326,7 +225,7 @@ async def test_a_turn_over_the_cap_is_skipped_and_counted() -> None:
         _reply("done"),
     )
     llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay"))
+    agent = _agent(llm, _options(reasoning="compress+replay"))
     result = await agent.run_task("q")
     await agent.close()
 
@@ -358,7 +257,7 @@ async def test_replay_required_evicts_whole_units_and_never_cuts() -> None:
     )
     agent = _agent(
         llm,
-        _options(reasoning="replay", replay_scope="window"),
+        _options(reasoning="compress+replay", replay_scope="window"),
     )
     agent.load_conversation(
         [
@@ -395,7 +294,7 @@ async def test_replay_strips_the_oldest_thinking_before_dropping_a_unit() -> Non
         ]
     server = Scripted(_reply("done"))
     llm = server.llm(reasoning_field="reasoning_content")
-    agent = _agent(llm, _options(reasoning="replay", replay_scope="window"))
+    agent = _agent(llm, _options(reasoning="compress+replay", replay_scope="window"))
     agent.load_conversation(turns)
     result = await agent.run_task("q")
     await agent.close()
@@ -412,33 +311,6 @@ async def test_replay_strips_the_oldest_thinking_before_dropping_a_unit() -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("turns", "expected"), [(2, [3, 4]), (1, [4]), (None, [1, 2, 3, 4])]
-)
-async def test_replay_turns_keeps_the_newest_k(
-    turns: int | None, expected: list[int]
-) -> None:
-    history = [
-        Message(role="assistant", content=f"a{i}", thinking=f"t{i}")
-        for i in range(1, 5)
-    ]
-    server = Scripted(_reply("done"))
-    llm = server.llm(reasoning_field="reasoning_content")
-    agent = _agent(
-        llm,
-        _options(reasoning="replay", replay_scope="window", replay_turns=turns),
-    )
-    agent.load_conversation(history)
-    await agent.run_task("q")
-    await agent.close()
-
-    sent = _assistant(server.bodies[0])
-    assert [m["content"] for m in sent] == ["a1", "a2", "a3", "a4"]
-    replayed = [i + 1 for i, m in enumerate(sent) if _has_reasoning(m)]
-    assert replayed == expected
-
-
-@pytest.mark.asyncio
 async def test_replay_scope_task_keeps_earlier_tasks_out() -> None:
     old = Message(role="assistant", content="old", thinking="old thought")
     script = [
@@ -448,7 +320,7 @@ async def test_replay_scope_task_keeps_earlier_tasks_out() -> None:
 
     task_server = Scripted(*script)
     task_llm = task_server.llm(reasoning_field="auto")
-    task_agent = _agent(task_llm, _options(reasoning="replay"))
+    task_agent = _agent(task_llm, _options(reasoning="compress+replay"))
     task_agent.load_conversation([old])
     await task_agent.run_task("q")
     await task_agent.close()
@@ -459,7 +331,7 @@ async def test_replay_scope_task_keeps_earlier_tasks_out() -> None:
     window_server = Scripted(*script)
     window_llm = window_server.llm(reasoning_field="reasoning_content")
     window_agent = _agent(
-        window_llm, _options(reasoning="replay", replay_scope="window")
+        window_llm, _options(reasoning="compress+replay", replay_scope="window")
     )
     window_agent.load_conversation([old])
     await window_agent.run_task("q")
@@ -472,7 +344,7 @@ def test_an_evicted_task_query_makes_every_remaining_turn_the_tasks() -> None:
         Message(role="assistant", content="old", thinking="old thought"),
         Message(role="user", content="later"),
     ]
-    options = AgentOptions(reasoning="replay")
+    options = AgentOptions(reasoning="compress+replay")
     sent, _ = _replay_plan(
         window, options, task_query=Message(role="user", content="gone")
     )
@@ -480,7 +352,7 @@ def test_an_evicted_task_query_makes_every_remaining_turn_the_tasks() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["drop", "replay"])
+@pytest.mark.parametrize("mode", ["compress", "compress+replay"])
 async def test_the_receipt_split_cleans_content_and_keeps_thinking(mode: str) -> None:
     server = Scripted(
         _reply("<think>draft</think>answer", calls=1),
@@ -493,18 +365,20 @@ async def test_the_receipt_split_cleans_content_and_keeps_thinking(mode: str) ->
     await agent.close()
 
     tool_turn = next(m for m in conversation if m.tool_calls)
-    assert (tool_turn.content, tool_turn.thinking) == ("answer", "draft")
+    assert tool_turn.content.startswith("answer")
+    assert "<think>" not in tool_turn.content
+    assert tool_turn.thinking == ("draft" if mode == "compress+replay" else "")
     assert result.result == "done"
     assert result.usage["reasoning_chars"] == len("draft") + len("last")
     current = next(m for m in _assistant(server.bodies[1]) if m.get("tool_calls"))
-    if mode == "replay":
+    if mode == "compress+replay":
         assert current["reasoning_content"] == "draft"
     else:
         assert not _has_reasoning(current)
 
 
 @pytest.mark.asyncio
-async def test_ollama_drop_sends_no_thinking_and_no_inline_copy() -> None:
+async def test_ollama_compress_sends_no_thinking_and_no_inline_copy() -> None:
     server = OllamaScripted(
         {
             "role": "assistant",
@@ -521,12 +395,12 @@ async def test_ollama_drop_sends_no_thinking_and_no_inline_copy() -> None:
         },
         {"role": "assistant", "content": "done"},
     )
-    agent = _agent(server.llm(), _options(reasoning="drop"))
+    agent = _agent(server.llm(), _options(reasoning="compress"))
     await agent.run_task("q")
     await agent.close()
     turn = next(m for m in server.bodies[1]["messages"] if m["role"] == "assistant")
     assert "thinking" not in turn
-    assert turn["content"] == ""
+    assert "<think>" not in turn["content"] and "draft" not in turn["content"]
 
 
 @pytest.mark.asyncio
@@ -545,7 +419,7 @@ async def test_the_empty_reply_label_keeps_its_thinking_for_replay() -> None:
 
     replay_server = Scripted(*script)
     replay_llm = replay_server.llm(reasoning_field="auto")
-    replay_agent = _agent(replay_llm, _options(reasoning="replay"))
+    replay_agent = _agent(replay_llm, _options(reasoning="compress+replay"))
     await replay_agent.run_task("q")
     label = next(
         m for m in replay_agent.conversation() if m.content == EMPTY_REPLY_LABEL
@@ -563,14 +437,16 @@ async def test_the_empty_reply_label_keeps_its_thinking_for_replay() -> None:
     await legacy_agent.close()
     assert not _has_reasoning(_assistant(legacy_server.bodies[1])[0])
 
-    drop_server = Scripted(*script)
-    drop_llm = drop_server.llm(reasoning_field="auto")
-    drop_agent = _agent(drop_llm, _options(reasoning="drop"))
-    await drop_agent.run_task("q")
-    label = next(m for m in drop_agent.conversation() if m.content == EMPTY_REPLY_LABEL)
-    await drop_agent.close()
-    assert label.thinking == "empty thought"
-    assert not _has_reasoning(_assistant(drop_server.bodies[1])[0])
+    compress_server = Scripted(*script)
+    compress_llm = compress_server.llm(reasoning_field="auto")
+    compress_agent = _agent(compress_llm, _options(reasoning="compress"))
+    await compress_agent.run_task("q")
+    label = next(
+        m for m in compress_agent.conversation() if m.content == EMPTY_REPLY_LABEL
+    )
+    await compress_agent.close()
+    assert label.thinking == ""  # a compress window carries no thinking
+    assert not _has_reasoning(_assistant(compress_server.bodies[1])[0])
 
 
 @pytest.mark.asyncio
@@ -578,7 +454,7 @@ async def test_the_size_cut_turn_keeps_its_thinking_in_replay() -> None:
     script = [_reply("a" * 60_000, thinking="cut thought", calls=1), _reply("done")]
     replay_server = Scripted(*script)
     replay_llm = replay_server.llm(reasoning_field="auto")
-    replay_agent = _agent(replay_llm, _options(reasoning="replay"))
+    replay_agent = _agent(replay_llm, _options(reasoning="compress+replay"))
     await replay_agent.run_task("q")
     cut = next(m for m in replay_agent.conversation() if m.tool_calls)
     await replay_agent.close()
@@ -610,7 +486,7 @@ async def test_do_reflect_fits_the_request_it_sends() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay"),
+        _options(reasoning="compress+replay"),
     )
     agent.load_conversation(
         [
@@ -643,7 +519,7 @@ async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay"),
+        _options(reasoning="compress+replay"),
     )
     agent.load_conversation(
         [
@@ -668,7 +544,7 @@ async def test_do_reflect_leaves_out_a_tail_that_cannot_fit() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay"),
+        _options(reasoning="compress+replay"),
     )
     # A failed check is never shortened: it goes whole, the last thing to go.
     failed = "Traceback (most recent call last):\n" + "x" * 120_000
@@ -699,19 +575,13 @@ class CountingEmbedding(BaseEmbeddingProvider):
 
 @pytest.mark.asyncio
 async def test_the_agent_refuses_an_impossible_pair() -> None:
-    replay_llm = Scripted(_reply("done")).llm(
-        reasoning_field="auto", requires_reasoning_replay=True
-    )
-    with pytest.raises(ValueError, match="drop is not possible"):
-        Agent(llm=replay_llm, options=_options(reasoning="drop"))
-    await replay_llm.close()
     without_field = OpenAICompatLLM(
         base_url="http://stub.test/v1",
         model="m",
         transport=httpx.MockTransport(Scripted().handler),
     )
     with pytest.raises(ValueError, match="need a reasoning field"):
-        Agent(llm=without_field, options=_options(reasoning="replay"))
+        Agent(llm=without_field, options=_options(reasoning="compress+replay"))
     await without_field.close()
 
 
@@ -731,7 +601,7 @@ class RecordingLLM(BaseLLMProvider):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["legacy", "drop", "replay"])
+@pytest.mark.parametrize("mode", ["legacy", "compress+replay"])
 async def test_no_mode_embeds_without_a_retriever(mode: str) -> None:
     embedding = CountingEmbedding()
     llm = RecordingLLM()
@@ -772,7 +642,7 @@ async def test_replay_counters_match_what_the_requests_carried() -> None:
         _reply("done", thinking="b" * 2_000),
     )
     llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay"))
+    agent = _agent(llm, _options(reasoning="compress+replay"))
     result = await agent.run_task("q")
     await agent.close()
     carried = sum(
@@ -787,8 +657,8 @@ async def test_replay_counters_match_what_the_requests_carried() -> None:
 
 @pytest.mark.asyncio
 async def test_a_replay_required_provider_replays_the_whole_window() -> None:
-    # The task scope and replay_turns would leave the two loaded turns out;
-    # a server that requires replay must get them, so both are exempt.
+    # The task scope would leave the two loaded turns out; a server that
+    # requires replay must get them, so it is exempt.
     old = Message(role="assistant", content="old", thinking="old thought")
     older = Message(role="assistant", content="older", thinking="older thought")
     server = Scripted(
@@ -800,7 +670,7 @@ async def test_a_replay_required_provider_replays_the_whole_window() -> None:
     )
     agent = _agent(
         llm,
-        _options(reasoning="replay", replay_turns=1),
+        _options(reasoning="compress+replay"),
     )
     agent.load_conversation([old, older])
     await agent.run_task("q")
@@ -823,7 +693,7 @@ async def test_a_replay_required_answer_keeps_its_thinking() -> None:
     )
     agent = _agent(
         llm,
-        _options(reasoning="replay", record_answers=True),
+        _options(reasoning="compress+replay", record_answers=True),
     )
     await agent.run_task("first")
     await agent.run_task("second")
@@ -896,8 +766,10 @@ async def test_config_providers_keep_the_section_field_in_replay(
             reasoning_field="reasoning_content",
         ),
     )
-    llm, embedding = providers_for(cfg, "replay")
-    agent = Agent(llm=llm, embedding=embedding, options=_options(reasoning="replay"))
+    llm, embedding = providers_for(cfg, "compress+replay")
+    agent = Agent(
+        llm=llm, embedding=embedding, options=_options(reasoning="compress+replay")
+    )
     agent.hippo.register_tool(_echo())
     agent.executor.register("echo", _run_echo)
     result = await agent.run_task("q")
@@ -924,7 +796,7 @@ async def test_a_reflection_the_prompt_check_refuses_reads_as_unreadable(
     agent = _agent(
         server.llm(reasoning_field="auto"),
         _options(
-            reasoning="replay",
+            reasoning="compress+replay",
             answer_on_stop=False,  # the request it adds is not what this counts
             max_steps=5,
             steps_per_attempt=1,
@@ -941,7 +813,7 @@ async def test_a_reflection_the_prompt_check_refuses_reads_as_unreadable(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["drop", "replay", "compress", "compress+replay"])
+@pytest.mark.parametrize("mode", ["compress", "compress+replay"])
 async def test_the_explicit_modes_write_no_raw_step_summary(mode: str) -> None:
     embedding = CountingEmbedding()
     server = Scripted(

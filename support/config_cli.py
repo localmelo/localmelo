@@ -123,7 +123,9 @@ def _set(name: str, text: str) -> int:
     key = settings.lookup(name)
     if not key.file:
         settings.fail(f"{key.name} is for one run only; use melo -X {key.name}=VALUE")
-    value = settings.check(key, settings.coerce(key, settings.parse_value(text), text))
+    parsed = settings.parse_value(text)
+    settings.refuse_removed_value(key.name, parsed)
+    value = settings.check(key, settings.coerce(key, parsed, text))
     try:
         cfg = config.load()
         config.set_key(cfg, key.name, value)

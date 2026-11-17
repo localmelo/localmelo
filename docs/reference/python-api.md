@@ -56,10 +56,9 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
 | `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](../guides/python.md#work-in-a-directory). |
 | `record_answers` | `False` | `True` keeps each run's answer in working memory for the next run; see [Keep answers between runs](../guides/python.md#keep-answers-between-runs). |
-| `reasoning` | `"legacy"` | How a reply's reasoning is sent back: `"legacy"`, `"drop"`, `"replay"`, `"compress"` or `"compress+replay"`; see [Reasoning modes](cli.md#direct-mode). |
-| `replay_turns` | `None` | With `"replay"` or `"compress+replay"`, the newest N assistant turns whose reasoning is replayed; `None` keeps every turn in scope. |
+| `reasoning` | `"legacy"` | How a reply's reasoning is kept: `"legacy"` or `"compress"`; `"compress+replay"` is what `"compress"` runs as on a provider that requires replay, and it needs a provider with a reasoning field. See [Reasoning modes](cli.md#direct-mode). |
 | `replay_scope` | `"task"` | `"task"` replays only the current task's turns; `"window"` replays every turn in the window, earlier tasks included. API-only. |
-| `note_writer` | `"auto"` | In the compress modes, `"auto"` reads the model's `<note>` block, else the heuristic; `"heuristic"` always writes the note from the reply's text and thinking. |
+| `note_writer` | `"auto"` | With `"compress"`, `"auto"` reads the model's `<note>` block, else the heuristic; `"heuristic"` always writes the note from the reply's text and thinking. |
 
 `AgentOptions` cannot be changed after it is created. A value that is not
 valid raises `ValueError` and names the field:

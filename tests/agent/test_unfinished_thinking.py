@@ -139,7 +139,7 @@ def _notices(events: list[AgentEvent]) -> list[str]:
     return [event.data["kind"] for event in events if event.type == "notice"]
 
 
-@pytest.mark.parametrize("reasoning", ["legacy", "drop"])
+@pytest.mark.parametrize("reasoning", ["legacy", "compress"])
 async def test_an_unclosed_think_is_thinking_and_the_model_answers_again(
     stub: StubServer, tmp_path: Path, reasoning: str
 ) -> None:

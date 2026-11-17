@@ -25,12 +25,10 @@ from localmelo.tests.fixtures.stub_llm import StubServer
     ("mode", "required", "replayed"),
     [
         ("legacy", False, False),
-        ("drop", False, False),
         ("compress", False, False),
-        ("replay", False, True),
         ("compress+replay", False, True),
         ("compress", True, True),
-        ("replay", True, True),
+        ("compress+replay", True, True),
     ],
 )
 async def test_gated_configured_session_normalizes_before_wrapping_and_replays(
@@ -88,9 +86,7 @@ async def test_gated_configured_session_normalizes_before_wrapping_and_replays(
         server.close()
 
 
-@pytest.mark.parametrize(
-    "mode", ["legacy", "drop", "replay", "compress", "compress+replay"]
-)
+@pytest.mark.parametrize("mode", ["legacy", "compress", "compress+replay"])
 async def test_gated_native_provider_keeps_its_fixed_thinking_field(
     tmp_path: Path,
     mode: ReasoningMode,
@@ -134,9 +130,7 @@ async def test_gated_native_provider_keeps_its_fixed_thinking_field(
         [body] = bodies
         old = next(m for m in body["messages"] if m["role"] == "assistant")
         assert old.get("thinking") == (
-            "native reasoning"
-            if mode in ("legacy", "replay", "compress+replay")
-            else None
+            "native reasoning" if mode in ("legacy", "compress+replay") else None
         )
     finally:
         if agent is not None:

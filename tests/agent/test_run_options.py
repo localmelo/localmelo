@@ -314,7 +314,7 @@ class TestPersistence:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("reasoning", "stores_long_term"), [("legacy", False), ("drop", True)]
+        ("reasoning", "stores_long_term"), [("legacy", False), ("compress", True)]
     )
     async def test_memory_dir_option_enables_sqlite(
         self, tmp_path: Path, reasoning: ReasoningMode, stores_long_term: bool

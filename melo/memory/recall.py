@@ -143,16 +143,13 @@ def resolve_plan(
     ``embedding`` runs every trigger named by *recall_at*, or the default
     ``start``, ``attempt`` and ``step``. ``auto`` is ``embedding`` when one
     is configured; without one it uses ``llm`` at ``start`` and ``attempt``
-    and ``bm25`` at ``step`` and ``tool``. ``auto`` is off in ``drop`` and
-    ``replay`` unless the user names an explicit retriever there.
+    and ``bm25`` at ``step`` and ``tool``.
     """
     if mode not in RETRIEVER_MODES:
         raise ValueError(
             f"unknown retriever {mode!r}; the modes are {', '.join(RETRIEVER_MODES)}"
         )
     if mode == "off" or reasoning == "legacy":
-        return RecallPlan()
-    if mode == "auto" and reasoning in ("drop", "replay"):
         return RecallPlan()
     triggers = (
         _checked_triggers(recall_at) if recall_at is not None else DEFAULT_TRIGGERS

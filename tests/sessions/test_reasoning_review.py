@@ -29,7 +29,7 @@ async def test_loaded_legacy_replay_strips_thinking_before_evicting_facts(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            reasoning="replay", replay_scope="window", builtins=frozenset()
+            reasoning="compress+replay", replay_scope="window", builtins=frozenset()
         ),
     )
     thinking = "x" * 40_000

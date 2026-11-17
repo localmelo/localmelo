@@ -1045,8 +1045,7 @@ def _check_recall_args(
     if effective_legacy and _recall_flag_given(args):
         parser.error(
             "argument --retriever/--recall-*/--retrieval-*: retrieval is not "
-            "available in legacy; use --reasoning compress, compress+replay, "
-            "drop or replay"
+            "available in legacy; use --reasoning compress"
         )
     recall_flags = [
         flag
@@ -1078,13 +1077,6 @@ def _check_recall_args(
             parser.error(
                 "argument --recall-at tool: it needs a retriever other than off"
             )
-    if getattr(args, "recall_placement", None) == "message" and args.reasoning in (
-        "replay",
-        "compress+replay",
-    ):
-        parser.error(
-            "argument --recall-placement: message is not available in replay modes"
-        )
     if getattr(args, "retrieval_extra_body", None) is not None and retriever in (
         "off",
         "bm25",
@@ -1099,7 +1091,7 @@ def _check_effective_recall(
     options: AgentOptions,
 ) -> None:
     """Reject a recall combination that flags or the config table built."""
-    if options.reasoning in ("replay", "compress+replay") and (
+    if options.reasoning == "compress+replay" and (
         options.recall_placement == "message"
     ):
         parser.error(
@@ -1192,20 +1184,6 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
         parser.error("--embedding-base-url requires --base-url")
-    reasoning = getattr(args, "reasoning", None)
-    reasoning_field = getattr(args, "reasoning_field", None)
-    if (
-        args.base_url
-        and not (args.serve or args.daemon)
-        and reasoning in ("replay", "compress+replay")
-        and reasoning_field is None
-    ):
-        parser.error(
-            "argument --reasoning: replay and compress+replay need a reasoning "
-            "field: give --reasoning-field (auto, reasoning_content or "
-            "reasoning) with --base-url, or set reasoning_field in the "
-            "backend's config"
-        )
     if (args.serve or args.daemon) and (args.base_url or args.chat_model):
         parser.error(
             "--base-url and --chat-model are for a task or the interactive UI; "
@@ -1431,7 +1409,6 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--window-eviction",
             "--window-messages",
             "--developer",
-            "--captured-history",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1577,11 +1554,6 @@ def _build_parser(
         help="Reflect between attempts (default), or run one attempt",
     )
     direct.add_argument(
-        "--captured-history",
-        choices=["on", "off"],
-        help="Store bounded, redacted captured tool results (default off)",
-    )
-    direct.add_argument(
         "--window-eviction",
         choices=["chunk", "boundary"],
         help="How working memory drops old turns: chunk eight messages at a "
@@ -1672,32 +1644,23 @@ def _build_parser(
     )
     direct.add_argument(
         "--reasoning",
-        choices=["legacy", "drop", "replay", "compress", "compress+replay"],
-        help="How a reply's reasoning is sent back: legacy (default, the "
-        "provider's own behavior), drop (never), replay (on assistant turns "
-        "in scope, under one key), compress (no reasoning; each reply becomes "
-        "a short note, with its drafts, in working memory), or "
-        "compress+replay (compress and replay); the compress modes recall "
-        "nothing yet",
+        choices=["legacy", "compress"],
+        help="How a reply's reasoning is kept: legacy (default, the "
+        "provider's own behavior), or compress (each reply becomes a short "
+        "note, with its drafts, in working memory; a server that requires "
+        "reasoning back still gets it)",
     )
     direct.add_argument(
         "--reasoning-field",
         choices=["auto", "reasoning_content", "reasoning"],
-        help="The request key replay and compress+replay use (with --base-url, "
-        "or a backend's reasoning_field); auto follows the key the last reply "
-        "came from",
-    )
-    direct.add_argument(
-        "--replay-turns",
-        type=_positive_int,
-        metavar="N",
-        help="With replay, keep the newest N assistant turns' reasoning "
-        "(default: every turn in scope)",
+        help="The request key a replayed reasoning goes under, for compress on a "
+        "backend that requires replay (also a backend's reasoning_field); auto "
+        "follows the key the last reply came from",
     )
     direct.add_argument(
         "--note-writer",
         choices=["auto", "heuristic"],
-        help="With compress or compress+replay, who writes a reply's note: "
+        help="With compress, who writes a reply's note: "
         "auto (default: read the model's <note>, else the heuristic) or "
         "heuristic (always from the reply's text and thinking). Accepted and "
         "inert in the other modes",
@@ -1763,7 +1726,7 @@ def _build_parser(
             "It also takes --base-url, --chat-model, --workspace, --max-steps, "
             "--attempt-policy, --builtins, --memory, "
             "--memory-dir, --request-timeout, --reasoning, --reasoning-field, "
-            "--replay-turns, --note-writer, --retriever, --recall-*, "
+            "--note-writer, --retriever, --recall-*, "
             "--retrieval-extra-body and the --embedding-* options.",
         )
         interactive.add_argument(
@@ -2411,8 +2374,6 @@ def _build_direct_mode_agent(
         keep=flagged,
         backend=OPENAI_COMPATIBLE if base_url else None,
     )
-    if "captured_history" not in flagged and budget_cfg.agent.captured_history:
-        options = dataclasses.replace(options, captured_history=True)
     if options.answer_on_stop != budget_cfg.agent.answer_on_stop:
         options = dataclasses.replace(
             options, answer_on_stop=budget_cfg.agent.answer_on_stop
@@ -2438,10 +2399,6 @@ def _build_direct_mode_agent(
         llm_options: dict[str, Any] = (
             {} if request_timeout is None else {"timeout": request_timeout}
         )
-        reasoning_field = getattr(args, "reasoning_field", None)
-        mode = options.reasoning if options is not None else "legacy"
-        if reasoning_field is not None and mode in ("replay", "compress+replay"):
-            llm_options["reasoning_field"] = reasoning_field
         extra_body = getattr(args, "retrieval_extra_body", None)
         if extra_body is not None:
             llm_options["extra_body_by_kind"] = {"retrieve": extra_body}
@@ -2524,11 +2481,6 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, reasoning=cast(ReasoningMode, cfg.agent.reasoning)
         )
-    if (
-        getattr(args, "replay_turns", None) is None
-        and cfg.agent.replay_turns is not None
-    ):
-        options = dataclasses.replace(options, replay_turns=cfg.agent.replay_turns)
     if getattr(args, "note_writer", None) is None and cfg.agent.note_writer != "auto":
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
@@ -2573,8 +2525,7 @@ def _build_direct_mode_agent(
     elif _recall_flag_given(args):
         parser.error(
             "argument --retriever/--recall-*/--retrieval-*: retrieval is not "
-            "available in legacy; use --reasoning compress, compress+replay, "
-            "drop or replay"
+            "available in legacy; use --reasoning compress"
         )
 
     if options.retriever == "embedding":
@@ -2592,7 +2543,6 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options,
             reasoning="compress+replay",
-            replay_turns=None,
             replay_scope="task",
         )
     # After the conversion above: a recall placement that the effective

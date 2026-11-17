@@ -205,7 +205,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `max_calls` | The run's call budget when it set one; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary`. |
 | `window_messages` | The window's message cap when it is not 20 (64 by default on a local server or a URL); absent for 20. |
-| `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
+| `reasoning`, `note_writer` | Outside `legacy`, the effective reasoning mode and who writes a reply's note with `compress`. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |
 | `cross_task_ratio`, `cross_task_cap`, `cross_task_cold` | Outside `legacy`, the digest-recall gate: the same-backend multiple a cross-task digest must reach, the per-recall cap (0–2) and the cold-start allowance (0 or 1). |
@@ -245,11 +245,11 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `written` | `{"semantic": n, "episodic": n, "profile": n, "reflection": n}`: entries written per kind (`IGNORE` writes no entry). |
 | `ignored` | Decisions that wrote no entry because the policy chose `IGNORE`. A boundary refusal counts in `candidates_refused`, not here. |
 
-The replay counters are `0` in `drop`; the note, recall and admission
-counters are `0` in every mode that does not use them, so the shape is the
-same across the explicit arms. A `legacy` line has no `memory_stats`, no `reasoning_chars`
+The replay counters are `0` in `compress`, unless it sends the reasoning back;
+the note, recall and admission counters are `0` in every mode that does not use
+them, so the shape is the same across the modes. A `legacy` line has no `memory_stats`, no `reasoning_chars`
 and no `cached_tokens`/`reasoning_tokens` in `usage`, and no
-`reasoning`/`replay_turns`/`note_writer` or `retriever`/`recall_*` in
+`reasoning`/`note_writer` or `retriever`/`recall_*` in
 `config`, so it is byte-identical to the line before these fields.
 
 The chat request timeout is a setting of the model connection, not of the

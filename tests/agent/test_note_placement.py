@@ -100,7 +100,7 @@ async def test_a_loaded_note_survives_a_run_in_the_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compress_replay_keeps_all_thinking_and_sends_only_k() -> None:
+async def test_compress_replay_keeps_all_thinking_and_sends_it() -> None:
     server = FakeLLM(
         _call_reply(thinking="first thought"),
         _call_reply(thinking="second thought"),
@@ -108,7 +108,7 @@ async def test_compress_replay_keeps_all_thinking_and_sends_only_k() -> None:
     )
     agent = _agent(
         server,
-        _options(reasoning="compress+replay", replay_turns=1, max_steps=3),
+        _options(reasoning="compress+replay", max_steps=3),
     )
     await agent.run_task("q")
     await agent.close()
@@ -120,13 +120,13 @@ async def test_compress_replay_keeps_all_thinking_and_sends_only_k() -> None:
     # The answer ends the run and is not kept in the window (record_answers
     # is off), so the two tool turns are what the window holds.
     assert window_thinking == ["first thought", "second thought"]
-    # The third request carries only the newest in-scope turn's thinking.
+    # The third request carries the thinking of every in-scope turn.
     sent = [
         message.thinking
         for message in server.requests[2]
         if message.role == "assistant"
     ]
-    assert sent == ["", "second thought"]
+    assert sent == ["first thought", "second thought"]
     # A compress run's window carries no thinking at all.
     compress = FakeLLM(_call_reply(thinking="hidden"), _answer())
     agent = _agent(compress, _options(reasoning="compress"))
@@ -185,8 +185,8 @@ async def test_a_note_naming_a_tool_does_not_offer_it() -> None:
     # The query alone resolves nothing, and since #80 a tool hint is only a
     # structured tool call: neither a window text nor a stored note offers it,
     # in any mode.
-    drop, drop_server = _build("drop")
-    await drop.run_task("q")
-    await drop.close()
-    assert "secret_tool" not in drop_server.offers[0]
+    legacy, legacy_server = _build("legacy")
+    await legacy.run_task("q")
+    await legacy.close()
+    assert "secret_tool" not in legacy_server.offers[0]
     assert "secret_tool" not in compress_server.offers[0]

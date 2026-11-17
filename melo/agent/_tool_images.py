@@ -4,10 +4,10 @@ History and working memory keep reference copies of tool-result images
 (see :meth:`ImagePart.as_reference`). With ``AgentOptions.tool_images`` on,
 :class:`ToolImageStore` keeps the payloads of the newest ones in RAM, and each
 planning request carries their pixels: the providers put them in a ``user``
-message after the tool results. The newest ``keep`` images are kept; when one
-more arrives past ``keep + retire - 1``, the oldest ``retire`` lose their pixels
-together, so the request prefix that a server caches changes once per batch,
-not on every step. An image whose digest a kept image already has is not sent
+message after the tool results. The newest :data:`KEEP_IMAGES` images are kept;
+when one more arrives past ``KEEP_IMAGES + RETIRE_IMAGES - 1``, the oldest
+:data:`RETIRE_IMAGES` lose their pixels together, so the request prefix that a
+server caches changes once per batch, not on every step. An image whose digest a kept image already has is not sent
 again. A payload wider than :data:`MAX_IMAGE_WIDTH` is scaled to that width as
 a JPEG once, when it is stored (with macOS ``sips``; elsewhere it is kept as
 it is).
@@ -29,6 +29,10 @@ from localmelo.melo.agent._request_accounting import _image_dimensions
 from localmelo.melo.schema import ImagePart, Message, ToolResult, decode_base64
 
 MAX_IMAGE_WIDTH: Final = 1280
+# The newest tool pictures that keep their pixels, and how many of the oldest lose
+# them together once one more arrives (a request carries 3 to 4 pictures).
+KEEP_IMAGES: Final = 3
+RETIRE_IMAGES: Final = 2
 JPEG_QUALITY: Final = 75
 SCALE_TIMEOUT_S: Final = 20.0
 # Pictures the person added whose pixels stay in RAM; older ones lose them.
@@ -97,7 +101,7 @@ class ToolImageStore:
     each live digest, keyed by the digest the tool's image had.
     """
 
-    def __init__(self, keep: int = 3, retire: int = 2) -> None:
+    def __init__(self, keep: int = KEEP_IMAGES, retire: int = RETIRE_IMAGES) -> None:
         self.keep_count = keep
         self.retire = retire
         self._payloads: dict[str, ImagePart] = {}

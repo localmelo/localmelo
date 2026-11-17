@@ -9,7 +9,7 @@ An embedding model is optional. localmelo does not serve one itself: you run a m
 - Without an embedding backend, working memory and history still work.
 - With memory on, explicit reasoning modes can keep text-only long-term entries and find them with BM25; the trigger must be enabled and include the `long` kind. In `legacy`, a run has no long-term writes or recall, with or without an embedding backend (see [Memory](../concepts/memory.md#what-localmelo-remembers)).
 - An embedding backend adds vector-similarity search; text-only entries are still found with BM25.
-- In `compress` and `compress+replay`, the `auto` retriever also ranks task-local recall with the embedding provider; without one it uses the LLM at start and attempt and BM25 at step and tool (see [recall in the loop](../concepts/memory.md#recall-in-the-loop)).
+- In `compress`, the `auto` retriever also ranks task-local recall with the embedding provider; without one it uses the LLM at start and attempt and BM25 at step and tool (see [recall in the loop](../concepts/memory.md#recall-in-the-loop)).
 
 An offline comparison of the three retrievers, at capped grade-2 recall@3 over 97 gold queries:
 

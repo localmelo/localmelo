@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import NamedTuple
 
 from localmelo.support.backends.openai_family import USUAL_URL
+from localmelo.support.config import REMOVED_REASONING_MODES
 
 USER = "user"
 ADVANCED = "advanced"
@@ -100,10 +101,8 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--window-eviction": "#183",
     "--reasoning": "#183",
     "--reasoning-field": "#183",
-    "--replay-turns": "#183",
     "--note-writer": "#183",
     "--tool-exposure": "#3",
-    "--captured-history": "#4",
     "--retriever": "#4",
     "--recall-at": "#4",
     "--recall-k": "#4",
@@ -118,8 +117,6 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
 EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.answer_on_stop": "#185",
     "agent.steps_per_attempt": "#185",
-    "agent.tool_images_keep": "#280",
-    "agent.tool_images_retire": "#280",
     "memory.sleep": "#363",
     "memory.sleep_lock": "#363",
     "memory.recall_form": "#428",
@@ -150,9 +147,7 @@ SETTINGS = (
     Setting("agent.window_eviction", "--window-eviction"),
     Setting("agent.window_messages", "--window-messages"),
     Setting("agent.reasoning", "--reasoning"),
-    Setting("agent.replay_turns", "--replay-turns"),
     Setting("agent.note_writer", "--note-writer"),
-    Setting("agent.captured_history", "--captured-history"),
     Setting("agent.context_window", "--context-window"),
     Setting("agent.output_reserve", "--output-reserve"),
     Setting("agent.safety_margin", "--safety-margin"),
@@ -197,6 +192,10 @@ REMOVED_SETTINGS: dict[str, str] = {
     "agent.thinking_steps": "the model thinks on every planning step",
     "agent.lean_output": "a run always uses the standard prompts",
     "agent.brief_items": "a brief run never lists the brief's numbered items",
+    "agent.captured_history": "history keeps each tool result as the check left it",
+    "agent.replay_turns": "a reply's reasoning is sent back for every turn in scope",
+    "agent.tool_images_keep": "a request carries the newest 3 tool pictures, and 4 just before 2 retire",
+    "agent.tool_images_retire": "the oldest 2 tool pictures lose their pixels together",
     "memory.recall_records": "recall holds at most 3 notes",
     "memory.recall_docs": "recall holds at most 2 chat turns",
     "memory.recall_chars": "the recall block holds at most 4000 characters",
@@ -224,6 +223,24 @@ REMOVED_SETTINGS: dict[str, str] = {
         "a recalled turn always shows the start of each part, not the sentences that "
         "match the message"
     ),
+}
+
+# Settings that stay with one of their values removed: (key, value) -> what holds now.
+# A config file that holds the value loads and reads it as the key's default (``melo
+# config`` names it); ``-X KEY=VALUE``, ``melo config set`` and the key's option exit 2
+# and say the value was removed.
+_COMPRESS = "compress, which sends the reasoning back where a server requires it"
+_REASONING_NOW = {
+    "drop": (
+        "use legacy, which sends no reasoning on an OpenAI-compatible server, "
+        f"or {_COMPRESS}"
+    ),
+    "replay": f"use legacy or {_COMPRESS}",
+    "compress+replay": f"use {_COMPRESS}",
+}
+REMOVED_VALUES: dict[tuple[str, str], str] = {
+    ("agent.reasoning", value): _REASONING_NOW[value]
+    for value in REMOVED_REASONING_MODES
 }
 
 # The two settings whose option takes no value: the option means the key has this one.

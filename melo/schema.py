@@ -1031,7 +1031,6 @@ class StepRecord:
     tool_result: ToolResult | None = None
     step_id: str = field(default_factory=new_record_id)
     timestamp: float = field(default_factory=time.time)
-    capture_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

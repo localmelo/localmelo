@@ -317,11 +317,6 @@ class TestBudget:
             (m.content, m.images) for m in third
         ]
 
-    async def test_keep_and_retire_are_settings(self) -> None:
-        llm = ScriptedLLM(shots(4))
-        await run(llm, 4, tool_images="on", tool_images_keep=1, tool_images_retire=1)
-        assert [len(sent_images(r)) for r in llm.requests] == [0, 1, 1, 1, 1]
-
     async def test_a_repeated_picture_is_sent_once_and_named_as_unchanged(
         self,
     ) -> None:

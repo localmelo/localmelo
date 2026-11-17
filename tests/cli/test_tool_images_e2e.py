@@ -165,23 +165,21 @@ def test_without_the_switch_only_the_name_goes(
 
 
 class TestSetting:
-    def test_the_keys_are_written_only_when_changed_and_checked(self) -> None:
+    def test_the_key_is_written_only_when_changed_and_checked(self) -> None:
         from localmelo.support import config
 
         assert config.AgentConfig().tool_images == "auto"
         config.save(config.Config())
         assert "tool_images" not in Path(config.config_path()).read_text()
         cfg = config.Config()
-        cfg.agent.tool_images, cfg.agent.tool_images_keep = "on", 4
+        cfg.agent.tool_images = "on"
         config.save(cfg)
         text = Path(config.config_path()).read_text()
-        assert 'tool_images = "on"' in text and "tool_images_keep = 4" in text
-        loaded = config.load().agent
-        assert (loaded.tool_images, loaded.tool_images_keep) == ("on", 4)
-        cfg.agent.tool_images, cfg.agent.tool_images_retire = "yes", 0
+        assert 'tool_images = "on"' in text
+        assert config.load().agent.tool_images == "on"
+        cfg.agent.tool_images = "yes"
         errors = cfg.validate()
         assert any("tool_images 'yes' is not recognised" in e for e in errors)
-        assert any("tool_images_retire must be an int >= 1" in e for e in errors)
 
     def test_x_sets_it_for_one_run_and_a_session_reads_it(self) -> None:
         import localmelo.__main__ as cli

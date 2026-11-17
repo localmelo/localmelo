@@ -293,27 +293,27 @@ async def test_real_answers_are_kept_as_they_are(answer: str) -> None:
     assert _notices(events) == []
 
 
-@pytest.mark.parametrize("reasoning", ["legacy", "drop"])
+@pytest.mark.parametrize("reasoning", ["legacy", "compress"])
 async def test_a_leading_thinking_block_is_not_the_answer(reasoning: str) -> None:
     result, events, llm = await _run(f"{BLOCK}\nUpdated.", reasoning=reasoning)
     assert result.status == "completed"
     assert split_thinking(result.result)[1] == "Updated."
     assert llm.requests == 1
     reply = next(e for e in events if e.type == "assistant.message")
-    if reasoning == "drop":
+    if reasoning == "compress":
         assert reply.data["content"] == "Updated."
         assert reply.data["thinking"].startswith("The user works at Acme.")
 
 
 async def test_a_reply_of_only_a_thinking_block_is_asked_again() -> None:
-    result, events, llm = await _run(BLOCK, "Updated.", reasoning="drop")
+    result, events, llm = await _run(BLOCK, "Updated.", reasoning="compress")
     assert (result.status, result.result) == ("completed", "Updated.")
     assert llm.requests == 2
     assert _notices(events) == ["empty_reply"]
 
 
 async def test_a_thinking_block_then_dots_is_asked_again() -> None:
-    result, events, llm = await _run(f"{BLOCK}\n...", "Updated.", reasoning="drop")
+    result, events, llm = await _run(f"{BLOCK}\n...", "Updated.", reasoning="compress")
     assert (result.status, result.result) == ("completed", "Updated.")
     assert _notices(events) == ["empty_reply"]
 

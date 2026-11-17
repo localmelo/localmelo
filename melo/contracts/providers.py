@@ -191,7 +191,7 @@ class BaseLLMProvider(ABC):
     reasoning_field: str | None = None
     # Whether the server rejects a request whose assistant turns omit the
     # reasoning it produced. Such a provider gets whole-unit eviction and
-    # no cap; ``drop`` is refused for it.
+    # no cap.
     requires_reasoning_replay: bool = False
     # Extra body fields for one call kind, merged over the provider's
     # ``extra_body`` for that request (R5's --retrieval-extra-body). Empty

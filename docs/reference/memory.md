@@ -109,7 +109,7 @@ count.
 
 ## Long-term memory
 
-With `--reasoning compress` (or `compress+replay`) and memory on,
+With `--reasoning compress` and memory on,
 `long_term.db` is a **typed** store: every entry has a kind, a source, a
 status, the signal that admitted it and its provenance, beside the text and
 the vector the earlier store already had. With persistence on, the file
@@ -361,11 +361,10 @@ planning and reflection requests alike. The history in RAM keeps none.
   empty reply's and a turn whose text a size cut cleared; `llm_calls`
   records it as received (R1's `thinking` and `reasoning_key`). In
   `legacy` the provider decides whether it is sent again: OpenAI-compatible
-  no, Ollama native yes. `drop` strips it at send. `replay` sends it on the
-  assistant turns in scope (by default the current task's; a provider that
-  requires replay gets every turn in the window), under one request key
-  (`reasoning_content`, `reasoning`, or Ollama's `thinking`), at most
-  40,000 characters per turn (no cap on a provider that requires replay).
+  no, Ollama native yes. `compress` strips it at send, except for a provider
+  that requires replay: that one gets every turn in the window, under one
+  request key (`reasoning_content`, `reasoning`, or Ollama's `thinking`),
+  uncut.
 - A request that was retried gives one row, for the reply that came back.
   So the rows of a run number its `n_llm`, unless a row could not be
   written: a row that waits more than 5 seconds for another process's write

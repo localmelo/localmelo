@@ -47,9 +47,8 @@ before the run with a plain message (see
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` takes `auto` or `thinking` instead. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
 | `context_window`, `output_reserve`, `safety_margin` | `[agent]` | not set: the model server's context | An override of the context budget; all three positive integers must resolve, with a positive input limit. Unset, the budget is the context length the model server reports, up to 131,072 tokens. See [Context accounting](#context-accounting). |
-| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the saved default for direct runs, the interactive UI and API v2 console sessions. See [Reasoning](#reasoning). |
-| `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
-| `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
+| `reasoning` | `[agent]` | `"legacy"` | `legacy` or `compress`; the saved default for direct runs, the interactive UI and API v2 console sessions. See [Reasoning](#reasoning). |
+| `note_writer` | `[agent]` | `"auto"` | With `compress`, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
 | `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
 | `window_eviction` | `[agent]` | `"chunk"` | `chunk` or `boundary`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
 | `confine_writes` | `[agent]` | `true` | On macOS, `--brief` worker runs and saved tasks start `shell_exec` and `python_exec` in a sandbox that refuses file writes outside the workspace; `false` turns it off (`-X agent.confine_writes=false` for one run). Other runs confine only the calls Auto decides (`[approvals] mode`). See [Writes stay in the workspace](cli.md#confined-writes). |
@@ -60,13 +59,12 @@ before the run with a plain message (see
 | `max_calls` | `[agent]` | not set | An advanced setting. A whole number of 2 or more: the most model requests a direct run sends (planning, reflection and the rest; each attempt of a retried request counts). Before the request that would pass it, the run ends `budget_exhausted` with the error `Call budget reached: ...`. With `answer_on_stop` on, the last call is kept for the answer: the run stops after `N - 1` requests and the answer request is call `N`. Not set, there is no limit. There is no flag; `-X agent.max_calls=N` sets it for one run. The interactive UI, the console, the app and the gateway ignore it. See [Run results](run-results.md#statuses). |
 | `empty_reply_fallback` | `[agent]` | `"on"` | An advanced setting. `"on"` makes a turn that ends with no answer and no tool call, from a model that did think, ask once more with thinking off where the service has a switch for it (the hosted services do; see [Thinking models](../guides/hosted-models.md#thinking-models)) and, if the reply is still empty, answer with the last lines of the thinking, ending with `(from melo's thinking)`, so the run completes. `"off"` gives both up: such a run ends `failed` with `melo did not finish an answer`, as before. Only `"off"` is saved; there is no flag, and `-X agent.empty_reply_fallback=off` sets it for one run. A direct run, the interactive UI, the console, the app and the gateway all read it. Each step is a `thinking_off_retry` or `answer_from_thinking` [notice](events.md#notice) and sets a flag in the result's `empty_reply` (see [Run results](run-results.md#fields)). |
 | `tool_images` | `[agent]` | `"auto"` | An advanced setting. Whether the pictures tools return reach the model: `on` sends the newest ones as `image_url` parts in each planning request, `off` names them only, and `auto` is `on` when the server says the model reads images or, for a hosted service, when its preset names the model as reading images (see [Hosted models](../guides/hosted-models.md#pictures)). A server says it in the model's own entry of `GET /v1/models` (`vision` true, `image` among `input_modalities` or `vision` among `capabilities`; `vision` false, or `input_modalities` without `image`, says no), else in oMLX's `model_type` `vlm`, else in Ollama's `vision` capability. When a picture is not sent (`off`, or a server that does not say), its tool message ends with a line that tells the model it cannot see the picture. There is no flag; `-X agent.tool_images=on` sets it for one run. See [Pictures that tools return](../guides/tools-mcp.md#pictures-that-tools-return). |
-| `tool_images_keep`, `tool_images_retire` | `[agent]` | `3`, `2` | With `tool_images` on: the newest `tool_images_keep` pictures keep their pixels, and the oldest `tool_images_retire` lose them together once more arrive, so a request carries 3 to 4 pictures by default. |
 | `window_messages` | `[agent]` | `64` on a local server or a URL (`256` with a token budget), `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
 | `kinds` | `[retrieval]` | not set | A list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. Omit for all but `thought`. |
-| `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused in `replay` and `compress+replay`. |
+| `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused on a backend that requires replay. |
 | `min_score` | `[retrieval]` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. Inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
 | `cross_task_ratio` | `[retrieval]` | `1.1` | Cross-task episodic digests need this multiple of the best same-task digest's score from the same long-store backend; 1–10. |
 | `cross_task_cap` | `[retrieval]` | `1` | Maximum cross-task digests per recall, 0–2; the existing total long-hit limit remains two. |
@@ -162,24 +160,21 @@ How URLs are used:
 
 `legacy` is the default: an OpenAI-compatible backend sends no reasoning,
 and Ollama native sends its own `thinking` field and inline copy as before.
-`drop` never sends reasoning; `replay` sends it on the assistant turns in
-scope, under one key, at most 40,000 characters per turn (a longer turn's
-reasoning is skipped and counted).
+`compress` sends none and keeps each reply's note and drafts in working
+memory. A backend with `requires_reasoning_replay = true` cannot take a request
+without the reasoning, so there `compress` also sends it back.
 
-`compress` sends none and keeps each
-reply's note and drafts in working memory; `compress+replay` does both. A
-backend with `requires_reasoning_replay = true` runs `compress` as
-`compress+replay`.
-
-Every explicit mode also
-removes an inline `<think>` block from the answer. The compress modes recall notes,
-drafts and earlier thinking by default; see
+`compress` also removes an inline `<think>` block from the answer, and recalls
+notes, drafts and earlier thinking by default; see
 [Recall in the loop](../concepts/memory.md#recall-in-the-loop).
+
+A config file that still holds `reasoning = "drop"`, `"replay"` or
+`"compress+replay"` loads and reads as `legacy`; `melo config` names the line.
+On the command line those values exit 2.
 
 ```toml
 [agent]
-reasoning = "replay"      # legacy, drop, replay, compress, compress+replay
-replay_turns = 3          # optional; omit for every turn
+reasoning = "compress"    # legacy or compress
 note_writer = "auto"      # optional: auto or heuristic
 ```
 
@@ -233,22 +228,20 @@ requires_reasoning_replay = false     # true for a server that rejects a
 `auto` follows the key the last reply's reasoning came from, so a backend
 that emits either `reasoning_content` or `reasoning` works as it is; it
 sends no key before the first reply. For OpenAI-compatible backends, the
-field is used only by `replay` and `compress+replay`: `legacy`, `drop` and
-`compress` ignore it, including through scheduler wrappers.
+field is used only when `compress` sends the reasoning back, on a backend with
+`requires_reasoning_replay = true`: `legacy` and every other run ignore it,
+including through scheduler wrappers.
 
-Native Ollama keeps its existing legacy wire behavior. `replay` uses the
-current task's assistant turns in direct runs and the `melo ""` loop;
-session builders select the retained conversation window instead.
+Native Ollama keeps its existing legacy wire behavior.
 
 Session resume uses the current process's mode: pairs contain no old thinking,
 while a window checkpoint can replay its retained, redacted thinking.
 The `[ollama]` backend fixes its field
 to `thinking` (it may still write `"thinking"` or `"auto"`).
 
-With `requires_reasoning_replay = true`, `--reasoning drop` is refused, every
-assistant turn in the window is replayed (the task scope and
-`replay_turns` do not apply), and the agent evicts whole working-memory
-units instead of cutting reasoning.
+With `requires_reasoning_replay = true`, `compress` replays every assistant
+turn in the window, and the agent evicts whole working-memory units instead of
+cutting reasoning.
 
 ### Tool environment
 
@@ -466,30 +459,12 @@ admit_on_outcome`. Each behaves as its default did, `window_eviction = "slide"` 
 config` names it (see [Command line](cli.md#settings)). `[memory] followup_query` was removed
 too: a message with no content of its own is always searched with what you typed in the chat's
 last turns, as its default `"recent"` did, and a file that holds the key is handled the same way.
-`[agent] brief_items`, `lean_output` and `thinking_steps` were removed the same way: each run
-behaves as it did with the default, and a file that holds one of them is handled the same way.
+`[agent] brief_items`, `lean_output`, `thinking_steps` and `captured_history` were removed the
+same way: each run behaves as it did with the default, and a file that holds one of them is handled
+the same way.
 `[memory] note_gate` and `note_min_cosine` were removed too: the note gate has one rule (see
 [Memory](../concepts/memory.md)), as its default `"pointed"` had, and a file that holds either key,
 whatever its value, is handled the same way.
-
-Opt in to separate captured tool history with `[agent] captured_history = true` or
-`--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
-ceiling including truncation and image notices.
-
-History stores a distinct, pattern-redacted copy of
-up to 200,000 characters per result (errors first), with exact omitted counts relative to the
-redacted capture. Counts live in `capture_metadata`, not in-band markers in stored text.
-
-`acquisition_omitted_chars` is null because the tool may already have limited its
-output. Capture is not a complete file or unlimited stdout; redaction is pattern-based and can miss
-secrets.
-
-The model's checked preview can still contain raw text; the `Message.tool_result`,
-`tool.finished` event and trace use redacted copies. Existing history retention and permissions
-apply.
-
-`Agent.run_tool()` does not write captured history and retains its existing result check.
-The option is off by default.
 
 ## Embedding and long-term memory
 

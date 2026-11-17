@@ -3,13 +3,14 @@
 The golden corpus was generated from AST-extracted parser/check functions in
 ``git show d232b9e:__main__.py`` (before the UI), plus ``a4599e0`` for R2a.
 Only shared namespace defaults are factored out; every case's result is recorded.
-The three explicit R4 overrides were captured from upstream cb250c6 before U2b,
-not from the new parser: compress became valid, and two replay errors name it.
+The explicit R4 override was captured from upstream cb250c6 before U2b, not from
+the new parser: compress became valid.
 R2b intentionally retires the no-query reasoning-field refusal: that one case
 now checks UI dispatch and its complete namespace; the original golden remains.
 The cases that gave ``--reflection-gate`` are gone with the option, and the
 ``--a`` prefix no longer matches ``--admit-on-outcome`` (an ``upstream_overrides``
-entry); every other case is as recorded.
+entry); every other case is as recorded. The cases that gave ``--replay-turns``
+or the reasoning values ``drop`` and ``replay`` are gone with them.
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 
@@ -53,7 +54,7 @@ CASES = [
 UI_FIELDS = {"yolo", "continue_session", "resume"}
 R2A_DEFAULTS = {
     key: SOURCES[GOLDEN["reasoning_baseline"]]["namespace_defaults"][key]
-    for key in ("reasoning", "reasoning_field", "replay_turns")
+    for key in ("reasoning", "reasoning_field")
 }
 R4_DEFAULTS = GOLDEN["upstream_namespace_defaults"]  # recorded from upstream #85
 # R5 (#94) added seven direct-mode options, all None unless given.
@@ -74,7 +75,6 @@ P5_DEFAULTS = {"workspace": None}
 R6_DEFAULTS = {"keep_decision_text": False}
 # U3 PR 4 added --allow-unconfigured for --serve.
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
-CAPTURED_DEFAULTS = {"captured_history": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
 WINDOW_MESSAGES_DEFAULTS = {"window_messages": None}
 WORKER_DEFAULTS = {
@@ -155,7 +155,6 @@ def test_historical_dispatch(
             **R6_DEFAULTS,
             **U3_PR4_DEFAULTS,
             **WORKER_DEFAULTS,
-            **CAPTURED_DEFAULTS,
             **WINDOW_EVICTION_DEFAULTS,
             **WINDOW_MESSAGES_DEFAULTS,
             "continue_session": False,
@@ -184,7 +183,6 @@ def test_historical_dispatch(
         **R6_DEFAULTS,
         **U3_PR4_DEFAULTS,
         **WORKER_DEFAULTS,
-        **CAPTURED_DEFAULTS,
         **WINDOW_EVICTION_DEFAULTS,
         **WINDOW_MESSAGES_DEFAULTS,
         **case["namespace"],

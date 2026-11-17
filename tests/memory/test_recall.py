@@ -104,12 +104,6 @@ def test_resolve_plan_never_turns_the_tool_on_by_default() -> None:
     assert DEFAULT_TRIGGERS == ("start", "attempt", "step")
 
 
-def test_resolve_plan_keeps_auto_off_in_drop_and_replay() -> None:
-    assert resolve_plan("auto", reasoning="drop", has_embedding=True) == RecallPlan()
-    assert resolve_plan("auto", reasoning="replay", has_embedding=True) == RecallPlan()
-    assert resolve_plan("bm25", reasoning="drop").start == "bm25"
-
-
 def test_resolve_plan_recall_at_replaces_the_triggers() -> None:
     plan = resolve_plan("bm25", reasoning="compress", recall_at={"tool", "step"})
     assert plan == RecallPlan(None, None, "bm25", "bm25")

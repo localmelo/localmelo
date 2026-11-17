@@ -61,7 +61,9 @@ VALID_CHAT_BACKENDS = (*LOCAL_BACKENDS, *CLOUD_BACKENDS)
 VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
 # Another spelling of "vllm" that a config file may use for either backend.
 OMLX_ALIAS = "omlx"
-REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
+REASONING_MODES = ("legacy", "compress")
+# Removed values of agent.reasoning: a config file that holds one reads as "legacy".
+REMOVED_REASONING_MODES = ("drop", "replay", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("chunk", "boundary")
 TOOL_IMAGES = ("auto", "on", "off")
@@ -229,8 +231,7 @@ class ApprovalsConfig:
 class AgentConfig:
     """The ``[agent]`` table: how a direct run or a session reasons."""
 
-    reasoning: str = "legacy"  # legacy | drop | replay | compress | compress+replay
-    replay_turns: int | None = None  # None: every turn in scope
+    reasoning: str = "legacy"  # legacy | compress
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
     window_eviction: str = "chunk"  # chunk | boundary
@@ -239,7 +240,6 @@ class AgentConfig:
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
-    captured_history: bool = False  # opt-in redacted captured tool results
     # Worker runs (--brief) and saved tasks: shell_exec and python_exec write only
     # in the workspace on macOS (AgentOptions.confine_writes); false turns it off.
     confine_writes: bool = True
@@ -255,10 +255,8 @@ class AgentConfig:
     # has (AgentOptions.max_calls). None: no limit.
     max_calls: int | None = None
     # Pictures tools return reach the model: auto (when the server says the model
-    # reads images) | on | off; the newest keep, retired retire at a time.
+    # reads images) | on | off.
     tool_images: str = "auto"
-    tool_images_keep: int = 3
-    tool_images_retire: int = 2
     # Developer setting: a turn that ends with no answer from a model that did
     # think (an empty reply, or a reply that ends inside its thinking) is asked
     # once more with thinking off where the service has a switch for it, and
@@ -285,18 +283,13 @@ class AgentConfig:
 
 
 def tool_images_errors(agent: AgentConfig) -> list[str]:
-    """What is wrong with ``[agent] tool_images`` and its two counts."""
-    errors: list[str] = []
-    if agent.tool_images not in TOOL_IMAGES:
-        errors.append(
-            f"[agent] tool_images {agent.tool_images!r} is not recognised. "
-            f"Must be one of {TOOL_IMAGES}."
-        )
-    for name in ("tool_images_keep", "tool_images_retire"):
-        value = getattr(agent, name)
-        if value < 1:
-            errors.append(f"[agent] {name} must be an int >= 1, got {value!r}")
-    return errors
+    """What is wrong with ``[agent] tool_images``."""
+    if agent.tool_images in TOOL_IMAGES:
+        return []
+    return [
+        f"[agent] tool_images {agent.tool_images!r} is not recognised. "
+        f"Must be one of {TOOL_IMAGES}."
+    ]
 
 
 def empty_reply_fallback_errors(agent: AgentConfig) -> list[str]:
@@ -1002,9 +995,6 @@ class Config:
                 f"[agent] window_messages must be an int from "
                 f"{WINDOW_MESSAGES_MIN} to {WINDOW_MESSAGES_MAX}, got {window!r}"
             )
-        turns = agent.replay_turns
-        if turns is not None and turns < 1:
-            errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
         names = ("context_window", "output_reserve", "safety_margin")
         budget = [getattr(agent, name) for name in names]
         errors.extend(
@@ -1537,6 +1527,11 @@ def _digits_as_text(value: Any) -> Any:
 _SPELLINGS: dict[str, Callable[[Any], Any]] = {
     # "slide" was removed (settings.removed_in says so); it reads as the default.
     "agent.window_eviction": lambda value: "chunk" if value == "slide" else value,
+    # "drop", "replay" and "compress+replay" were removed (settings.removed_in says so);
+    # they read as the default.
+    "agent.reasoning": lambda value: (
+        "legacy" if value in REMOVED_REASONING_MODES else value
+    ),
     # "model" and "model+tags" were removed; both did the rules first, so they read as "rules".
     "memory.sleep": lambda value: (
         "rules" if value in ("model", "model+tags") else value

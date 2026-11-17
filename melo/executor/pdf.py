@@ -87,7 +87,7 @@ NO_TEXT_CHARS = 20
 # Characters of base64 one picture may take; the child draws a page smaller to fit.
 PICTURE_BYTES = 4 * _MB
 
-# Pictures one result carries: the default of ``AgentOptions.tool_images_keep``,
+# Pictures one result carries: ``KEEP_IMAGES`` of ``melo.agent._tool_images``,
 # so none of them loses its pixels when the next arrives.
 MAX_PICTURES = 3
 PICTURE_DPI = 150

@@ -89,9 +89,7 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--window-eviction` | `-X agent.window_eviction=VALUE` |
 | `--window-messages` | `-X agent.window_messages=VALUE` |
 | `--reasoning` | `-X agent.reasoning=VALUE` |
-| `--replay-turns` | `-X agent.replay_turns=VALUE` |
 | `--note-writer` | `-X agent.note_writer=VALUE` |
-| `--captured-history` | `-X agent.captured_history=VALUE` |
 | `--context-window` | `-X agent.context_window=VALUE` |
 | `--output-reserve` | `-X agent.output_reserve=VALUE` |
 | `--safety-margin` | `-X agent.safety_margin=VALUE` |
@@ -357,10 +355,8 @@ two equal.
 | `--window-eviction` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
-| `--replay-turns` | experimental | #183 |
 | `--note-writer` | experimental | #183 |
 | `--tool-exposure` | experimental | #3 |
-| `--captured-history` | experimental | #4 |
 | `--retriever` | experimental | #4 |
 | `--recall-at` | experimental | #4 |
 | `--recall-k` | experimental | #4 |
@@ -436,7 +432,6 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--window-eviction chunk\|boundary` | `chunk` | How working memory drops old turns: `chunk` eight messages at a time; `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
 | `--window-messages N` | `64` on a local server or a URL (`256` with a token budget), `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. Overrides `[agent] window_messages`; see [Memory](memory.md#working-memory-window). |
-| `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `100` | The most planning steps the whole run may take (also `-s N`). |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts of `agent.steps_per_attempt` steps (50) with a reflection after each. `none`: one attempt of `--max-steps` steps, no reflection. `[agent] reflection = false` (**Reflect when stuck after many steps** in Settings, or `-X agent.reflection=off` for one run) gives `none` to every run that reads the config; this option keeps its say over it. |
@@ -453,15 +448,14 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
-| `--reasoning legacy\|drop\|replay\|compress\|compress+replay` | `legacy` | How a reply's reasoning is sent back. `legacy` keeps the provider's own behavior (an OpenAI-compatible server gets none, Ollama native gets its own field); `drop` never sends it; `replay` sends it on the assistant turns in scope, under one key; `compress` sends none and keeps each reply's note and drafts in working memory; `compress+replay` does both. |
-| `--reasoning-field auto\|reasoning_content\|reasoning` | not set | The request key `--reasoning replay` uses. `auto` follows the key the last reply's reasoning came from; the others fix it. Needed with `--base-url`, or set `reasoning_field` in the chat backend's config section. |
-| `--replay-turns N` | every turn in scope | With `replay` or `compress+replay`, keep the newest `N` assistant turns' reasoning; older ones are sent without it. It is inert in `legacy`, `drop` and `compress`. |
-| `--note-writer auto\|heuristic` | `auto` | In the compress modes, who writes each reply's note: `auto` reads the model's `<note>` block and falls back to the heuristic, `heuristic` always writes it from the reply's text and reasoning. Accepted and inert in the other modes. |
+| `--reasoning legacy\|compress` | `legacy` | How a reply's reasoning is kept. `legacy` keeps the provider's own behavior (an OpenAI-compatible server gets none, Ollama native gets its own field); `compress` sends none and keeps each reply's note and drafts in working memory, except that a backend whose `requires_reasoning_replay` is true still gets the reasoning back. |
+| `--reasoning-field auto\|reasoning_content\|reasoning` | not set | The request key a replayed reasoning goes under, for `--reasoning compress` on a backend that requires replay. `auto` follows the key the last reply's reasoning came from; the others fix it. Or set `reasoning_field` in the chat backend's config section. |
+| `--note-writer auto\|heuristic` | `auto` | With `compress`, who writes each reply's note: `auto` reads the model's `<note>` block and falls back to the heuristic, `heuristic` always writes it from the reply's text and reasoning. Accepted and inert in `legacy`. |
 | `--retriever auto\|off\|bm25\|llm\|embedding` | `auto` | How recall ranks documents. `auto` uses `embedding` when an embedding provider is configured, else `llm` at `start`/`attempt` and `bm25` at `step`/`tool`. `off` turns recall off. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `--recall-at LIST` | `start,attempt,step` | The recall triggers: a comma list of `start`, `attempt`, `step` and `tool`. `tool` registers the `recall` tool and is never on unless named. |
 | `--recall-k N` | `3` | Task-local hits per recall, from 1 to 10 (plus at most 2 long-term hits). |
 | `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
-| `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
+| `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused on a backend that requires replay. |
 | `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
 | `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. Available for a task or the interactive UI with `llm`/`auto` outside `legacy`; never saved to the config file. |
 | `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
@@ -516,33 +510,25 @@ accepts the options named in [Interactive UI](#interactive-ui).
   from any folder. A blank name is a usage error. See
   [Procedural memory](../concepts/procedures.md#how-it-works).
 - `--reasoning`: `legacy` is the default and leaves the wire unchanged.
-  `drop`, `replay`, `compress` and `compress+replay`
-  remove an inline `<think>` block from an explicit-mode reply's text,
-  so the result is the clean answer. `replay` sends the reasoning on
-  assistant turns in scope, at most `40,000` characters per turn (a longer
-  turn's reasoning is skipped and counted); a backend whose
-  `requires_reasoning_replay` is true never has its reasoning cut, and
-  `drop` is refused there. `legacy` is never refused, even on such a
-  backend, where it can still draw an HTTP 400. `compress` sends no
-  reasoning and asks the model for a short note before each tool call; the
-  notes and drafts stay in working memory (see
-  [Reasoning notes](../concepts/memory.md#reasoning-notes)). `compress+replay` is both.
-  A backend whose `requires_reasoning_replay` is true runs `compress` as
-  `compress+replay`, and the JSON line reports the effective mode.
-  `--replay-turns` counts assistant turns that carry reasoning; tool results
-  do not consume a turn. The default task scope is the current task's
-  turns only: earlier turns of a `melo ""` loop or of a session are not
-  replayed. On a backend whose `requires_reasoning_replay` is true, every
-  assistant turn in the window is replayed, and neither the task scope nor
-  `--replay-turns` applies. `--base-url` runs use these flags and do not
-  read the config file.
+  `compress` removes an inline `<think>` block from a reply's text, so the
+  result is the clean answer; it sends no reasoning and asks the model for a
+  short note before each tool call, and the notes and drafts stay in working
+  memory (see [Reasoning notes](../concepts/memory.md#reasoning-notes)). A
+  backend whose `requires_reasoning_replay` is true cannot take a request
+  without the reasoning, so there `compress` also sends the reasoning of every
+  assistant turn in the window, uncut, and the JSON line reports the
+  effective mode, `compress+replay`. `legacy` is never refused, even on such
+  a backend, where it can still draw an HTTP 400. `--base-url` runs use
+  these flags and do not read the config file. A value that was removed
+  (`drop`, `replay`, `compress+replay`) exits 2 on the command line and in
+  `-X`, and reads as `legacy` in `config.toml`.
 - `--retriever`, `--recall-*` and `--retrieval-extra-body`: see
   [Recall in the loop](../concepts/memory.md#recall-in-the-loop). `--retriever`,
   `--recall-*` and `--retrieval-extra-body` are accepted in the interactive
   UI. They have no effect in `legacy`: every one of
   them is a usage error there (exit 2, one line), as are `--retriever
   embedding` without an embedding provider or with `--memory off`,
-  `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
+  `--recall-placement message` on a backend that requires replay, `--recall-at
   tool` with `--mcp-only` or a `--builtins` list without `recall`,
   `--builtins recall` without `--recall-at tool`, and
   `--retrieval-extra-body` when the resolved retriever is `off`, `bm25` or
@@ -566,16 +552,16 @@ accepts the options named in [Interactive UI](#interactive-ui).
   to a heuristic when there is none; `heuristic` ignores the block. A note
   is at most about 1,200 characters, and `remember: yes` marks it a
   candidate for later memory. The flag is accepted in every mode and only
-  the compress modes use it. In `config.toml` it is the `[agent]`
-  `note_writer` key, and `[agent] reasoning` takes the same five values.
-  In `compress` and `compress+replay` the default `--retriever auto` also
+  `compress` uses it. In `config.toml` it is the `[agent]`
+  `note_writer` key, and `[agent] reasoning` takes `legacy` or `compress`.
+  In `compress` the default `--retriever auto` also
   recalls notes and drafts at `start`, `attempt` and `step`; see
   [Recall in the loop](../concepts/memory.md#recall-in-the-loop).
 - `--reasoning-field`: `auto` resolves to the key the last reply's
   reasoning came from, and sends no key before the first such reply. The
-  flag, and a backend's `reasoning_field`, are used only in `replay` and
-  `compress+replay`; in `legacy`, `drop` and `compress` the wire is as if
-  no field were set. The `ollama`
+  flag, and a backend's `reasoning_field`, are used only when `compress`
+  runs with the reasoning sent back, on a backend that requires it; in
+  every other run the wire is as if no field were set. The `ollama`
   backend fixes its field to `thinking`, so the flag is a usage error
   there. The same rule applies in the interactive UI, including after a
   backend switch.
@@ -593,7 +579,7 @@ These options apply to `melo` without a task.
 - The UI also takes `--context-window`, `--output-reserve`, `--safety-margin`,
   `--workspace`, `--max-steps`, `--attempt-policy`,
   `--builtins`, `--memory`, `--memory-dir`,
-  `--request-timeout`, `--reasoning`, `--reasoning-field`, `--replay-turns`,
+  `--request-timeout`, `--reasoning`, `--reasoning-field`,
   `--note-writer`, `--retriever`, `--recall-*`, `--retrieval-extra-body` and
   the `--embedding-*` options, for every turn of the session. Explicit flags
   win over the saved `[agent]` and `[retrieval]` defaults; retrieval settings
@@ -605,9 +591,8 @@ These options apply to `melo` without a task.
 - For example, `melo --reasoning compress --retriever bm25 --note-writer heuristic`
   starts a session with short notes and recall. There is no `/reasoning`
   command: choose the mode when starting the process. `/model` and `/backend`
-  keep the mode, full conversation and RAM-only notes/drafts. A provider that requires replay
-  refuses a `drop` session without changing its model, conversation or MCP
-  state; `compress` on such a provider runs as `compress+replay`.
+  keep the mode, full conversation and RAM-only notes/drafts. `compress` on a
+  provider that requires replay also sends the reasoning back.
 - Session replay covers the retained conversation window, not only the
   current task. On resume, `pairs` restores answers without thinking;
   `window` can replay the checkpoint's retained, redacted thinking. The
@@ -728,23 +713,17 @@ These are usage errors:
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
 - a recall flag in `legacy`, reported as
-  `argument --retriever/--recall-*/--retrieval-*: retrieval is not available in legacy; use --reasoning compress, compress+replay, drop or replay`;
+  `argument --retriever/--recall-*/--retrieval-*: retrieval is not available in legacy; use --reasoning compress`;
 - `--retriever embedding` without an embedding provider or with
   `--memory off`;
-- `--recall-placement message` with `--reasoning replay` or
-  `compress+replay`;
+- `--recall-placement message` with `--reasoning compress` on a backend with
+  `requires_reasoning_replay = true`;
 - `--recall-at tool` with `--mcp-only`, without `recall` in `--builtins`,
   or with `--retriever off`;
 - `--retrieval-extra-body` with `--retriever off`, `bm25` or `embedding`;
-- `--reasoning replay` or `--reasoning compress+replay` with `--base-url`
-  and no `--reasoning-field`, reported as
-  `argument --reasoning: replay and compress+replay need a reasoning field: give --reasoning-field (auto, reasoning_content or reasoning) with --base-url, or set reasoning_field in the backend's config`;
-- `--reasoning replay` or `--reasoning compress+replay` on a configured
-  backend whose `reasoning_field` is unset, reported as
+- `--reasoning compress` on a configured backend with
+  `requires_reasoning_replay = true` and no `reasoning_field`, reported as
   `argument --reasoning: replay and compress+replay need a reasoning field: set reasoning_field in the chat backend's config section`;
-- `--reasoning drop` on a backend with `requires_reasoning_replay = true`,
-  reported as
-  `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay or compress+replay`;
 - `--reasoning-field` with the `ollama` backend, reported as
   `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
 - an MCP config file that cannot be read or is not valid;
@@ -776,7 +755,7 @@ These are usage errors:
   when localmelo runs from a git checkout (for example `603f40d`), otherwise
   the installed package version (for example `0.1.0`), or `unknown`.
 - Outside `--reasoning legacy`, the record also has `config.reasoning`,
-  `config.replay_turns`, `config.note_writer`, `usage.reasoning_chars` (and
+  `config.note_writer`, `usage.reasoning_chars` (and
   `usage.reasoning_tokens` or `usage.cached_tokens` when the server reports
   them) and `memory_stats`, with the note counters zeroed in the modes that
   do not use them; see [Run results](run-results.md#fields). A `legacy`

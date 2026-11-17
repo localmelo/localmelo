@@ -315,7 +315,7 @@ def render_transcript(messages: Sequence[Message]) -> str:
     Images are not shown: a tool
     result's content already names its images, and a line counts the
     images of any other message. Thinking is left out, as in legacy and in
-    this transcript; a ``replay`` planning or reflection request carries
+    this transcript; a replaying planning or reflection request carries
     it, but the retry's written-out turns do not.
     """
     paragraphs: list[str] = []

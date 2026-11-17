@@ -25,7 +25,7 @@ What a later run recalls:
 
 - Recalling long-term memory in a later process needs persistence, memory on, a reasoning mode other than `legacy` and an earlier stored entry.
 - A `legacy` run opens no long-term store; a `long_term.db` an earlier version wrote there stays as it is, and the other reasoning modes read it. They persist text-only entries without an embedding backend and find them with BM25.
-- In explicit modes, recall must be enabled and include the `long` kind; `drop` and `replay` leave `auto` recall off by default.
+- With `compress`, recall must be enabled and include the `long` kind.
 - Attempt digests enter long-term memory only with a confirmed file write or an eligible passing check; recall prefers digests from the same task and workspace, and a new task gets no cross-task digests until a same-task digest matches (see [digest recall](../reference/memory.md#digest-recall)).
 
 ## Notes melo keeps about you
