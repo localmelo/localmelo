@@ -2,13 +2,14 @@
 
 Procedural memory learns the steps of tasks you run again and again, such as a test suite you fix every day or a daily report, so that a progress display can show how far a run is. It keeps what earlier runs did, never what the model said: the classes of their tool calls, short labels, step counts and times.
 
-| Persistence | Where it lives |
+| Where the run comes from | Where its record lives |
 |---|---|
-| On (see [Memory](../guides/memory.md#keep-memory-between-runs)) | `procedures.db` in the memory directory. |
-| Off | RAM, for the agent's life; nothing is written. |
+| A chat or a task of the app, the web console or the terminal | `procedures.db` in the default memory directory, with no task text (see [The store](#the-store)). This needs no setting and has none. |
+| Any run with persistence on (see [Memory](../guides/memory.md#keep-memory-between-runs)) | `procedures.db` in the memory directory, with the query text. |
+| Any other run: `melo "<task>"` and a script, with persistence off | RAM, for the agent's life; nothing is written. |
 
 - Every run writes it, through `melo`, the `melo ""` loop, the gateway or the Python API: when a run ends, its record is added.
-- To keep it off the disk, leave persistence off.
+- To keep a direct run or a script off the disk, leave persistence off. A chat or task of the app, the console or the terminal always writes its record; to clear it, see [The store](#the-store).
 - Nothing here calls a model, reaches a prompt or changes a request.
 
 What a run may show from it:
@@ -73,14 +74,17 @@ A call's label names it without its arguments' content:
 
 ## The store
 
-`SqliteProcedures` keeps procedural memory in `procedures.db`, in the memory directory, with mode 0600; `MemoryProcedures` keeps it in RAM. Both live in `localmelo.melo.memory.procedures.store`. The file has three tables, in schema version 1 (`PRAGMA user_version`):
+`SqliteProcedures` keeps procedural memory in `procedures.db`, in the memory directory (the default one for a chat or a task), with mode 0600; `MemoryProcedures` keeps it in RAM. Both live in `localmelo.melo.memory.procedures.store`. The file has three tables, in schema version 1 (`PRAGMA user_version`):
 
 | Table | One row per | Changes |
 |---|---|---|
-| `routines` | Routine: its key, name, normalized and redacted query (at most 2,000 characters), place, and the routine it was similar to | Never |
+| `routines` | Routine: its key, name, normalized and redacted query (at most 2,000 characters; empty for a chat or a task), place, and the routine it was similar to | Never |
 | `episodes` | Finished run: routine, template, model, build, match, level, status, steps, attempts, tool calls, duration, first pass, cycles, segments and shadow bar error | Never |
 | `templates` | Version of a template: statistics, named steps, parameters, the runs it came from, its parent version, status, source | Only `status`: `active` → `superseded`, `candidate` → `active` or `rejected`; a rejected candidate's `eval_json` may record why |
 
+- A chat or a task writes no task text: its `query_text` is empty, and its routine's key is the SHA-256 of the words you wrote in that turn (dates and times masked) and the folder, never of the notes, files, digests or news that melo adds to the request. A turn with no words of its own makes no routine. The same words in the same folder find their routine again after a restart; a reworded task is not recognized as similar, since there is no text to compare.
+- Steps are what a tool call was, never its content: its class, label and target (a file's base name, or a program with its first subcommand, cut to 40 characters), counts and times.
+- "Forget everything" in the console and `/memory` in the terminal do not remove this file. To clear it, stop localmelo and run `melo-procedures forget --all`, or delete `~/.cache/localmelo/memory/procedures.db*`.
 - Triggers in the file refuse any other change, and at most one version of a template is `active`.
 - A run's end writes in one `BEGIN IMMEDIATE` transaction, so two processes that finish runs of one routine at once wait for each other (up to 500 ms).
 - Rows leave the file only through `melo-procedures forget`.

@@ -14,7 +14,7 @@ import pytest
 
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.memory.block import BLOCK_HEADER
-from localmelo.support.gateway.console.front import FrontAgent
+from localmelo.support.gateway.console.front import WHO_NOTE, FrontAgent
 from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
@@ -44,4 +44,4 @@ async def test_the_review_holds_the_persons_part_and_exactly_the_notes_given(
     assert agent._reviewer.requests == (TYPED,)
     assert agent._reviewer._recalled == NOTES
     sent = next(m.content for m in reversed(llm.requests[0]) if m.role == "user")
-    assert sent == f"{TYPED}{NOTES}{CONTEXT}\n\n{ACTING_NOTE}"
+    assert sent == f"{TYPED}{NOTES}{CONTEXT}\n\n{WHO_NOTE}\n\n{ACTING_NOTE}"

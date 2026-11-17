@@ -297,6 +297,28 @@ class AgentFactory:
         ):
             self.backend = replace(backend, label=discovery.OMLX_NAME)
 
+    @property
+    def configured(self) -> bool:
+        """Whether the session runs on the saved config (not on a ``--base-url`` server)."""
+        return self._cfg is not None
+
+    def follow_saved(self, saved: config.Config) -> None:
+        """Take the chat backend, its section and the remembered services of *saved*.
+
+        A switch made through the gateway saved them. The session's other settings and
+        its embedding stay, so a switch never changes how memory is built.
+        """
+        if self._cfg is None:
+            return
+        cfg = copy.deepcopy(self._cfg)
+        cfg.chat_backend = saved.chat_backend
+        setattr(
+            cfg, saved.chat_backend, copy.deepcopy(getattr(saved, saved.chat_backend))
+        )
+        cfg.services = copy.deepcopy(saved.services)
+        self._cfg = cfg
+        self.backend = config_backend(cfg, None)
+
     def use_model(self, model: str) -> None:
         follows = self.backend.follows and model == self.backend.model
         self.backend = replace(self.backend, model=model, listed=0, follows=follows)

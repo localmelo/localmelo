@@ -1810,6 +1810,18 @@ async def test_status_all_wraps_its_rows_under_their_labels(
     assert "not reachable: connection refused" in " ".join(map(str.strip, rows))
 
 
+async def test_status_all_lists_the_record_of_repeated_tasks_without_the_memory_opt_in(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _listing(monkeypatch, None)
+    session = setup.session
+    session.out = wide = RecordingOut(200)
+    session.enter("/status all")
+    await _until(lambda: "version    melo " in wide.text())
+    files = next(r for r in _plain(wide.text()).splitlines() if r.startswith("files"))
+    assert "memory/procedures.db" in files and "history.db" not in files
+
+
 async def test_the_status_bar_always_names_the_approval_mode_and_its_key(
     setup: Setup,
 ) -> None:

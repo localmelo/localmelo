@@ -19,6 +19,7 @@ from localmelo.melo.memory.procedures.normalize import (
     find_similar,
     key_for_query,
     key_for_routine,
+    key_for_words,
     known_model,
     length_options,
     normalize_query,
@@ -104,6 +105,16 @@ def test_the_same_words_in_another_place_are_another_routine() -> None:
     assert here.key != there.key
     assert here.query_text == there.query_text == "fix the tests"
     assert key_for_query("fix  THE tests", "/a").key == here.key
+
+
+def test_words_make_the_key_of_their_query_and_keep_no_text() -> None:
+    words = "Fix the tests on 2026-10-26"
+    kept = key_for_query(words, "/a")
+    key = key_for_words(words, "/a")
+    assert key is not None
+    assert (key.key, key.place, key.name) == (kept.key, "/a", None)
+    assert kept.query_text != "" and key.query_text == ""
+    assert key_for_words("  \n ", "/a") is None
 
 
 def test_a_named_routine_is_one_routine_in_any_folder() -> None:

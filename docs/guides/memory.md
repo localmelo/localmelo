@@ -18,6 +18,7 @@ melo "What is 6*7?"
   ```
 
 - A gateway uses the variables it was started with, and all its sessions save to the same files.
+- Without any of this, the chats and tasks of the app, the web console and the terminal still keep the steps of repeated tasks in `procedures.db` of that directory, so that a task done before a restart shows its last time again. It holds no task text; see [Privacy](#privacy). Nothing else is written.
 - History keeps the model's reasoning for 30 days (see [Model calls](../reference/memory.md#model-calls)); `LOCALMELO_THINKING_RETENTION_DAYS` sets another number of days, such as `7` or `0.5`, for `history.db` and the session store's `sessions.db` alike (see [Sessions](../reference/memory.md#sessions)); a value that is not a number above 0 stops `melo` before it runs anything (see [Usage errors](../reference/cli.md#usage-errors)).
 
 What a later run recalls:
@@ -119,7 +120,7 @@ asyncio.run(main())
 
 - **What `forget(task_id)` removes.** The task's rows from history's `tasks`, `steps` and `llm_calls` tables, and the long-term entries of the task; a step summary an older version wrote names only its step (`"step_id"`), so only `forget_all()` removes it.
 - **What `forget_all()` removes.** Every long-term entry and every row of the three history tables.
-- **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget` clears that), and the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`).
+- **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget --all` clears that; "Forget everything" in the console and `/memory` in the terminal leave it as it is), and the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`).
 - **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock; the deletes overwrite what they free (`PRAGMA secure_delete=ON`) and a checkpoint truncates the WAL, so the text is not left in the database file or its `-wal` file; if another connection keeps the WAL from truncating, the checkpoint is skipped with a WARNING and a later one clears it.
 - A forget is safe while localmelo runs; removing the files is not.
 
@@ -169,12 +170,13 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 |---|---|
 | `~/.cache/localmelo/memory/history.db` | Your tasks, the model's text, every tool call with its arguments and every tool result, each after the redaction of [Model calls](../reference/memory.md#model-calls); also the model's reasoning for every call, redacted and kept 30 days by default. |
 | `~/.cache/localmelo/memory/long_term.db` | The entries of the reasoning modes other than `legacy`, redacted, and the step summaries and reflections an older version wrote, with their embedding vectors. |
-| `~/.cache/localmelo/memory/procedures.db` | Each task's normalized query, the folder it ran in and its tool calls' labels (file names and program names, never their content or output). |
+| `~/.cache/localmelo/memory/procedures.db` | The steps of each repeated task: the class, label and target of its tool calls (file names and program names, never their content or output), counts and times, and the folder it ran in. For a chat or a task of the app, the console or the terminal, a fingerprint of the words you wrote (a SHA-256 with the folder) and no task text. With persistence on, also each task's normalized query. |
 | `~/.cache/localmelo/cli/sessions.db` and `~/.cache/localmelo/cli_history` | Every terminal turn with its tool calls and output; your messages (both `0600`). |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's session rows and turns. |
 
 - The files are not encrypted; they are as private as your home directory.
-- The query and the labels in `procedures.db` pass a minimal redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of [Model calls](../reference/memory.md#model-calls), then a URL's password (`postgres://app:<redacted>@host`, the user name kept) and the value of `NAME=value` or `NAME: value` when NAME contains `key`, `token`, `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`); anything else stays as written, such as host names, paths and other values.
+- The fingerprint cannot be read back, but anyone who guesses your exact words can check them against it. "Forget everything" does not remove `procedures.db`; to clear it, stop localmelo and run `melo-procedures forget --all`, or remove the file (see [Reset memory](#reset-memory)).
+- The query (kept only with persistence on) and the labels in `procedures.db` pass a minimal redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of [Model calls](../reference/memory.md#model-calls), then a URL's password (`postgres://app:<redacted>@host`, the user name kept) and the value of `NAME=value` or `NAME: value` when NAME contains `key`, `token`, `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`); anything else stays as written, such as host names, paths and other values.
 - Images that tools return are stored only as references: the MIME type, the SHA-256 digest and the size, never the image itself.
 - `~/.cache/localmelo/logs/cli.log` records request URLs and errors.
 - To remove the files, see [Reset memory](#reset-memory); the Python API's `forget` overwrites the cells it deletes and truncates the WAL, so the text does not stay in `history.db-wal` or `long_term.db-wal`.

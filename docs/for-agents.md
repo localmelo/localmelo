@@ -234,6 +234,8 @@ Every route the gateway serves:
 | `POST /api/auth/login` | [api-v2](reference/api-v2.md) |
 | `POST /api/auth/logout` | [api-v2](reference/api-v2.md) |
 | `POST /api/auth/rotate` | [api-v2](reference/api-v2.md) |
+| `GET /api/chat-models` | [api-v2](reference/api-v2.md#get-apichat-models) |
+| `POST /api/chat-models/switch` | [api-v2](reference/api-v2.md#post-apichat-modelsswitch) |
 | `PUT /api/checkin` | [api-v2](reference/api-v2.md) |
 | `GET /api/chores` | [api-v2](reference/api-v2.md) |
 | `POST /api/chores` | [api-v2](reference/api-v2.md) |
@@ -246,6 +248,7 @@ Every route the gateway serves:
 | `GET /api/grants` | [api-v2](reference/api-v2.md#get-apigrants) |
 | `DELETE /api/grants/{grant_id}` | [api-v2](reference/api-v2.md#delete-apigrantsid) |
 | `GET /api/health` | [api-v2](reference/api-v2.md#get-apihealth) |
+| `GET /api/hosted/models` | [api-v2](reference/api-v2.md#get-apihostedmodels) |
 | `PUT /api/memory` | [api-v2](reference/api-v2.md) |
 | `POST /api/memory/import` | [api-v2](reference/api-v2.md) |
 | `DELETE /api/memory/import/offer` | [api-v2](reference/api-v2.md) |
@@ -344,7 +347,7 @@ from localmelo.support.config import Config, load, save
 | Path | What it holds |
 |---|---|
 | `~/.cache/localmelo/config.toml` | The configuration; a missing file means not configured. No flag or variable moves it: set `HOME`. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, and `long_term.db` outside `legacy`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, and `long_term.db` outside `legacy`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. Chats and tasks of the app, console and terminal write `procedures.db` alone, with no task text. |
 | `~/.cache/localmelo/gateway/` | `sessions.db` (console chats, tasks, grants), `auth/token`, `endpoint.json` (the running gateway). |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats. |
 | `~/.cache/localmelo/scheduler/runs/` | The gateway's model-call log. |

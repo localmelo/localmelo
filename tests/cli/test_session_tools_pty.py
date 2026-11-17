@@ -13,6 +13,16 @@ from .test_e2e_pty import melo as melo
 from .test_e2e_pty import stub as stub
 
 
+def _turn_saved(home: Path) -> bool:
+    """Whether the turn's end is in the store, where /usage and /copy read it."""
+    path = home / ".cache/localmelo/cli/sessions.db"
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+            return db.execute("SELECT status FROM turns").fetchall() == [("completed",)]
+    except sqlite3.Error:
+        return False
+
+
 def test_title_memory_usage_copy_and_undo_in_a_real_terminal(
     melo: Callable[..., Melo],
     tmp_path: Path,
@@ -25,6 +35,10 @@ def test_title_memory_usage_copy_and_undo_in_a_real_terminal(
     term.type("hello\r")
     term.see("Hello! I am melo, running on a stub model.")
     term.see("Worked for")
+    # The answer shows a few milliseconds before the turn is saved. A command
+    # typed in that gap sees the turn as running: /usage lists it so and /copy
+    # finds no answer. A person's next command comes later; wait as they do.
+    assert term.read_until(lambda _: _turn_saved(tmp_path), 10), term.text()
     term.type("/memory window\r")
     term.see("Working memory:")
     term.see("Embedding model:")

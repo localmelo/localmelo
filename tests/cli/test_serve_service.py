@@ -47,6 +47,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
     monkeypatch.setattr(daemon, "uninstall", lambda: fake.removed.append("gateway"))
     monkeypatch.setattr(daemon, "START_WAIT_S", 0.5)
     monkeypatch.setattr(gateway_endpoint, "live", fake.endpoint)
+    monkeypatch.setattr(gateway_endpoint, "current", fake.endpoint)
     monkeypatch.setattr(
         console_link,
         "open_console",

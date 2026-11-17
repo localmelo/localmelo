@@ -24,6 +24,7 @@ from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
     key_for_query,
     key_for_routine,
+    key_for_words,
     template_id,
 )
 from localmelo.melo.memory.procedures.store import (
@@ -702,6 +703,47 @@ async def test_a_similar_view_records_no_version_of_its_own_template(
     # the template this episode belongs to.
     assert result.episode.template_id != view.template_id
     assert (result.episode.level, result.episode.template_version) == (1, None)
+
+
+async def test_two_stores_on_one_file_learn_at_once_without_a_failure(
+    tmp_path: Path, runs: Runs
+) -> None:
+    # Every chat and task has an agent, and so a store, on the one file.
+    path = tmp_path / "procedures.db"
+    first, second = SqliteProcedures(path), SqliteProcedures(path)
+    try:
+        results = await asyncio.gather(
+            *[store.learn(runs(6)) for _ in range(15) for store in (first, second)],
+            return_exceptions=True,
+        )
+    finally:
+        await first.aclose()
+        await second.aclose()
+    assert not [r for r in results if isinstance(r, BaseException)]
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        counts = [
+            conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("routines", "episodes")
+        ]
+    assert counts == [1, 30]
+
+
+async def test_routines_without_text_are_found_by_key_and_never_as_similar(
+    store: Procedures, runs: Runs
+) -> None:
+    words = [f"do chore number {n} in the house" for n in range(6)]
+    for text in words:
+        key = key_for_words(text, PLACE)
+        assert key is not None
+        await store.learn(runs(5, key=key))
+    assert {row["query_text"] for row in await rows(store, "routines")} == {""}
+    found = await lookup(store, key_for_query(words[3], PLACE))
+    assert found is not None and found.match == "exact"
+    # Neither a reworded task nor a routine with no text matches a similar one.
+    assert await lookup(store, key_for_query("do chore number 3 now", PLACE)) is None
+    unseen = key_for_words("an unseen task", PLACE)
+    assert unseen is not None and await lookup(store, unseen) is None
 
 
 async def test_a_newer_file_is_not_written_to(tmp_path: Path) -> None:

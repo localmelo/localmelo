@@ -7,6 +7,9 @@ chat, as ``this chat``; one the window still shows is not.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -14,10 +17,11 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import BLOCK_HEADER
 from localmelo.support.sessions.agents import build_session_agent
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStore, StoredEvent
 from localmelo.tests.fixtures.stub_llm import StubServer
@@ -142,3 +146,107 @@ async def test_a_turn_whose_question_left_the_window_is_recalled_though_its_answ
     (used,) = data["used"]
     assert used["turn"] == 3 and used["source"] == f"this chat, {today()}"
     assert "Nov 3" in request
+
+
+# ── The record of repeated tasks: on disk, and none of the text ─────────────
+
+
+def every_value(path: Path) -> str:
+    """Every value of every table of the file, lowercased, in one text."""
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        values = [
+            str(value)
+            for table in tables
+            for row in conn.execute(f"SELECT * FROM {table}")
+            for value in row
+        ]
+    return "\n".join(values).lower()
+
+
+async def test_chats_and_tasks_leave_a_record_a_new_agent_finds_and_none_of_their_text(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    record = Path(os.path.expanduser("~/.cache/localmelo/memory/procedures.db"))
+    # One marker in each part of a turn's text: the person's words, the file
+    # they attached, a note recalled from an earlier turn, a context block, and
+    # a task's request.
+    fact = "my quokka appointment is on Nov 3"
+    ask = "when is my appointment? narwhal"
+    attached = [TextAttachment("notes.txt", "okapi lines")]
+    marks = ("narwhal", "okapi", "quokka", "platypus", "wombat")
+
+    async def build() -> Agent:
+        return await build_session_agent(
+            cfg=None,
+            base_url=stub.base_url,
+            model="stub-model",
+            workspace=str(workspace),
+            options=AgentOptions(window_messages=8),
+            identify=True,
+            memory=memory,
+        )
+
+    agent = await build()
+    chat = SessionRunner(
+        agent,
+        store,
+        None,
+        new_session=NewSession(kind="chat"),
+        memory=memory,
+        context="platypus news",
+    )
+    for said in (fact, *LATER):
+        await chat.run_turn(said)
+        await memory.drain()
+    stub.requests.clear()
+    await chat.run_turn(ask, attachments=attached)
+    request = stub.requests[0]["messages"][-1]["content"]
+    assert all(mark in request for mark in ("narwhal", "okapi", "quokka", "platypus"))
+    await chat.close()
+    await agent.close()
+    assert record.exists()
+
+    agent = await build()
+    task = SessionRunner(
+        agent,
+        store,
+        None,
+        new_session=NewSession(kind="task"),
+        context="platypus news",
+    )
+    await task.start_turn("check the wombat report", from_person=False)
+    outcome = await task.wait()
+    assert outcome is not None and outcome.status == "completed"
+    await task.close()
+    await agent.close()
+
+    # A new agent, a new chat, other context: the same words find the record.
+    agent = await build()
+    events: list[StoredEvent] = []
+    again = SessionRunner(
+        agent,
+        store,
+        None,
+        new_session=NewSession(kind="chat"),
+        on_event=events.append,
+        progress=True,
+        context="other news",
+    )
+    await again.run_turn(ask, attachments=attached)
+    await again.close()
+    await agent.close()
+    states = [e.event["data"] for e in events if e.event["type"] == "run.progress"]
+    assert states[0]["past"]["runs"] == 1 and states[0]["basis"]["match"] == "exact"
+
+    text = every_value(record)
+    assert not [mark for mark in marks if mark in text]
+    with contextlib.closing(sqlite3.connect(record)) as conn:
+        texts = conn.execute("SELECT query_text FROM routines").fetchall()
+    # Six turns and a task make seven routines; the repeated turn found its own.
+    assert len(texts) == 7 and set(texts) == {("",)}

@@ -8,7 +8,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 ### Chat
 
 - One main chat, with side chats under it: it answers, or hands bigger work to a task by priority; the terminal, the console and the app open the same chat.
-- A chat does the work you ask for itself, and hands what is left to one fresh task when the rest would fill its context; its turn names the task.
+- A chat decides first who does your work: short work itself, long work (more than about five steps) a task, and the chat stays free for you. Work that turns out long still moves to one fresh task.
 - A task a chat started runs once; more work on the same job (your message, Continue, Finish it, Allow once) goes on in one fresh task with the record as background.
 - When a task a chat started fails, runs out of steps or needs you, the chat follows up once: it continues another way or asks one clear question.
 - A finished task's answer comes back to the chat that started it.
@@ -102,6 +102,10 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 ### App and web console
 
+- Finished tasks no longer pile up under the main chat: only work that is still going is kept in sight there.
+- Settings says less: a row is its title and its control, and the layout explains it; only what a person must know before choosing (where search words go, what still asks, what a missing helper blocks) stays in words.
+- A switch in Settings takes the click anywhere on it. Before, only a spot at its top-left corner reacted, so a switch could look stuck.
+- After an update, the app and `melo` no longer keep using the gateway of the version before: an idle one is replaced when they start, and one with work in it is left until it is idle.
 - The web console and the macOS app speak 简体中文, with times and dates written the Chinese way.
 - Melo the Akita lives in the app, the console and on your desktop: it wakes, types, rests and plays, and raises a paw when something waits for you.
 - With the app's window put away, a small pill says what runs.
@@ -122,6 +126,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A blocked step reads the same on its chat card and its task page, also after a reload; a run whose work went on in a newer task says so instead of Needs you everywhere; the Scheduled tab says how each last run really ended.
 - The live steps beside a chat mark a failed, blocked or waiting step as the chat does, a stopped turn's card says its cause once and names Continue when it offers it, and a narrow window hides the empty side-chat note.
 - Keyboard use of the console: a skip link passes the chat list, scrolling code, tables and tool output take focus, and the app's window stops at 720 by 480; a short window fits its message box and setup card.
+- A task you did before a restart of the app shows again how many steps it took last time.
 
 ### Terminal
 
@@ -146,6 +151,11 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The first run finds a model server that already runs, or on a Mac sets one up after one OK.
 - The chat model is picked from what the server offers; when the saved model is gone and the server has one chat model, melo uses it and says so.
 - Hosted model services in Settings and `melo setup`, chosen from a list, with the key in the keychain.
+- The Anthropic choice suggests models the service offers today; the one it suggested before had been withdrawn, so a new key could not be used.
+- A hosted service lists its models by itself once its key is saved, and the first one it suggests is offered first; a saved model the service no longer offers is said at once, and never changed for you.
+- Keep keys for several hosted services at once: each remembers its last model, and one list in the console, the app and `/model` switches between them and the local server, from the next message.
+- A key is sent only to its own service; a key saved for another address is refused before any request, and "Other" keeps one key per address.
+- The Anthropic service lists its models (it asks in its own format), and a service's error shows as one short line, not its raw answer.
 - melo_serve is a local model server, and its model can be switched from every surface.
 - `melo serve` just works after the first run, and can run at login on macOS.
 - oMLX is supported and recommended on Apple silicon.

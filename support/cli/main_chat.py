@@ -326,7 +326,7 @@ def connect(
     # A gateway another melo is starting gets a moment; one started here, all of *start_s*.
     deadline = clock() + start_s / 4
     while True:
-        running = gateway_endpoint.live()
+        running = gateway_endpoint.current()
         if running is not None:
             found = look(running.url, running.port)
             if found.main is not None:

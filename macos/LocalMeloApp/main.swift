@@ -479,9 +479,25 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             let confirmed = attachConfirmed(status: http?.statusCode,
                                             gatewayHeader: http?.value(forHTTPHeaderField: "X-LocalMelo-Gateway"),
                                             endpoint: endpoint)
+            let own = Bundle.main.object(forInfoDictionaryKey: "LocalMeloBuild") as? String ?? ""
+            let replace = confirmed && replacesGateway(own: own,
+                                                       build: http?.value(forHTTPHeaderField: "X-LocalMelo-Build"),
+                                                       busy: http?.value(forHTTPHeaderField: "X-LocalMelo-Busy"))
+            // An idle gateway of another build: ended the way `melo serve stop` ends it, then the app starts its own.
+            // One that does not go in time is used as it is.
+            var ended = false
+            if replace {
+                kill(endpoint.pid, SIGTERM)
+                let deadline = Date().addingTimeInterval(gatewayStopSeconds)
+                while kill(endpoint.pid, 0) == 0 || errno == EPERM {
+                    if Date() >= deadline { break }
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                ended = !(kill(endpoint.pid, 0) == 0 || errno == EPERM)
+            }
             DispatchQueue.main.async {
                 guard let self = self, self.startAttempt == attempt, !self.quitPending else { return }
-                if confirmed {
+                if confirmed && !ended {
                     self.attach(endpoint)
                 } else {
                     self.spawnGateway()

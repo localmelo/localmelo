@@ -734,12 +734,6 @@ button:hover:not(:disabled) {
   object-fit: contain;
   margin: 0 auto 12px;
 }
-.eyebrow {
-  font-size: var(--text-caption);
-  font-weight: 600;
-  color: var(--ink-3);
-  margin: 0 0 12px;
-}
 .welcome > h2 {
   font-size: var(--text-display);
   line-height: 1.25;
@@ -2358,7 +2352,6 @@ details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .activity-step-time { color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .activity-output { max-height: 6.4em; margin: 8px 0 0; padding: var(--space-2) var(--space-3); overflow: hidden; border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font: var(--text-caption)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--space-3); }
-.activity-level { max-width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
 .activity-open { margin-left: auto; font-size: var(--text-small); }
 .approval-fold { padding: 0 8px 8px 50px; }
 .approval-toggle { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-3); font-size: var(--text-caption); }
@@ -2561,7 +2554,7 @@ a.sched-last[data-ending="failed"] { color: var(--error); }
   .panel-backdrop { position: fixed; inset: 0; z-index: calc(var(--layer-sheet) - 1); display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
+  .panel-chip, .activity-head, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, a.sched-last, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
 }
 /* Settings: the sections on the left, the chosen one on the right; on a phone the list, and the section as a sheet. */
 dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); max-height: none; padding: 0; overflow: hidden; }
@@ -2582,6 +2575,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-7) var(--space-7); }
 .st-section h3 { margin: 0; padding-right: var(--space-7); font-size: var(--text-heading); font-weight: 500; line-height: 30px; letter-spacing: -0.4px; }
 .st-help { max-width: 62ch; margin: var(--space-1) 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+/* A section with no lead under its heading goes straight to its first group. */
+.st-section h3 + .st-group { margin-top: var(--space-5); }
 /* The rest of a section's help, folded under the two sentences that matter first. */
 .st-help:has(+ .st-more) { margin-bottom: var(--space-2); }
 .st-more { max-width: 62ch; margin: 0 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
@@ -2617,7 +2612,10 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-test p[data-state="error"] { color: var(--error); }
 /* The switch is a checkbox: the track is drawn beside it, and the checkbox keeps the focus and the state. */
 .st-switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
-.st-switch input { position: absolute; inset: -10px -6px; width: auto; height: auto; margin: 0; opacity: 0; cursor: pointer; }
+/* The checkbox takes the click for the whole switch and a margin around it. It needs a width and a height (a
+   checkbox keeps its own small size when only its edges are set) and it lies above the track, which comes after
+   it and is positioned too: without either, only a corner outside the track reacts. */
+.st-switch input { position: absolute; z-index: 1; top: -10px; left: -6px; width: calc(100% + 12px); height: calc(100% + 20px); margin: 0; opacity: 0; cursor: pointer; }
 .st-track { position: relative; width: 40px; height: 24px; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); transition: background-color var(--motion), border-color var(--motion); }
 .st-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform var(--motion), background-color var(--motion); }
 .st-switch input:checked + .st-track { border-color: var(--accent); background: var(--accent); }

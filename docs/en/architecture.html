@@ -122,9 +122,9 @@
         <p class="diagram-caption">You, or Auto's review, approve a step, in a chat as in a worker. What you allow is kept as a grant, and it survives a restart.</p>
         <ul>
           <li>You talk to the main chat. Side chats have the same abilities and share its memory, from their first message.</li>
-          <li>A chat does your work itself, in its own run, with the same agent and the same checks and approvals as a worker; most work starts no task. No word list stands in its way: its model reads what you say and acts, or says why not.</li>
+          <li>A chat decides first who does your work. Short work it does itself, in its own run, with the same agent and the same checks and approvals as a worker; long work it gives to a task, and stays free for you. No word list or step count makes that choice: its model reads what you say and acts, or says why not.</li>
           <li>Words you send while a chat works are a note: they reach it at its next step. Stop ends the turn, and a side chat is free for something else.</li>
-          <li>A task is a separate run: you ask for one, the chat hands the rest of long work on (its turn ends there, and the task starts from what it did and what is left), or a scheduled chore starts one on time. The task scheduler orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
+          <li>A task is a separate run: you ask for one, the chat starts one for long work, it hands the rest of work that turned out long on (its turn ends there, and the task starts from what it did and what is left), or a scheduled chore starts one on time. The task scheduler orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
           <li>A task belongs to the chat that started it: its news and result come back there, and a side chat leaves a summary of finished work for the main chat.</li>
           <li>A chat can check on a worker and message it while it runs. A worker asks its chat for help; only the chat asks you.</li>
           <li>A worker runs once: a fresh context, one job, then its result is kept. More work on that job, whether new work, what it left unfinished, Continue or Finish it, goes to a new worker with the old one's record as background; the old one never runs again.</li>
@@ -417,7 +417,7 @@
             <ul>
               <li>A turn runs on the chat's own agent, one turn at a time, with what memory recalls for it.</li>
               <li>The console, the app and the terminal open the same main chat; side chats sit under it, and it shows a card when one finishes or a task needs you.</li>
-              <li>A chat does your work itself in that turn: files, Python, the web and the browser, with the same approvals as any step. Most work starts no task.</li>
+              <li>A chat decides first who does your work: short work itself in that turn (files, Python, the web and the browser, with the same approvals as any step), long work a task.</li>
               <li>What you send while it works joins the turn as a note, read at its next step; Stop ends the turn.</li>
               <li>You can still ask for a task, and any chat can start one; when a side chat finishes work, the main chat reads a line about it, and memory keeps its summary.</li>
             </ul>

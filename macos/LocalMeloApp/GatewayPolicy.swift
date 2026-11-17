@@ -382,6 +382,17 @@ func attachConfirmed(status: Int?, gatewayHeader: String?, endpoint: GatewayEndp
     status == 200 && gatewayHeader == endpoint.id
 }
 
+/// After an update the gateway of the build before would keep serving. One that says it is idle (`X-LocalMelo-Busy: 0`
+/// on `GET /`) and runs another build than the app's (`X-LocalMelo-Build`) is ended, and the app starts its own. An app
+/// without a stamp replaces nothing, and a gateway that does not say it is idle (a busy one, or one from before it
+/// said so) is used as it is: ending it would end what runs in it.
+func replacesGateway(own: String, build: String?, busy: String?) -> Bool {
+    !own.isEmpty && (build ?? "") != own && busy == "0"
+}
+
+/// How long an ended gateway is given to go, as `melo serve stop` gives it.
+let gatewayStopSeconds: TimeInterval = 10
+
 func quitTitle(attached: Bool) -> String {
     attached ? L10n.t("app.menu.quitAttached", "Quit localmelo (the gateway keeps running)")
         : L10n.t("app.menu.quit", "Quit localmelo")

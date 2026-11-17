@@ -308,7 +308,7 @@ blocks = ["chat"]
 id = "task"
 href = "quickstart.html#interactive-conversations"
 title = ["Hand it a task", "交给它一个任务"]
-line = ["Ask in the chat: it does the work itself, and a task you ask for comes back as a card.", "直接在对话里提要求：它亲自做事，你要的任务完成后以卡片回来。"]
+line = ["Ask in the chat: it does short work itself, and long work goes to a task that comes back as a card.", "直接在对话里提要求：短的它亲自做，长的交给任务，完成后以卡片回来。"]
 image = "cards.webp"
 alt = ["Three cards in the main chat: Done, not finished, with what is left and a Finish it button; Needs you, with the question to answer; and Ready, with the task's summary.", "主对话中的三张卡片：Done, not finished（还差什么，有 Finish it 按钮）、Needs you（要你回答的问题）和 Ready（任务的小结）。"]
 

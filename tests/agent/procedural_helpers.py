@@ -148,7 +148,11 @@ async def _no_wait(delay: float) -> None:
 
 
 def make_agent(
-    llm: BaseLLMProvider, *, tools: Tools | None = None, **options: Any
+    llm: BaseLLMProvider,
+    *,
+    tools: Tools | None = None,
+    persist_procedures: bool = False,
+    **options: Any,
 ) -> Agent:
     """An agent with the stand-in tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
@@ -157,7 +161,11 @@ def make_agent(
     # without it being named in `builtins` (P13b).
     options.setdefault("mode", "interactive")
     options.setdefault("tool_exposure", "all")
-    agent = Agent(llm=llm, options=AgentOptions(**options))
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(**options),
+        persist_procedures=persist_procedures,
+    )
     tools = tools or Tools()
     functions: dict[str, Callable[..., Any]] = {
         "file_read": tools.file_read,

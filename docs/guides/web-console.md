@@ -187,10 +187,10 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 
 ![The main chat: a question answered, a task that came back done, a task with its priorities open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
-- **Ask, or ask for work.** Every chat does the work itself, in its own turn: it answers, reads and changes files in its folder, runs Python, looks things up and uses the browser when browsing is on. You see its steps in the chat, and each one passes the same approvals as a task's.
+- **Ask, or ask for work.** A chat decides first who does the work. Short work it does itself, in its own turn: it answers, reads and changes files in its folder, runs Python, looks things up and uses the browser when browsing is on. You see its steps in the chat, and each one passes the same approvals as a task's. Long work (many steps or some minutes: building or testing something, going through many files or pages, research that ends in a report) it gives to a task, and the chat stays free for you.
 - **It starts right away.** You say what you want, in your own words; the chat's model reads it and decides, and no list of verbs stands in its way (`去签到`, `order me a pizza`, `fix tests/cli/test_e2e_pty.py and commit`). It does not ask first, and it never answers with only what it is about to do: it does it, or says why it cannot. A go-ahead counts (`I authorize you to apply`, `我授权你去投简历`), and so does a request in steps (`look at this site and tell me the latest prices`, `分析一下这个仓库，告诉我它的结构`).
-- **A task is for work you want beside the chat.** Ask for one (`/task …`, `run this as a task`, `do this in the background`): one line and **Stop**, `Started: Plan the trip` (developer mode adds `· P2`). Your message is the task's request, word for word, and its result comes back as a card.
-- **Long work can move on.** The chat finishes your work in its turn when it can. When what is left would fill its context with large tool or page output, it hands that to one fresh task and its turn ends with a line naming it: the task starts from your message, what the chat did and found (which calls worked, which failed, and which may have done part of their work) and what is left, and never redoes what is done. While the chat has a browser page open, a take-over card or an approval waiting, holds a password you gave in that message (typed, or the one in a file when your words say to sign in or name a password, give none of their own, and the files hold exactly one password, none of them too long to keep), or sits in a folder no task may use, the work stays in the chat; no sign-in moves with it. Secrets in what the chat wrote or its calls returned are redacted before the task gets them. **Retry** on that message finds the same task, and a Stop as the task is admitted shows it, and it runs.
+- **A task is for long work, and for work you want beside the chat.** The chat starts one by itself for long work, or ask for one (`/task …`, `run this as a task`, `do this in the background`): one line and **Stop**, `Started: Plan the trip` (developer mode adds `· P2`). Your message is the task's request, word for word, and its result comes back as a card.
+- **Work that turns out long moves on.** When work the chat began itself turns out long, or what is left would fill its context with large tool or page output, it hands that to one fresh task and its turn ends with a line naming it: the task starts from your message, what the chat did and found (which calls worked, which failed, and which may have done part of their work) and what is left, and never redoes what is done. While the chat has a browser page open, a take-over card or an approval waiting, holds a password you gave in that message (typed, or the one in a file when your words say to sign in or name a password, give none of their own, and the files hold exactly one password, none of them too long to keep), or sits in a folder no task may use, the work stays in the chat; no sign-in moves with it. Secrets in what the chat wrote or its calls returned are redacted before the task gets them. **Retry** on that message finds the same task, and a Stop as the task is admitted shows it, and it runs.
 - **What needs only an answer gets one.** A greeting, a short message with nothing to do in it (`thanks`, `今天天气不错`), a question (`why do the tests fail?`, `is it done?`), text to translate or explain. Words that say not to act (`just explain how`, `don't change anything`) are read by the model like any others, and a request too unclear to act on gets one short question back.
 - **Say it in code's words.** `/task …`, or **Run as a task** beside the send button (developer mode), starts the message as a task at once; no model reads it to decide. A task started this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
 - **Priorities as P0 to P5.** In developer mode a line shows the code (`P1`); hover it for what it means. In default mode a task's start says nothing of it, and a level you change reads in words (`today`). Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). In developer mode **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
@@ -247,7 +247,7 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 - **Each card keeps its own report.** When a task given from the task page ran more than once, each `Did not finish` card shows the report of its own run.
 - **It approves nothing.** A follow-up has only the task tools (no web, browser, file or shell tool) and widens no permission. What it tells the task reaches it as melo's note, never as your words: a step your own request did not ask for stays blocked in Auto, whatever the note says.
 - **Only tasks the chat started.** A run of a chore the chat saved counts as one of them (a reminder's does not). Tasks started from the task page and other chats' tasks keep the card alone. Activity reads what the chat did: `Continued the task: Fix CI`, `Asked you: Should I split it?`.
-- **Turn it off** with **Follow up on tasks** in Settings → Chats and folders (developer mode), or `[tasks] follow_up = false`.
+- **Turn it off** with **When a task stops, its chat takes over** in Settings → Chats and folders (developer mode), or `[tasks] follow_up = false`.
 
 <a id="slash-commands"></a>
 
@@ -264,7 +264,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | Command | On this page |
 |---|---|
 | `/help [command]` | The everyday commands; `/help all` lists every one and `/help NAME` gives one command's details. |
-| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. With melo_serve: alone, the list of its chat models; with a name, a switch every chat follows. |
+| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. With melo_serve: alone, the list of its chat models; with a name, a switch every chat follows. With a key for a hosted service: alone, the list of every model you can use now; with a name or `service:name`, a switch from the next message ([Hosted models](hosted-models.md#switch-between-models)). |
 | `/backend [url]` | With a URL: switch the model server and save it. Alone: open Settings at the model server. |
 | `/new`, `/clear`, `/side [title]` | A new chat, made by its first message and a side chat under the main chat; `/side` names it, and `/clear` also removes the rows shown. |
 | `/chats`, `/sessions [filter]` | Open the chat list, filtered by the word. |
@@ -754,8 +754,12 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   DeepSeek and Other (OpenAI format): the form then has an **API key** field with
   **Save key** (kept in your Mac's keychain, shown only as **Saved in the keychain**, with
   **Replace** and **Remove**) and, for a service with a switch for it, **Let the model think
-  before it answers**. **Test connection** then lists the service's models and tries one
-  short chat with a tool. See [Hosted models](hosted-models.md).
+  before it answers**. Once a key is saved the service lists its models by itself, when
+  Settings opens, when you choose the service and after you save the key (one request,
+  no chat); the first model it suggests is offered first, and a saved model it no longer
+  offers is said at once, never changed for you. Each service you used keeps its last
+  model, and a key goes only to its own service. **Test connection** tries one short chat
+  with a tool. See [Hosted models](hosted-models.md).
 - **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
@@ -801,7 +805,7 @@ never what runs. When it is on:
   priority;
 - a running turn shows the tool's name and arguments on each tool card, its step, attempt, phase and test count, the number of tool calls on the work line and the steps and tokens under an answer, and a model server error keeps its own text on the card (default mode words each of these for a person and keeps the raw text under **Details**);
 - the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the
-  connection form keeps its technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
+  connection form keeps its technical words (**Chat backend**, **Chat API URL**).
 
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:

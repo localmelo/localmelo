@@ -21,7 +21,7 @@ import pytest
 
 import localmelo.support.onboard as onboard
 from localmelo.melo.contracts.providers import ProviderError
-from localmelo.support import config
+from localmelo.support import config, hosted
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DiscoveryError, FoundServer
 from localmelo.support.config import Config, LocalBackendConfig
@@ -1952,6 +1952,12 @@ HOSTED_ROWS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _no_service_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setup asks a service for its models once a key exists; no test reaches one."""
+    monkeypatch.setattr(onboard, "_listed_models", lambda preset, section: [])
+
+
 def _typed_secret(*keys: str) -> mock.Mock:
     """``_ask_secret`` answering from *keys*; the real one reads without echo."""
     return mock.Mock(side_effect=list(keys))
@@ -2026,8 +2032,11 @@ def test_the_setup_picker_asks_the_address_of_other_and_the_model_by_name(
         "https://llm.example.com/v1",
         "some-model",
     )
-    assert cfg.openai.api_key == "keychain:localmelo.other"
-    assert fake_keychain.items == {("localmelo.other", "localmelo"): SECRET}
+    service = hosted.service_for(
+        hosted.BY_ID["other"], "https://llm.example.com/v1"
+    )  # one key per address
+    assert cfg.openai.api_key == f"keychain:{service}"
+    assert fake_keychain.items == {(service, "localmelo"): SECRET}
 
 
 def test_a_key_that_is_not_one_is_asked_for_again_and_never_saved(
@@ -2073,6 +2082,72 @@ def test_a_keychain_that_cannot_be_used_says_why_and_falls_back_to_a_variable(
     assert SECRET not in out
     assert (cfg.openai.api_key, cfg.openai.api_key_env) == ("", "DEEPSEEK_API_KEY")
     assert fake_keychain.items == {}
+
+
+def test_the_setup_keeps_a_key_only_for_the_address_it_belongs_to(
+    fake_keychain: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def proxied() -> Config:
+        cfg = Config(chat_backend="nvidia")
+        cfg.nvidia.base_url = "https://proxy.example/v1"
+        cfg.nvidia.api_key_env = "MY_PROXY_TOKEN"
+        cfg.nvidia.chat_model = "m"
+        return cfg
+
+    built_in = hosted.BY_ID["nvidia"].stored_url
+    # The setup moves the section to the vendor's own address; the variable that went with the
+    # proxy is not offered to be kept there.
+    cfg = proxied()
+    with (
+        mock.patch.dict("os.environ", {"MY_PROXY_TOKEN": "the-proxys-token"}),
+        mock.patch("builtins.input", _Answers("2", "", "")),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+    ):
+        assert onboard._onboard_hosted(cfg, "nvidia")
+    assert "Keep the key melo already has" not in capsys.readouterr().out
+    assert (cfg.nvidia.base_url, cfg.nvidia.api_key_env) == (built_in, "NVIDIA_API_KEY")
+
+    # A key pasted there is saved for the address the section now has, and is read back.
+    cfg = proxied()
+    with (
+        mock.patch("builtins.input", _Answers("1", "")),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        assert onboard._onboard_hosted(cfg, "nvidia")
+    found = hosted.api_key("nvidia", cfg.nvidia)
+    assert (found.address, found.key) == (hosted.BY_ID["nvidia"].base_url, SECRET)
+
+    # "Other" at one address with a variable the person named: another address does not keep it,
+    # the same address spelled another way does.
+    def other_at_a() -> Config:
+        cfg = Config(chat_backend="openai")
+        cfg.openai.base_url = "https://gw-a.example/v1"
+        cfg.openai.api_key_env = "MY_GW_TOKEN"
+        cfg.openai.chat_model = "m"
+        return cfg
+
+    for typed, kept in (
+        ("https://gw-b.example/v1", False),
+        ("HTTPS://GW-A.example/v1/", True),
+    ):
+        cfg = other_at_a()
+        capsys.readouterr()
+        # With the key kept: Enter keeps it, Enter takes the model; else the variable's row, its name, a model.
+        answers = (
+            _Answers(typed, "", "")
+            if kept
+            else _Answers(typed, "2", "GW_B_TOKEN", "", "m2")
+        )
+        with (
+            mock.patch.dict("os.environ", {"MY_GW_TOKEN": "gateway-a-token"}),
+            mock.patch("builtins.input", answers),
+            mock.patch.object(onboard, "_confirm", return_value=True),
+        ):
+            assert onboard._onboard_hosted(cfg, "other")
+        assert ("Keep the key melo already has" in capsys.readouterr().out) is kept
+        assert cfg.openai.api_key_env == ("MY_GW_TOKEN" if kept else "GW_B_TOKEN")
 
 
 def test_a_saved_key_is_kept_by_enter(config_path: Path, fake_keychain: Any) -> None:
@@ -2506,3 +2581,28 @@ def test_without_a_plan_the_screen_shows_the_manual_way(
     assert t_in("en", how.note) in out and discovery.GUIDE_URL in out
     assert ("This Mac is an Intel Mac." in out) is not raising
     assert "Try a hosted service." in out or raising
+
+
+def test_the_setup_offers_a_model_the_service_lists_first() -> None:
+    preset = hosted.get("deepseek")
+    assert preset is not None
+    answers = _Answers("")  # Enter takes the row offered first
+    with mock.patch("builtins.input", answers), mock.patch("builtins.print"):
+        picked = onboard._pick_hosted_model(preset, "", ["a-model", "deepseek-v4-pro"])
+    assert (
+        picked == "deepseek-v4-pro"
+    )  # the first suggestion the service has, not "a-model"
+
+
+def test_with_none_of_the_suggestions_listed_no_model_is_offered_first() -> None:
+    preset = hosted.get("deepseek")
+    assert preset is not None
+    answers = _Answers(
+        "", "2"
+    )  # Enter on the first row asks again; row 2 is a listed model
+    with mock.patch("builtins.input", answers), mock.patch("builtins.print") as out:
+        picked = onboard._pick_hosted_model(preset, "", ["a-model", "b-model"])
+    assert picked == "a-model"
+    assert len(answers.prompts) == 2
+    shown = " ".join(str(call.args[0]) for call in out.call_args_list if call.args)
+    assert "Choose a model below" in shown and "deepseek-flash" not in shown

@@ -475,6 +475,9 @@ def test_build_assembles_locked_runtime_and_swift(
         plist = plistlib.load(f)
     assert plist["NSAppTransportSecurity"] == {"NSAllowsLocalNetworking": True}
     assert plist["CFBundleExecutable"] == "LocalMelo"
+    # The package carries its stamp and the app knows the same one (a running gateway of another build is replaced).
+    stamp = (site / "localmelo/BUILD").read_text(encoding="utf-8").strip()
+    assert plist["LocalMeloBuild"] == stamp and len(stamp) == 32
     assert plist["CFBundleIdentifier"] == "org.localmelo.app"
     # The Dock and the app menu say localmelo; only the file and the executable keep LocalMelo.
     assert plist["CFBundleName"] == plist["CFBundleDisplayName"] == "localmelo"

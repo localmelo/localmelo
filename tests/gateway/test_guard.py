@@ -1069,6 +1069,9 @@ def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
 @pytest.mark.parametrize(
     ("method", "path"),
     [
+        ("GET", "/api/hosted/models"),
+        ("GET", "/api/chat-models"),
+        ("POST", "/api/chat-models/switch"),
         ("GET", "/api/serve"),
         ("POST", "/api/serve/switch"),
         ("POST", "/api/serve/switch/cancel"),

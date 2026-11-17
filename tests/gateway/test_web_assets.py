@@ -290,29 +290,14 @@ async def test_every_sheet_the_moves_manifest_names_is_served(
         assert sheet.headers["content-type"] == "image/webp", entry["file"]
 
 
-async def test_chat_url_placeholder_matches_the_omlx_hint(
+async def test_chat_url_field_shows_the_omlx_address_as_its_example(
     client: httpx.AsyncClient,
 ) -> None:
     page = await client.get("/")
     parser = InputPlaceholders()
     parser.feed(page.text)
-    # oMLX's server listens on port 8000 by default. The plain hint beside the field shows that address
-    # as its example, and the developer's wording (the catalog's, for settings.mjs) still names oMLX.
-    placeholder = parser.placeholders["s-chat-url"]
-    assert placeholder == "http://127.0.0.1:8000/v1"
-    assert f"such as {placeholder}." in page.text
-    # A screen reader reads that instruction with the field.
-    assert (
-        _shell_attributes(page.text, "input", "s-chat-url")["aria-describedby"]
-        == "s-chat-url-hint"
-    )
-    settings = await client.get("/assets/settings.mjs")
-    assert "settings.${set}.${name}" in settings.text
-    words = (await client.get("/assets/i18n/en.json")).json()
-    assert (
-        "oMLX supports the OpenAI-compatible adapter."
-        in words["settings.developer.urlHint"]
-    )
+    # oMLX's server listens on port 8000 by default; the field's placeholder is the example.
+    assert parser.placeholders["s-chat-url"] == "http://127.0.0.1:8000/v1"
 
 
 @pytest.mark.parametrize(
@@ -700,3 +685,22 @@ async def test_the_shell_pins_the_main_chat_and_drops_the_chats_switch(
         css,
     )
     assert block is not None
+
+
+def test_a_settings_switch_takes_the_click_on_its_whole_face() -> None:
+    """The invisible checkbox has a size of its own and lies above the track.
+
+    With only its edges set a checkbox keeps its small size, and the track, which
+    is positioned and comes after it, covers it: then one corner reacts and the
+    switch looks stuck (measured in a real page; a style check keeps it so).
+    """
+    rule = re.search(r"\.st-switch input \{([^}]*)\}", _stylesheet())
+    assert rule is not None
+    style = dict(
+        (name.strip(), value.strip())
+        for name, value in (
+            part.split(":", 1) for part in rule.group(1).split(";") if ":" in part
+        )
+    )
+    assert style["position"] == "absolute" and int(style["z-index"]) > 0
+    assert "100%" in style["width"] and "100%" in style["height"]

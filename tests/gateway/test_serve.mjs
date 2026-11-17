@@ -27,14 +27,22 @@ const PICKS = [
   {id: '70b', name: 'Qwen3 70B', current: false, loadable: false, words: 'Splash · needs 48 GB, 31 GB free', fit: ''},
 ];
 
-function rig() {
+function rig({groups = null, backend = 'melo_serve', refuse = '', keyed = groups !== null} = {}) {
   const doc = {activeElement: null};
   doc.createElement = (tag) => node(tag, doc);
-  const health = {model: {backend: 'melo_serve', name: 'Qwen3.8-27B'}, switch: null};
+  const health = {model: {backend, name: 'Qwen3.8-27B', backend_label: 'DeepSeek'}, switch: null};
   const calls = [];
+  const choiceCalls = [];
+  const modelSet = [];
   const said = [];
   const waiting = {id: 1, pick: '8b', name: 'Qwen3 8B', state: 'waiting', title: 'Switching to Qwen3 8B…', detail: 'Waiting for 1 chat to finish', error: ''};
   const api = async (path, options = {}) => {
+    if (path.startsWith('/chat-models')) {
+      choiceCalls.push([path, options.body ?? null]);
+      if (path === '/chat-models/switch' && refuse) throw new Error(refuse);
+      if (path === '/chat-models/switch') return {ok: true, model: {backend: 'openai', name: options.body.model, backend_label: options.body.group}};
+      return {hosted: groups !== null, groups: groups ?? []};
+    }
     calls.push([path, options.body ?? null]);
     if (path === '/serve') return {picks: PICKS, foot: 'Every chat on this Mac follows the switch.'};
     if (path === '/serve/switch') return {switch: waiting};
@@ -42,10 +50,11 @@ function rig() {
   };
   const openers = [0, 1].map(() => ({button: node('button', doc), menu: node('div', doc)}));
   const serve = setupServe({
-    doc, api, state: () => ({health}), notify: (words) => said.push(words), openers,
+    doc, api, state: () => ({health, keyed: keyed ? ['deepseek'] : []}), notify: (words) => said.push(words), openers,
     changed: (sw) => { health.switch = sw; },
+    modelChanged: (model) => modelSet.push(model),
   });
-  return {doc, health, calls, said, openers, serve, menu: openers[0].menu};
+  return {doc, health, calls, choiceCalls, modelSet, said, openers, serve, menu: openers[0].menu};
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -104,4 +113,97 @@ test('a switch that fails before the next poll is said once', async () => {
   t.serve.update();
   t.serve.update();
   assert.deepEqual(t.said, ['The switch to Qwen3 8B did not finish: melo_serve is busy']);
+});
+
+// --- hosted services: the groups of the list ---------------------------------------------------------------
+
+const GROUPS = [
+  {id: 'local', label: 'oMLX', kind: 'local', serves: false, models: ['qwen-small', 'qwen-big'], current: '', problem: ''},
+  {id: 'openai', label: 'OpenAI', kind: 'hosted', serves: false, models: ['gpt-4o', 'gpt-4o-mini'], current: '', problem: ''},
+  {id: 'deepseek', label: 'DeepSeek', kind: 'hosted', serves: false, models: ['deepseek-flash', 'deepseek-v4-pro'], current: 'deepseek-flash', problem: ''},
+  {id: 'gemini', label: 'Google Gemini', kind: 'hosted', serves: false, models: [], current: '', problem: 'The service did not accept the key (401). Paste the key again.'},
+];
+const headings = (menu) => menu.children.filter((child) => child.className === 'mode-menu-title').map((child) => child.textContent);
+
+test('with no hosted key and another model server there is no list: the buttons open Settings, as before', async () => {
+  const t = rig({backend: 'ollama'});
+  t.serve.update();
+  await settle();
+  assert.equal(t.serve.serves(), false);
+  assert.equal(t.serve.click(0), false);
+  assert.deepEqual(t.choiceCalls, [], 'no new request: nothing is asked while no hosted service has a key');
+  await t.serve.reloadChoices();  // a settings save with no key known asks nothing either
+  assert.deepEqual(t.choiceCalls, []);
+});
+
+test('a key saved in Settings puts its service on the list at once, asking only for the groups', async () => {
+  const t = rig({groups: GROUPS, backend: 'ollama', keyed: false});
+  assert.equal(t.serve.serves(), false);
+  await t.serve.reloadChoices(true);
+  assert.deepEqual(t.choiceCalls, [['/chat-models?models=0', null]]);
+  assert.equal(t.serve.serves(), true);
+});
+
+test('with a key the chip opens one list: a group per server and service, the one in use marked, a failing one as a row that says why', async () => {
+  const t = rig({groups: GROUPS, backend: 'openai'});
+  t.serve.update();
+  await settle();
+  assert.equal(t.serve.serves(), true);
+  assert.deepEqual(t.serve.chip(), {name: 'Qwen3.8-27B', backend: 'DeepSeek'});
+  assert.equal(t.serve.click(0), true);
+  await settle();
+  assert.equal(t.choiceCalls.at(-1)[0], '/chat-models', 'the models are asked when the list opens');
+  assert.deepEqual(headings(t.menu).slice(0, 4), ['oMLX', 'OpenAI', 'DeepSeek', 'Google Gemini']);
+  const items = rows(t.menu);
+  assert.deepEqual(items.map((item) => text(item)), ['✓qwen-small', '✓qwen-big', '✓gpt-4o', '✓gpt-4o-mini', '✓deepseek-flash', '✓deepseek-v4-pro', 'The service did not accept the key (401). Paste the key again.']);
+  assert.deepEqual(items.map((item) => item.attributes['aria-checked']).slice(0, 6), ['false', 'false', 'false', 'false', 'true', 'false']);
+  assert.equal(items.at(-1).attributes['aria-disabled'], 'true', 'the failing service is no choice and hides no other');
+  assert.equal(t.doc.activeElement, items[4], 'the arrows start on the model in use');
+  assert.equal(t.calls.length, 0, 'melo_serve is not asked');
+});
+
+test('a model picked from a group is switched to at once and named by the chip, no key, no test', async () => {
+  const t = rig({groups: GROUPS, backend: 'openai'});
+  t.serve.update();
+  await settle();
+  t.serve.click(0);
+  await settle();
+  await rows(t.menu)[3].click();
+  assert.deepEqual(t.choiceCalls.find(([path]) => path === '/chat-models/switch'), ['/chat-models/switch', {group: 'openai', model: 'gpt-4o-mini'}]);
+  assert.equal(t.modelSet.at(-1).name, 'gpt-4o-mini');
+  assert.equal(t.menu.hidden, true, 'the list closes');
+  assert.deepEqual(t.said, []);
+  // The model in use is not switched to again.
+  t.serve.click(0);
+  await settle();
+  const before = t.choiceCalls.length;
+  await rows(t.menu)[4].click();
+  assert.equal(t.choiceCalls.length, before);
+});
+
+test('/model names a model of any group, or service:model', async () => {
+  const t = rig({groups: GROUPS, backend: 'openai'});
+  t.serve.update();
+  await settle();
+  await t.serve.load();
+  assert.equal(t.serve.named('gpt-4o').model, 'gpt-4o');
+  assert.equal(t.serve.named('deepseek:deepseek-v4-pro').group, 'deepseek');
+  assert.equal(t.serve.named('nothing'), null);
+  assert.equal(t.serve.unknown('nothing'), 'No listed model is called nothing.');
+  const started = await t.serve.switchTo(t.serve.named('qwen-big').id);
+  assert.deepEqual(t.choiceCalls.find(([path]) => path === '/chat-models/switch'), ['/chat-models/switch', {group: 'local', model: 'qwen-big'}]);
+  assert.equal(started.title, 'Model set to qwen-big (saved).');
+});
+
+test('a refused switch is said and the list stays open on the model in use', async () => {
+  const words = 'The service has no model called gpt-4o. Choose one from the list.';
+  const t = rig({groups: GROUPS, backend: 'openai', refuse: words});
+  t.serve.update();
+  await settle();
+  t.serve.click(0);
+  await settle();
+  await rows(t.menu)[2].click();
+  assert.deepEqual(t.said, [words]);
+  assert.deepEqual(t.modelSet, []);
+  assert.equal(t.menu.hidden, false);
 });

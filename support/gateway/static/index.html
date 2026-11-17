@@ -331,7 +331,6 @@
             <p id="settings-status" class="field-hint st-status" role="status" aria-live="polite"></p>
             <section class="st-section" id="settings-panel-model" role="tabpanel" aria-labelledby="settings-head-model">
               <h3 id="settings-head-model" data-i18n="settings.section.model">Model server</h3>
-              <p class="st-help" id="settings-description" data-i18n="html.settingsDescription">The models Melo runs on, and the server that serves them. Changes apply to your next message.</p>
               <ul class="st-group">
                 <li class="st-row" id="s-chat-row"><div class="st-text"><span class="st-label" data-i18n="html.chatModel">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
                 <li class="st-row" id="s-picks-row" data-stack hidden>
@@ -357,14 +356,12 @@
                 </div>
                 <div class="field" id="s-chat-url-field">
                   <label for="s-chat-url" id="s-chat-url-label" data-i18n="html.sChatUrlLabel">Server address</label>
-                  <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" aria-describedby="s-chat-url-hint" />
-                  <p class="field-hint" id="s-chat-url-hint" data-i18n="html.sChatUrlHint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
+                  <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" />
                 </div>
                 <div id="s-cloud-fields" hidden>
                   <div class="field" id="s-base-url-field" hidden>
                     <label for="s-base-url" data-i18n="settings.hosted.address">Service address</label>
-                    <input id="s-base-url" placeholder="https://llm.example.com/v1" spellcheck="false" autocomplete="url" aria-describedby="s-base-url-hint" />
-                    <p class="field-hint" id="s-base-url-hint" data-i18n="settings.hosted.addressHint">A service that speaks the OpenAI format. Use its address up to /v1.</p>
+                    <input id="s-base-url" placeholder="https://llm.example.com/v1" spellcheck="false" autocomplete="url" />
                   </div>
                   <p class="st-hint" id="s-address-text"></p>
                   <div class="field" id="s-key-field">
@@ -380,7 +377,7 @@
                       <input id="s-key-input" type="password" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="s-key-help s-key-status" />
                       <button type="button" class="outline-button" id="s-key-save" data-i18n="settings.hosted.saveKey">Save key</button>
                     </div>
-                    <p class="field-hint" id="s-key-help" data-i18n="settings.hosted.keyHelp">Kept in your Mac's keychain, not in melo's settings. melo does not show it again.</p>
+                    <p class="field-hint" id="s-key-help" data-i18n="settings.hosted.keyHelp">Kept in your Mac's keychain.</p>
                     <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
                   </div>
                   <details class="advanced" id="s-key-env-details">
@@ -405,8 +402,7 @@
                   <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
                 </div>
                 <div class="field" id="s-thinking-field" hidden>
-                  <label class="st-check"><input type="checkbox" id="s-thinking" aria-describedby="s-thinking-hint" /> <span data-i18n="settings.hosted.thinking">Let the model think before it answers</span></label>
-                  <p class="field-hint" id="s-thinking-hint" data-i18n="settings.hosted.thinkingHint">Thinking can help on hard tasks. If a thinking model ends a turn without an answer, melo asks once more with thinking off.</p>
+                  <label class="st-check"><input type="checkbox" id="s-thinking" /> <span data-i18n="settings.hosted.thinking">Let the model think before it answers</span></label>
                 </div>
                 <div class="field" id="s-embed-offer" hidden>
                   <label class="st-check"><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label" data-i18n="html.sEmbedOfferLabel">Remember across chats with an embedding model?</span></label>
@@ -439,30 +435,28 @@
             </section>
             <section class="st-section" id="settings-panel-memory" role="tabpanel" aria-labelledby="settings-head-memory" hidden>
               <h3 id="settings-head-memory" data-i18n="settings.section.memory">Memory</h3>
-              <p class="st-help" data-i18n="html.whatMeloKeepsAboutYou">What Melo keeps about you and your earlier chats, and how it finds it again.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><label class="st-label" for="s-across-chats" data-i18n="html.rememberAcrossChats">Remember across chats</label><p class="st-hint" data-i18n="html.notesYouAskMeloTo">Notes you ask Melo to keep, and earlier chats, come back when they matter.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-across-chats" data-i18n="html.rememberAcrossChats">Remember across chats</label></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-across-chats" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" data-stack>
                   <div class="st-text"><span class="st-label" id="s-recall-legend" data-i18n="html.sRecallLegend">How Melo finds notes</span><span class="st-key" id="s-recall-key" hidden>memory.retriever</span></div>
                   <div class="st-choices" role="radiogroup" aria-labelledby="s-recall-legend">
-                    <label class="st-choice" id="s-recall-row-auto"><input type="radio" name="s-recall" id="s-recall-auto" value="auto" disabled /><span class="st-label"><span data-i18n="html.recall.auto">By words and meaning</span> <span class="st-key" data-developer hidden>auto</span></span><span class="st-hint" data-i18n="html.usesTheEmbeddingModelWhen">Adds meaning with an embedding model; without one, your chat model picks among the notes words find (words alone if none is set up).</span></label>
-                    <label class="st-choice" id="s-recall-row-bm25"><input type="radio" name="s-recall" id="s-recall-bm25" value="bm25" disabled /><span class="st-label"><span data-i18n="html.recall.bm25">By words only</span> <span class="st-key" data-developer hidden>bm25</span></span><span class="st-hint" data-i18n="html.neverCallsAnEmbeddingModel">Never calls an embedding model.</span></label>
+                    <label class="st-choice" id="s-recall-row-auto"><input type="radio" name="s-recall" id="s-recall-auto" value="auto" disabled /><span class="st-label"><span data-i18n="html.recall.auto">By words and meaning</span> <span class="st-key" data-developer hidden>auto</span></span></label>
+                    <label class="st-choice" id="s-recall-row-bm25"><input type="radio" name="s-recall" id="s-recall-bm25" value="bm25" disabled /><span class="st-label"><span data-i18n="html.recall.bm25">By words only</span> <span class="st-key" data-developer hidden>bm25</span></span></label>
                     <label class="st-choice" id="s-recall-row-embedding" hidden><input type="radio" name="s-recall" id="s-recall-embedding" value="embedding" disabled /><span class="st-label"><span data-i18n="html.recall.embedding">By meaning and words, always</span> <span class="st-key" data-developer hidden>embedding</span></span><span class="st-hint" data-i18n="html.needsAnEmbeddingModelSaving">Needs an embedding model: saving it without one is refused.</span></label>
-                    <label class="st-choice" id="s-recall-row-llm" hidden><input type="radio" name="s-recall" id="s-recall-llm" value="llm" disabled /><span class="st-label"><span data-i18n="html.recall.llm">Words, then the chat model chooses</span> <span class="st-key" data-developer hidden>llm</span></span><span class="st-hint" data-i18n="html.noEmbeddingCallsTheChat">No embedding calls; the chat model picks among the notes words found.</span></label>
+                    <label class="st-choice" id="s-recall-row-llm" hidden><input type="radio" name="s-recall" id="s-recall-llm" value="llm" disabled /><span class="st-label"><span data-i18n="html.recall.llm">Words, then the chat model chooses</span> <span class="st-key" data-developer hidden>llm</span></span></label>
                   </div>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label" data-i18n="html.notes">Notes</span><p class="st-hint" data-i18n="html.seeChangeOrForgetWhat">See, change or forget what Melo keeps.</p></div>
+                  <div class="st-text"><span class="st-label" data-i18n="html.notes">Notes</span></div>
                   <div class="st-actions"><button type="button" class="outline-button" id="s-open-memory" data-i18n="html.sOpenMemory">Open Memory</button></div>
                 </li>
               </ul>
             </section>
             <section class="st-section" id="settings-panel-chats" role="tabpanel" aria-labelledby="settings-head-chats" hidden>
               <h3 id="settings-head-chats" data-i18n="settings.section.chats">Chats and folders</h3>
-              <p class="st-help" data-i18n="html.whereANewChatWorks">Where a new chat works. Each chat can pick another folder from the folder chip under the message box.</p>
               <ul class="st-group">
                 <li class="st-row">
                   <div class="st-text"><span class="st-label" data-i18n="html.defaultFolder">Default folder</span><span class="st-mono" id="s-folder"></span></div>
@@ -475,25 +469,25 @@
                     <button type="button" class="outline-button" id="s-folder-use" data-i18n="html.sFolderUse">Use</button>
                     <button type="button" class="quiet-button" id="s-folder-cancel" data-i18n="html.sFolderCancel">Cancel</button>
                   </div>
-                  <p class="st-hint" id="s-folder-hint" data-i18n="html.sFolderHint">Use an absolute path or a path beginning with ~/.</p>
+                  <p class="st-hint" id="s-folder-hint" role="status" aria-live="polite" hidden></p>
                 </li>
                 <li class="st-row" id="s-approvals-row" hidden>
-                  <div class="st-text"><span class="st-label" id="s-approvals-legend" data-i18n="settings.approvals.title">New chats start in</span><span class="st-key" data-developer hidden>approvals.mode</span><p class="st-hint" data-i18n="settings.approvals.hint">Ask: melo asks before it runs commands or changes files. Auto: it works without asking and blocks risky steps. Each chat can switch under the message box.</p></div>
+                  <div class="st-text"><span class="st-label" id="s-approvals-legend" data-i18n="settings.approvals.title">New chats start in</span><span class="st-key" data-developer hidden>approvals.mode</span></div>
                   <div class="st-segments" role="radiogroup" aria-labelledby="s-approvals-legend">
                     <label><input type="radio" name="s-approvals" id="s-approvals-ask" value="ask" disabled /><span data-i18n="auto.mode.ask">Ask</span></label>
                     <label><input type="radio" name="s-approvals" id="s-approvals-auto" value="auto" disabled /><span data-i18n="auto.mode.auto">Auto</span></label>
                   </div>
                 </li>
                 <li class="st-row" id="s-web-fetch-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-web-fetch" data-i18n="settings.webFetch.title">Read web pages</label><span class="st-key" data-developer hidden>tools.web_fetch</span><p class="st-hint" data-i18n="settings.webFetch.hint">Melo can read public web pages you ask about. It never reaches this Mac or your local network, and never signs in.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-web-fetch" data-i18n="settings.webFetch.title">Read web pages</label><span class="st-key" data-developer hidden>tools.web_fetch</span></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-fetch" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" id="s-web-search-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-web-search" data-i18n="settings.webSearch.title">Web search</label><span class="st-key" data-developer hidden>web.search</span><p class="st-hint" data-i18n="settings.webSearch.hint">Melo can search the web when it needs to check something, in every chat and task. The words it searches for leave this computer.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-web-search" data-i18n="settings.webSearch.title">Web search</label><span class="st-key" data-developer hidden>web.search</span><p class="st-hint" data-i18n="settings.webSearch.hint">The words searched leave this computer.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-search" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" id="s-browser-row" hidden>
-                  <div class="st-text"><span class="st-label" id="s-browser-legend" data-i18n="settings.browser.title">Browser</span><span class="st-key" data-developer hidden>browser.driver</span><p class="st-hint" data-i18n="settings.browser.hint">Where melo reads and uses web pages, asking you about each site. Chrome works in the background with no window; Safari's windows come to the front.</p><p class="st-hint" id="s-browser-chrome-missing" data-i18n="settings.browser.chromeMissing" hidden>Install Google Chrome to browse in the background.</p></div>
+                  <div class="st-text"><span class="st-label" id="s-browser-legend" data-i18n="settings.browser.title">Browser</span><span class="st-key" data-developer hidden>browser.driver</span><p class="st-hint" id="s-browser-chrome-missing" data-i18n="settings.browser.chromeMissing" hidden>Install Google Chrome to browse in the background.</p></div>
                   <div class="st-segments" role="radiogroup" aria-labelledby="s-browser-legend">
                     <label><input type="radio" name="s-browser" id="s-browser-chrome" value="chrome" disabled /><span data-i18n="settings.browser.chrome">Chrome</span></label>
                     <label><input type="radio" name="s-browser" id="s-browser-safari-automation" value="safari-automation" disabled /><span data-i18n="settings.browser.safari">Safari</span></label>
@@ -501,27 +495,27 @@
                   </div>
                 </li>
                 <li class="st-row" id="s-app-windows-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">When a page melo uses in the browser opens a window in another app, such as a chat app's sign-in window, melo sees it and can press its buttons with your say. It never types into other apps.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p><p class="st-hint" id="s-app-windows-status" role="status" hidden></p></div>
+                  <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">With your say each time; melo never types there.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p><p class="st-hint" id="s-app-windows-status" role="status" hidden></p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-app-windows" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" id="s-follow-up-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-follow-up" data-i18n="settings.followUp.title">Follow up on tasks</label><span class="st-key" data-developer hidden>tasks.follow_up</span><p class="st-hint" data-i18n="settings.followUp.hint">When a task a chat started fails or stops, that chat continues it once, works around a blocked step, or asks you one question, then says what got done.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-follow-up" data-i18n="settings.followUp.title">When a task stops, its chat takes over</label><span class="st-key" data-developer hidden>tasks.follow_up</span></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-follow-up" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" id="s-reflection-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-reflection" data-i18n="settings.reflection.title">Reflect when stuck after many steps</label><span class="st-key" data-developer hidden>agent.reflection</span><p class="st-hint" data-i18n="settings.reflection.hint">If a task is still not done after 50 steps, melo reflects on what went wrong before it goes on; that costs one more model request. Off, it keeps going straight to 100 steps.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-reflection" data-i18n="settings.reflection.title">Reflect when stuck after many steps</label><span class="st-key" data-developer hidden>agent.reflection</span></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-reflection" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>
               <h4 class="st-group-title" id="s-extra-title" data-i18n="html.sExtraTitle">Other folders melo may read</h4>
-              <p class="st-hint st-group-hint" id="s-extra-hint" data-i18n="html.sExtraHint">Folders outside a chat's own folder that you chose “Always allow” for. melo reads in them without asking; writing there still asks every time.</p>
+              <p class="st-hint st-group-hint" id="s-extra-hint" data-i18n="html.sExtraHint">Writing there still asks every time.</p>
               <ul class="st-group" id="s-extra" aria-labelledby="s-extra-title" aria-describedby="s-extra-hint"></ul>
               <h4 class="st-group-title" id="s-recent-title" data-i18n="html.sRecentTitle">Recent folders</h4>
               <ul class="st-group" id="s-recent" aria-labelledby="s-recent-title"></ul>
             </section>
             <section class="st-section" id="settings-panel-permissions" role="tabpanel" aria-labelledby="settings-head-permissions" hidden>
               <h3 id="settings-head-permissions" data-i18n="settings.section.permissions">Permissions</h3>
-              <p class="st-help" data-i18n="permissions.help">What you allow in the main chat counts everywhere; in a side chat, only there. Spending money and account steps always ask and never show here.</p>
+              <p class="st-help" data-i18n="permissions.help">Spending money and account steps always ask and are not listed here.</p>
               <details class="st-more">
                 <summary data-i18n="permissions.formsTitle">Typing and sending a form</summary>
                 <p data-i18n="permissions.forms">They are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).</p>
@@ -530,24 +524,22 @@
             </section>
             <section class="st-section" id="settings-panel-scheduled" role="tabpanel" aria-labelledby="settings-head-scheduled" hidden>
               <h3 id="settings-head-scheduled" data-i18n="settings.section.scheduled">Scheduled</h3>
-              <p class="st-help" data-i18n="html.meloCanLookInOn">Melo can look in on its own while localmelo runs, and do chores you asked for at set times.</p>
               <ul class="st-group">
                 <li class="st-row">
                   <div class="st-text"><label class="st-label" for="s-checkin" data-i18n="html.checkIn">Check-in</label><p class="st-hint" id="s-checkin-hint"></p><p class="st-state" id="s-checkin-state"></p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-checkin" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label" data-i18n="html.chores">Chores</span><p class="st-hint" data-i18n="html.askInTheMainChat">Ask in the main chat, such as "every weekday at 8:30, brief me on my calendar".</p></div>
+                  <div class="st-text"><span class="st-label" data-i18n="html.chores">Chores</span><p class="st-hint" id="s-chores-hint" data-i18n="html.askInTheMainChat">Ask in the main chat, such as "every weekday at 8:30, brief me on my calendar".</p></div>
                   <div class="st-actions"><button type="button" class="outline-button" id="s-open-scheduled" data-i18n="html.sOpenScheduled">Open Scheduled</button></div>
                 </li>
               </ul>
             </section>
             <section class="st-section" id="settings-panel-appearance" role="tabpanel" aria-labelledby="settings-head-appearance" hidden>
               <h3 id="settings-head-appearance" data-i18n="settings.section.appearance">Appearance</h3>
-              <p class="st-help" data-i18n="html.howThisWindowLooksAnd">How this window looks, and what Melo shows on your desktop.</p>
               <ul class="st-group">
                 <li class="st-row">
-                  <div class="st-text"><span class="st-label" id="settings-theme-legend" data-i18n="html.settingsThemeLegend">Theme</span><p class="st-hint" data-i18n="html.rememberedInThisBrowser">Remembered in this browser.</p></div>
+                  <div class="st-text"><span class="st-label" id="settings-theme-legend" data-i18n="html.settingsThemeLegend">Theme</span></div>
                   <div class="st-segments" role="radiogroup" aria-labelledby="settings-theme-legend">
                     <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" /><span data-i18n="settings.theme.system">System</span></label>
                     <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /><span data-i18n="settings.theme.light">Light</span></label>
@@ -555,7 +547,7 @@
                   </div>
                 </li>
                 <li class="st-row" id="s-language-row">
-                  <div class="st-text"><span class="st-label" id="s-language-legend" data-i18n="settings.language.title">Language</span><p class="st-hint" data-i18n="settings.language.hint">Automatic follows your Mac or browser. The window reloads in the language you choose.</p></div>
+                  <div class="st-text"><span class="st-label" id="s-language-legend" data-i18n="settings.language.title">Language</span></div>
                   <div class="st-segments" role="radiogroup" aria-labelledby="s-language-legend">
                     <label><input type="radio" name="s-language" id="s-language-auto" value="auto" disabled /><span data-i18n="settings.language.auto">Automatic</span></label>
                     <label lang="en"><input type="radio" name="s-language" id="s-language-en" value="en" disabled />English</label>
@@ -563,15 +555,15 @@
                   </div>
                 </li>
                 <li class="st-row" id="s-desktop-row" data-stack hidden>
-                  <div class="st-text"><span class="st-label" id="s-desktop-legend" data-i18n="html.sDesktopLegend">Melo on the desktop</span><p class="st-hint" data-i18n="html.whileTheWindowIsPut">While the window is put away. The same choice as the app's menu.</p></div>
+                  <div class="st-text"><span class="st-label" id="s-desktop-legend" data-i18n="html.sDesktopLegend">Melo on the desktop</span></div>
                   <div class="st-choices" role="radiogroup" aria-labelledby="s-desktop-legend">
-                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pill" value="pill" /><span class="st-label" data-i18n="html.meloAndTheActivityPill">Melo and the activity pill</span><span class="st-hint" data-i18n="html.thePillTakesMeloS">The pill takes Melo's place while work runs.</span></label>
+                    <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pill" value="pill" /><span class="st-label" data-i18n="html.meloAndTheActivityPill">Melo and the activity pill</span></label>
                     <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-pet" value="pet" /><span class="st-label" data-i18n="html.meloOnly">Melo only</span></label>
                     <label class="st-choice"><input type="radio" name="s-desktop" id="s-desktop-nothing" value="nothing" /><span class="st-label" data-i18n="html.nothing">Nothing</span></label>
                   </div>
                 </li>
                 <li class="st-row">
-                  <div class="st-text"><label class="st-label" for="s-developer" data-i18n="html.developerMode">Developer mode</label><p class="st-hint" data-i18n="html.addsTheDeveloperSectionTechnical">Adds the Developer section, technical names and debug views. It changes what is shown, never what runs.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-developer" data-i18n="html.developerMode">Developer mode</label></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-developer" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>

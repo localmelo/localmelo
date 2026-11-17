@@ -141,7 +141,7 @@ When the model is not the saved default, a row after the folder gives the server
 | Command | What it does |
 |---|---|
 | `/help [command]` | The everyday commands in three groups; `/help all` (and `/help` in developer mode) lists every command and the keys; `/help NAME` gives one command's details. |
-| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. With melo_serve: its chat models with what each needs and whether it fits, and a switch every chat on this Mac follows ([Switch the model](model-servers.md#switch-the-model)). |
+| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. With melo_serve: its chat models with what each needs and whether it fits, and a switch every chat on this Mac follows ([Switch the model](model-servers.md#switch-the-model)). With a key for a hosted service: one list of the server's models and each keyed service's, grouped, the current one marked; Enter switches from the next message with no key typed and no test, and `/model NAME` or `/model service:NAME` switches with no list ([Hosted models](hosted-models.md#switch-between-models)). |
 | `/backend [url]` | Switch to another model server: asks for its URL and a model from its list, checks it with `GET /models`, switches and saves both as the default. |
 | `/new` | Start a new chat: the model forgets the conversation; in the terminal's own chat the new chat starts with none of the last chat's grants (what you allowed in the main chat still holds). A `── New chat ──` rule marks the start. |
 | `/clear` | `/new` on an empty screen: the screen and its scrollback are wiped and the welcome is drawn again. |
@@ -172,7 +172,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
 - `/new`, `/clear`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the draft stays and the hint says `/model is not available while a turn runs (esc stops it).`
-- `/model` keeps the configured backend and changes its model; `/backend` saves the server as `ollama` when it answers `GET /api/version`, as `omlx` when its model listing names oMLX, else as `vllm`, and keeps the rest of the config.
+- `/model` keeps the configured backend and changes its model (with a hosted key it can also move to another service; the embedding choice never changes); `/backend` saves the server as `ollama` when it answers `GET /api/version`, as `omlx` when its model listing names oMLX, else as `vllm`, and keeps the rest of the config.
 - A model that does not start leaves the current one in place (`✗ Could not start NAME: …`); a server that does not answer leaves the current server (`✗ Could not reach URL: connection refused. Still using URL.`).
 - In a `melo --url URL` session the choices last for this session only, unless you answered yes to `Save URL · MODEL as the default backend?`.
 
@@ -462,7 +462,7 @@ Where things live:
 - Sessions are kept in `~/.cache/localmelo/cli/sessions.db`: every turn, with your message, the answer and each tool call with its output, and the grants of the terminal's own chat; `~/.cache/localmelo/cli_history` keeps your messages. Both are plain text (mode 0600), not encrypted.
 - The web console's Workers view shows your chats read-only under **Terminal chats**, redacted as it reads them; it cannot change or send to them.
 - The UI writes its log to `~/.cache/localmelo/logs/cli.log` and never prints a traceback; a config file that is not valid TOML stops `melo` with one `melo: …` line and exit code 1.
-- Procedural memory follows [memory persistence](memory.md#keep-memory-between-runs), as for a task.
+- The chat keeps the steps of its turns in `procedures.db` of the memory directory with no turn text, whether or not [memory persistence](memory.md#keep-memory-between-runs) is on; `/memory` does not remove it (see [Procedural memory](../concepts/procedures.md#the-store)).
 
 ### First run
 

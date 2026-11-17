@@ -332,6 +332,15 @@ def tools_name(developer: str) -> str:
     return app.removesuffix(".app") if app.endswith(".app") else developer
 
 
+def package_digest(package: Path) -> str:
+    """A digest of every file under *package* (path and bytes): equal for equal code, whenever built."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in package.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(package).as_posix().encode() + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()[:32]
+
+
 def build(output: Path) -> None:
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         raise RuntimeError("Building requires an arm64 macOS host")
@@ -402,6 +411,10 @@ def build(output: Path) -> None:
                 package / name,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
+        # The build's stamp: a digest of the package as copied. A running gateway says it, so the
+        # app and the terminal replace an idle gateway of the build before (support/gateway_endpoint.py).
+        stamp = package_digest(package)
+        (package / "BUILD").write_text(stamp + "\n", encoding="utf-8")
         with (ROOT / "pyproject.toml").open("rb") as f:
             version = tomllib.load(f)["project"]["version"]
         metadata = site / f"localmelo-{version}.dist-info"
@@ -448,6 +461,8 @@ def build(output: Path) -> None:
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": version,
                     "CFBundleVersion": "1",
+                    # The package's stamp, for the app's own check of a running gateway.
+                    "LocalMeloBuild": stamp,
                     # English is the source; the app follows the console's language.
                     "CFBundleDevelopmentRegion": "en",
                     "CFBundleLocalizations": languages,

@@ -119,7 +119,7 @@ before the run with a plain message (see
 | `search` | `[web]` | `false` | Whether chats and tasks may search the web with the `web_search` tool (read-only; the words of a search leave this computer; a search whose words look like a secret or like pasted text asks first; see [Tools](tools.md#searching-the-web) and [Searching the web with melo](../guides/web-search.md)). Settings → Chats and folders → **Web search** is the same switch, `-X web.search=true` turns it on for one run, and `melo config set web.search true` saves it. Direct runs never have it. |
 | `search_order` | `[web]` | `[]` | Developer setting. The ways a search tries, in order, until one gives results that fit the words: `bing-rss`, `browser` (Safari's window, only while `[browser] driver` is on), `baidu`. Empty means that order. A name that is not one of the three, or one named twice, is a configuration error. |
 | `search_count` | `[web]` | `6` | Developer setting. How many results one search shows, a whole number from 1 to 8; a call may ask for fewer. |
-| `follow_up` | `[tasks]` | `true` | Whether a chat follows up on a task it started when the task fails, runs out of steps, ends **Done, not finished** or needs you: one turn of its own that continues the task once, works around a blocked step or asks you one question, then says what got done (see [Web console](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)). `false` leaves only the task's card; Settings → Chats and folders → **Follow up on tasks** (developer mode) is the same switch; `-X tasks.follow_up=off` for one run. Any value that is not a bool is a configuration error. |
+| `follow_up` | `[tasks]` | `true` | Whether a chat follows up on a task it started when the task fails, runs out of steps, ends **Done, not finished** or needs you: one turn of its own that continues the task once, works around a blocked step or asks you one question, then says what got done (see [Web console](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)). `false` leaves only the task's card; Settings → Chats and folders → **When a task stops, its chat takes over** (developer mode) is the same switch; `-X tasks.follow_up=off` for one run. Any value that is not a bool is a configuration error. |
 | `recent_digest_minutes` | `[chat]` | `30` | A new chat's first message (a side chat's or a terminal chat's, never the main chat's) also reads a short digest of your other chats from the last that many minutes: up to five lines, one per recent turn, saying what it was about and where, at most 600 characters, after your own words. It is read from memory's index of your chats, so `[memory] across_chats = false` turns it off too. `0` turns it off; `-X chat.recent_digest_minutes=0` for one run. A whole number from 0 to 1440; anything else is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
@@ -489,6 +489,15 @@ See [Memory](memory.md).
   does not have, stops `melo` before the run with exit code 1 and a plain fix.
 - A reference must name one of melo's own items (`keychain:localmelo.` and a
   name of lowercase letters, digits, `-` and `_`); any other value is refused.
+- A key goes only to its own service. A built-in service's key is read only for
+  its own address; "Other" keeps one item per address
+  (`localmelo.other-<32 hex digits>`). A reference whose item belongs to another
+  address stops the run with `This key was saved for another service or address`,
+  before any request. An item `localmelo.other` from an earlier version is not used.
+- `[services.<id>]` tables (`chat_model`; `base_url` for `other`; `backend` for
+  `local`) hold each hosted service's last model and the last local server, so
+  Settings and `/model` can switch back. They hold no key. Older versions ignore
+  them and drop them the next time they save.
 - Export the variable in the shell that runs `melo`.
 - If it is not set and there is no saved key, `melo` stops before the run with
   exit code 1:
@@ -635,7 +644,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | Path | What it holds | Created |
 |---|---|---|
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, or a chat or task of the app, console or terminal runs (it writes `procedures.db` alone), with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
 | `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |
