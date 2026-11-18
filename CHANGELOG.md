@@ -17,7 +17,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The go-ahead Allow once sends is melo's own sentence: a chat shows it as a folded "Not typed by you" line, and a chat or a task no longer keeps it as words you typed; it never answers a question a task waits on.
 - Text in a file or a paste that imitates the heading of melo's memory is not taken for recalled notes when a step is reviewed in Auto, and a password typed after such a line is hidden like any other.
 - In Auto, a long task that goes well no longer runs out of reviews (a review that lets a high-impact step run on your words still counts), and a tool you allowed for the chat runs its routine calls without one.
-- In Auto, when a review's answer cannot be read, the second request restates the answer's form, and the step's record says what was wrong with the answer (empty, not JSON, words around the object, not an object or no verdict), never what it said.
+- In Auto, when a review's answer cannot be read, the second request restates the answer's form, and the step's record says what was wrong with it (empty, not JSON, words around the object, not an object, no verdict), never what it said.
 - Approval cards say in one plain sentence what the step will do and why melo asks, and follow your chat's mode.
 - A chat keeps whom a request is about, and a new chat sees a short digest of your other recent chats.
 - A short follow-up such as "go look it up" or "continue" works from what you said just before.
