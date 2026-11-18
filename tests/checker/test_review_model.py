@@ -277,6 +277,7 @@ def test_the_reply_is_read_strictly(reply: str, expected: ModelAnswer | None) ->
         ('{"verdict": "routine"} {"verdict": "ask"}', "words around the object"),
         ('["routine"]', "not an object"),
         ('{"verdict": "maybe"}', "no verdict"),
+        ('{"verdict": ["routine"]}', "no verdict"),
     ],
 )
 def test_an_unreadable_reply_is_named_by_one_word_of_a_closed_set(

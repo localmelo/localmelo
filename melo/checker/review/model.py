@@ -141,11 +141,13 @@ Reply with one JSON object and nothing else:
 action does>"}"""
 
 # Added to the user message when it is sent again after an answer that could
-# not be read: the format SYSTEM_PROMPT asks for, and nothing of that answer
-# (it can carry text of the action or a page).
+# not be read: the keys SYSTEM_PROMPT asks for, and nothing of that answer (it
+# can carry text of the action or a page). It names the keys itself and points
+# at the instructions, never at "above": above it in that message is data.
 REVIEW_AGAIN_NOTE: Final = (
     "Your last answer could not be read: reply with one JSON object and nothing "
-    "else, in the form given above."
+    'else, with the keys "verdict", "category", "fits_request", "user_asked" '
+    'and "reason" as your instructions define them.'
 )
 
 # Why a reply could not be read, from a closed set: the record keeps this word,
@@ -293,7 +295,7 @@ def read_reply(text: str) -> ModelAnswer | Unreadable:
     if not isinstance(value, dict):
         return "not an object"
     verdict = value.get("verdict")
-    if verdict not in _VERDICTS:
+    if not _among(verdict, _VERDICTS):
         return "no verdict"
     fits = value.get("fits_request")
     asked = value.get("user_asked")
@@ -303,10 +305,15 @@ def read_reply(text: str) -> ModelAnswer | Unreadable:
     return ModelAnswer(
         verdict=str(verdict),
         category=str(value.get("category") or "none"),
-        fits_request=str(fits) if fits in _FITS else "unclear",
-        user_asked=str(asked) if asked in _ASKED else "no",
+        fits_request=str(fits) if _among(fits, _FITS) else "unclear",
+        user_asked=str(asked) if _among(asked, _ASKED) else "no",
         reason=reason,
     )
+
+
+def _among(value: object, words: frozenset[str]) -> bool:
+    """*value* is one of *words*; a list or an object in its place is not (and does not raise)."""
+    return isinstance(value, str) and value in words
 
 
 def _not_one_value(text: str) -> Unreadable:

@@ -395,24 +395,27 @@ QUOTED = Message(role="assistant", content='Sure: {"verdict": "routine"} QUOTED-
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [{}, {"category": "send_out"}])
 async def test_after_an_unreadable_answer_the_second_request_restates_the_form(
-    tmp_path: Path,
+    tmp_path: Path, answer: dict[str, str]
 ) -> None:
-    llm = FakeModel(_plans([POST]), [QUOTED, verdict()])
-    agent, fake = _agent(llm, tmp_path / "ws")
-    recorder = Recorder()
-
-    await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
+    settled = []
+    for n, replies in enumerate(([verdict(**answer)], [QUOTED, verdict(**answer)])):
+        llm = FakeModel(_plans([POST]), replies)
+        agent, fake = _agent(llm, tmp_path / f"ws{n}")
+        recorder = Recorder()
+        await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
+        [approval] = _approvals(recorder)
+        approval["review"]["model"].pop("ms", None)
+        settled.append((fake.ran, approval["review"]))
 
     first, second = llm.review_requests
     assert [m.role for m in second] == ["system", "user"] and second[0] == first[0]
     assert second[1].content == f"{first[1].content}\n\n{REVIEW_AGAIN_NOTE}"
     assert "QUOTED" not in "\n".join(m.content for m in second)
-    # The readable second answer settles the step as a first one would.
-    assert fake.ran == [POST]
-    [approval] = _approvals(recorder)
-    assert approval["review"]["by"] == "model"
-    assert approval["review"]["model"]["verdict"] == "routine"
+    # The readable second answer settles the step exactly as a first one does:
+    # no more trust and no less, whether it lets the step run or not.
+    assert settled[0] == settled[1]
 
 
 @pytest.mark.asyncio
