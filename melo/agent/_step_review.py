@@ -54,13 +54,14 @@ from localmelo.melo.checker.review.model import (
     EARLIER_REQUESTS,
     MAX_ACTION_CHARS,
     MAX_REQUEST_CHARS,
+    REVIEW_AGAIN_NOTE,
     REVIEW_TIMEOUT_S,
     REVIEW_TRIES,
     REVIEWS_PER_TURN,
     SYSTEM_PROMPT,
     ReviewInputs,
     action_text,
-    parse_reply,
+    read_reply,
     shares_a_name,
     step_names,
     user_message,
@@ -120,6 +121,9 @@ PLAIN_PATH_CHARS: Final = 120
 # Addresses one verdict on a site lets through until the user's next
 # message; past that, each is reviewed by itself.
 PLAIN_PAGES_PER_TURN: Final = 10
+# The error of a review whose answer could not be read; the record adds the
+# word for why in brackets (:data:`~localmelo.melo.checker.review.model.Unreadable`).
+UNREADABLE: Final = "its answer could not be read"
 
 Purpose = Literal["undecided", "consent"]
 
@@ -911,18 +915,24 @@ class StepReviewer:
 
         A request that timed out, failed or came back unreadable is sent
         once more (a busy local model often answers the second time); the
-        answer of the last one stands. ``ms`` spans all of them.
+        answer of the last one stands. ``ms`` spans all of them. After an
+        unreadable answer the user message carries :data:`REVIEW_AGAIN_NOTE`
+        too; nothing of that answer is ever sent back (it can carry text of
+        the action or a page). After a timeout or a failure the request is
+        the same.
         """
-        messages = [
-            Message(role="system", content=SYSTEM_PROMPT),
-            Message(role="user", content=user_message(inputs)),
-        ]
+        system = Message(role="system", content=SYSTEM_PROMPT)
+        asking = user_message(inputs)
+        messages = [system, Message(role="user", content=asking)]
         started = self._clock()
         answer = ModelAnswer(error="the review did not run")
         for _ in range(REVIEW_TRIES):
             answer = await self._request_once(messages, started)
             if not answer.error:
                 break
+            if answer.error.startswith(UNREADABLE):
+                again = f"{asking}\n\n{REVIEW_AGAIN_NOTE}"
+                messages = [system, Message(role="user", content=again)]
         return answer
 
     async def _request_once(
@@ -944,9 +954,10 @@ class StepReviewer:
             return ModelAnswer(
                 error=f"the review failed ({type(exc).__name__})", ms=ms()
             )
-        answer = parse_reply(reply.content)
-        if answer is None:
-            return ModelAnswer(error="its answer could not be read", ms=ms())
+        answer = read_reply(reply.content)
+        if not isinstance(answer, ModelAnswer):
+            # Only the word for why: nothing of the reply is kept.
+            return ModelAnswer(error=f"{UNREADABLE} ({answer})", ms=ms())
         return dataclasses.replace(answer, ms=ms())
 
     # ── Blocks ──
@@ -1048,11 +1059,14 @@ def _settle(
             )
         return dataclasses.replace(review, by="model", model=answer)
     if answer.error:
+        # The word for why an answer could not be read stays in the record
+        # (``model.error``); the person reads the sentence as before.
+        error = UNREADABLE if answer.error.startswith(UNREADABLE) else answer.error
         return dataclasses.replace(
             review,
             verdict="high",
             categories=("unreviewed",),
-            reasons=(f"melo could not review this call: {answer.error}.",),
+            reasons=(f"melo could not review this call: {error}.",),
             by="model",
             model=answer,
         )
