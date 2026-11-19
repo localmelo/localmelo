@@ -85,6 +85,9 @@ MEMORY_RECALL_OPEN_CHARS = (500, 16000)
 # MemoryConfig.recall_source. ``auto`` reads turns until the encoder has caught up,
 # then items.
 MEMORY_RECALL_SOURCE = ("turns", "items", "auto")
+# How recall counts the question's words an item holds, for the word list's bar: each
+# word alike, or by how rare it is among the items: see MemoryConfig.recall_word_weight.
+MEMORY_RECALL_WORD_WEIGHT = ("count", "rare")
 # How many windows of one ingest the encoder is asked for at once: see
 # MemoryConfig.compress_parallel.
 MEMORY_COMPRESS_PARALLEL = (1, 8)
@@ -387,7 +390,11 @@ class MemoryConfig:
     ``compress_cache.jsonl`` in the memory folder). ``project_instructions = "off"``
     stops a task that the person made from reading the instruction file of its
     folder (``AGENTS.md``, ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it
-    starts.
+    starts. ``recall_word_weight`` (#349, decided by 2026-12-08) is how the word
+    list's bar counts the question's content words an item holds: ``count`` (each
+    word alike, the default) or ``rare`` (a word weighs by how few items hold it, so
+    a turn that shares only a word most items hold stays out of the list, and a turn
+    that shares the one rare word stays in).
     """
 
     across_chats: bool = True
@@ -398,6 +405,9 @@ class MemoryConfig:
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
     recall_source: str = "turns"  # turns | items | auto: what recall draws on.
+    # count | rare: the word bar counts each word alike, or by its rarity (#349,
+    # decided by 2026-12-08, or the key is deleted).
+    recall_word_weight: str = "count"
     compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
@@ -797,6 +807,7 @@ class Config:
         for name, allowed in (
             ("recall_form", MEMORY_RECALL_FORM),
             ("recall_source", MEMORY_RECALL_SOURCE),
+            ("recall_word_weight", MEMORY_RECALL_WORD_WEIGHT),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)

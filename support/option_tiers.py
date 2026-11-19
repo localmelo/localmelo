@@ -122,6 +122,11 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.recall_list_max": "#428",
     "memory.recall_open_chars": "#428",
     "memory.recall_source": "#428",
+    # Decide by 2026-12-08. Case: the stage set of the public long-memory benchmark,
+    # `count` against `rare`, two repeats, on a real model (the night job). It becomes
+    # the default if it wins by the rule written before the run; otherwise the key is
+    # deleted on that date.
+    "memory.recall_word_weight": "#349",
 }
 
 # Long option name -> tier, for every option the parser has.

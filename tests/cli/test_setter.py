@@ -312,6 +312,7 @@ def test_keys_lists_value_default_and_source(
         "memory.recall_list_max": ["20", "20", "default"],
         "memory.recall_open_chars": ["4000", "4000", "default"],
         "memory.recall_source": ['"turns"', '"turns"', "default"],
+        "memory.recall_word_weight": ['"count"', '"count"', "default"],
     }
 
 

@@ -163,6 +163,7 @@ it; the option shown still works. A comparison names the issue that decides it.
   memory.recall_list_max       20           (#428)
   memory.recall_open_chars     4000         (#428)
   memory.recall_source         turns        (#428)
+  memory.recall_word_weight    count        (#349)
   memory.compress_parallel     1
   memory.compress_cache        ""
   memory.project_instructions  on
