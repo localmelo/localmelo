@@ -8,7 +8,10 @@ and lets the chat model choose among them. An item takes part in a list only
 above that list's bar: a share of the question's content words for BM25
 (:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors. The bars are loose on
 purpose (a missed chat costs an answer, an unrelated one a few lines the model
-passes over), so a message about something else can still recall an item.
+passes over), so a message about something else can still recall an item. With
+``[memory] recall_word_weight = "rare"`` the word bar is a share of the words'
+weight, a word that few items hold weighing more (:meth:`Corpus.rarity`), so an
+item that shares only a common word with the question stays out.
 Documents (not records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
 A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
@@ -850,6 +853,7 @@ class Corpus:
         # Changes with every add and remove, so what is derived from all the
         # items can be kept until they change.
         self.version = 0
+        self._doc_freq: tuple[int, Counter[str]] = (-1, Counter())
 
     def add(self, item: Item) -> None:
         self.version += 1
@@ -869,6 +873,23 @@ class Corpus:
     def keys(self, prefix: str) -> set[str]:
         return {key for key in self.items if key.startswith(prefix)}
 
+    def doc_freq(self) -> Counter[str]:
+        """How many items hold each term; a term no item holds counts 0. Kept for
+        each :attr:`version`."""
+        version, counts = self._doc_freq
+        if version != self.version:
+            counts = Counter(term for terms in self.terms.values() for term in terms)
+            self._doc_freq = (self.version, counts)
+        return counts
+
+    def rarity(self, terms: Iterable[str]) -> dict[str, float]:
+        """The weight of each of *terms*: ``ln(1 + N / (1 + df))`` for *N* items,
+        *df* of which hold the term. The fewer items hold a term the more it weighs;
+        a term no item holds weighs most."""
+        counts = self.doc_freq()
+        total = len(self.items)
+        return {term: math.log(1 + total / (1 + counts[term])) for term in terms}
+
 
 def ranked(
     corpus: Corpus,
@@ -881,11 +902,15 @@ def ranked(
     keep_from_turn: int | None = None,
     coverage: float = MIN_COVERAGE,
     min_cosine: float = MIN_COSINE,
+    word_weight: str = "count",
 ) -> list[Item]:
     """The items that pass the bars for *query*, best first.
 
     *coverage* is the share of the question's content words an item must hold
-    to join the BM25 list; a small one lets loose candidates through.
+    to join the BM25 list; a small one lets loose candidates through. With
+    *word_weight* ``count`` each word counts alike; with ``rare`` a word counts by
+    :meth:`Corpus.rarity`, so the share is of the words' weight, and an item still
+    holds at least one of them.
     *min_cosine* is the least similarity a vector needs to join the vector
     list. The turns of *exclude_session* from *keep_from_turn* on (all of them
     without one) are left out (:func:`in_view`).
@@ -893,9 +918,21 @@ def ranked(
     wanted = gate_terms(query)
     lists: list[list[str]] = []
     if wanted:
-        need = max(1, math.ceil(coverage * len(wanted)))
         hits = corpus.index.search(stemmed(query), len(corpus.items))
-        lists.append([k for k, _ in hits if len(wanted & corpus.terms[k]) >= need])
+        if word_weight == "rare":
+            weight = corpus.rarity(wanted)
+            bar = coverage * math.fsum(weight.values())
+            lists.append(
+                [
+                    k
+                    for k, _ in hits
+                    if (shared := wanted & corpus.terms[k])
+                    and math.fsum(weight[w] for w in shared) >= bar
+                ]
+            )
+        else:
+            need = max(1, math.ceil(coverage * len(wanted)))
+            lists.append([k for k, _ in hits if len(wanted & corpus.terms[k]) >= need])
     if query_vector is not None:
         scored = [
             (float(np.dot(query_vector, item.vector)), key)

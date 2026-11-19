@@ -79,6 +79,7 @@ from localmelo.support.config import (
     MEMORY_COMPRESS_PARALLEL,
     MEMORY_RECALL_LIST_MAX,
     MEMORY_RECALL_OPEN_CHARS,
+    MEMORY_RECALL_WORD_WEIGHT,
 )
 from localmelo.support.memory import (
     blocked,
@@ -1019,6 +1020,13 @@ class ChatMemory:
         mode = cfg.memory.retriever if cfg is not None else "auto"
         return mode if mode in ("bm25", "embedding", "llm") else "auto"
 
+    def word_weight(self) -> str:
+        """The ``[memory] recall_word_weight`` of the settings now (an unknown value
+        is ``count``)."""
+        cfg = self._settings()
+        weight = getattr(cfg.memory, "recall_word_weight", "count") if cfg else "count"
+        return weight if weight in MEMORY_RECALL_WORD_WEIGHT else "count"
+
     def _answering(self, failure: str) -> tuple[str, str]:
         """:func:`_resolve` for the settings now: the retriever that answers a recall
         and its ``fallback``, given what the query embedding said (*failure*)."""
@@ -1317,7 +1325,8 @@ class ChatMemory:
         """Rank for *query* as the retriever says; the numbers go to *recall*.
 
         *min_cosine* is the vector bar of the ranking (the words bar is
-        :data:`.recall.MIN_COVERAGE`); the loose candidates of the ``llm`` retriever (named,
+        :data:`.recall.MIN_COVERAGE`, weighed as ``[memory] recall_word_weight``
+        says); the loose candidates of the ``llm`` retriever (named,
         or what ``auto`` becomes with no embedding model and a chat model set up)
         take no coverage bar and no vectors.
         With *listing* (the list form) no cap on a chat's turns applies, and a turn
@@ -1339,6 +1348,7 @@ class ChatMemory:
                 exclude_session=exclude_session,
                 keep_from_turn=keep_from_turn,
                 min_cosine=min_cosine,
+                word_weight=self.word_weight(),
             )
             loose = (
                 ranked(

@@ -3,7 +3,9 @@
 ``MIN_COSINE`` (0.45) is the least similarity a vector needs to join the vector
 list and ``MIN_COVERAGE`` (0.4) the share of the question's content words an item
 must hold to join the word list. Both apply to the recall block and to the memory
-search tool. Synthetic notes, turns and fixed vectors, no model.
+search tool. With ``[memory] recall_word_weight = "rare"`` the word bar is a share of
+the words' weight, a word that few items hold weighing more. Synthetic notes, turns
+and fixed vectors, no model.
 """
 
 from __future__ import annotations
@@ -209,6 +211,7 @@ def test_ranked_with_the_default_bars_is_ranked_with_the_constants() -> None:
             now=NOW + 1,
             coverage=MIN_COVERAGE,
             min_cosine=MIN_COSINE,
+            word_weight="count",
         )
 
 
@@ -297,3 +300,186 @@ async def test_the_llm_retriever_keeps_its_loose_candidates_whatever_the_bar(
         assert chat.calls  # the model was asked about the loose candidates
     finally:
         await memory.aclose()
+
+
+# ── recall_word_weight = "rare": a shared word weighs by how few items hold it ──
+
+# Two content words. "group" is in nine of the ten items, "dentist" in one.
+GROUP_DENTIST = "group dentist"
+# Three content words: "visit" is in the eight items that hold "group" too.
+THREE_WORDS = "when is my group dentist visit"
+
+
+def common_words_corpus() -> tuple[Corpus, list[Item], Item, Item]:
+    """Eight turns that hold "group" and "visit", one that holds only "group" and
+    one that holds only "dentist"."""
+    corpus = Corpus()
+    both = [doc_item(f"d:{n}", f"the group visit plan number {n}") for n in range(8)]
+    group_only = doc_item("d:group", "my group is loud on friday")
+    dentist = doc_item("d:dentist", "the dentist is on friday")
+    for item in (*both, group_only, dentist):
+        corpus.add(item)
+    return corpus, both, group_only, dentist
+
+
+def keys_of(
+    corpus: Corpus, question: str, weight: str, coverage: float = MIN_COVERAGE
+) -> list[str]:
+    found = ranked(
+        corpus,
+        question,
+        None,
+        "",
+        now=NOW + 1,
+        coverage=coverage,
+        word_weight=weight,
+    )
+    return sorted(item.key for item in found)
+
+
+def test_rare_drops_a_turn_that_shares_only_a_word_most_items_hold() -> None:
+    corpus, both, group_only, dentist = common_words_corpus()
+    every = sorted(item.key for item in (*both, group_only, dentist))
+    # One of two words is enough for the count bar, so "group" alone passes it.
+    assert keys_of(corpus, GROUP_DENTIST, "count") == every
+    # The default is the count.
+    assert [i.key for i in ranked(corpus, GROUP_DENTIST, None, "", now=NOW + 1)] == [
+        i.key
+        for i in ranked(
+            corpus, GROUP_DENTIST, None, "", now=NOW + 1, word_weight="count"
+        )
+    ]
+    # By weight "group" is under a third of the question and "dentist" the rest.
+    assert keys_of(corpus, GROUP_DENTIST, "rare") == [dentist.key]
+
+
+def test_rare_keeps_the_turn_with_the_rare_word_of_a_longer_question() -> None:
+    corpus, both, group_only, dentist = common_words_corpus()
+    # Of three words the count bar needs two: a turn with "dentist" alone is out,
+    # and so is one with "group" alone; the turns with "group" and "visit" are in.
+    assert keys_of(corpus, THREE_WORDS, "count") == sorted(i.key for i in both)
+    # By weight "dentist" alone is more than 0.4 of the question and "group" alone
+    # is not, and "group" with "visit" is just above it.
+    assert keys_of(corpus, THREE_WORDS, "rare") == sorted(
+        i.key for i in (*both, dentist)
+    )
+    # The share is of the weight: at 0.5 "group" with "visit" falls short too.
+    assert keys_of(corpus, THREE_WORDS, "rare", coverage=0.5) == [dentist.key]
+    assert keys_of(corpus, THREE_WORDS, "count", coverage=0.5) == sorted(
+        i.key for i in both
+    )
+
+
+def test_rare_bar_of_one_holds_only_the_items_with_every_word() -> None:
+    corpus = Corpus()
+    both = doc_item("d:both", "the group dentist visit is on friday")
+    corpus.add(both)
+    for n in range(4):
+        corpus.add(doc_item(f"d:{n}", f"the group lunch number {n}"))
+    corpus.add(doc_item("d:dentist", "the dentist is on friday"))
+    # A bar of exactly the whole weight is met when every word is held, whatever
+    # order the weights are added in.
+    assert keys_of(corpus, GROUP_DENTIST, "rare", coverage=1.0) == [both.key]
+    assert keys_of(corpus, GROUP_DENTIST, "count", coverage=1.0) == [both.key]
+
+
+def test_rare_still_needs_one_shared_word_when_the_bar_is_zero() -> None:
+    corpus = Corpus()
+    loud = doc_item("d:loud", "the group is loud")
+    corpus.add(loud)
+    corpus.add(doc_item("d:weather", "the weather is mild"))
+    # "the" is not a content word, but the weather turn holds it, so the index finds
+    # the turn; it shares no content word with the question.
+    for weight in ("count", "rare"):
+        assert keys_of(corpus, "the group", weight, coverage=0.0) == [loud.key]
+
+
+def test_rare_acts_as_count_when_no_word_of_the_question_is_in_an_item() -> None:
+    corpus, *_ = common_words_corpus()
+    for question in (FAR_QUESTION, "zebra yodel quartz"):
+        assert keys_of(corpus, question, "count") == []
+        assert keys_of(corpus, question, "rare") == []
+    assert keys_of(Corpus(), GROUP_DENTIST, "rare") == []
+    # A word no item holds weighs most (df = 0), as ln(1 + N), and one that every
+    # item holds weighs least.
+    weights = corpus.rarity(["zebra", "group", "dentist"])
+    assert weights["zebra"] == pytest.approx(math.log(1 + 10))
+    assert weights["zebra"] > weights["dentist"] > weights["group"] > 0.0
+    assert weights["group"] == pytest.approx(math.log(1 + 10 / (1 + 9)))
+
+
+def test_the_document_counts_are_kept_until_an_item_is_added_or_removed() -> None:
+    corpus, _, group_only, dentist = common_words_corpus()
+    counts = corpus.doc_freq()
+    assert (counts["group"], counts["dentist"], counts["zebra"]) == (9, 1, 0)
+    # The same counts again, with nothing rebuilt.
+    assert corpus.doc_freq() is counts
+    corpus.add(doc_item("d:extra", "a dentist and a zebra"))
+    after_add = corpus.doc_freq()
+    assert after_add is not counts
+    assert (after_add["dentist"], after_add["zebra"]) == (2, 1)
+    corpus.remove(dentist.key)
+    corpus.remove(group_only.key)
+    after_remove = corpus.doc_freq()
+    assert (after_remove["group"], after_remove["dentist"]) == (8, 1)
+    # A key that is gone leaves the weights by the new item count.
+    assert corpus.rarity(["group"])["group"] == pytest.approx(math.log(1 + 9 / (1 + 8)))
+
+
+async def _add_turns(memory: ChatMemory, store: SessionStore, texts: list[str]) -> None:
+    """Each of *texts* stored as the typed words of a chat turn of a chat of its own."""
+    _, index = memory.stores()
+    for text in texts:
+        turn = await _turn(store, text)
+        await index.add(
+            Document(
+                session_id=turn.session_id,
+                turn=1,
+                surface="gateway",
+                kind="chat",
+                title=text,
+                text=document_text(text, "Noted."),
+                created_at=time.time(),
+            )
+        )
+
+
+GROUP_TURN = "my group is loud on friday"
+DENTIST_TURN = "the dentist is on friday"
+
+
+@pytest.mark.parametrize(
+    ("setting", "turns_found"),
+    # With the count every turn that holds "group" or "dentist" is found (the block
+    # and the tool's default cap them); with the weight only the dentist turn is.
+    [(None, 8), ("count", 8), ("rare", 1)],
+)
+async def test_the_setting_reaches_the_ranking_of_the_search_and_the_block(
+    tmp_path: Path, store: SessionStore, setting: str | None, turns_found: int
+) -> None:
+    cfg = config() if setting is None else config(recall_word_weight=setting)
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    await _add_turns(
+        memory, store, [f"the group visit plan number {n}" for n in range(6)]
+    )
+    await _add_turns(memory, store, [GROUP_TURN, DENTIST_TURN])
+    try:
+        found = await memory.search(GROUP_DENTIST, docs_k=20)
+        assert len(found) == turns_found
+        assert any(DENTIST_TURN in item.text for item in found)
+        assert any(GROUP_TURN in item.text for item in found) is (turns_found > 1)
+        block = await memory.before_turn(
+            store, await _turn(store, "Ask"), f"which {GROUP_DENTIST}?"
+        )
+        assert DENTIST_TURN in block.block
+        assert len(block.used) == min(turns_found, 2)
+    finally:
+        await memory.aclose()
+
+
+def test_the_weight_of_the_settings_now_is_count_unless_rare_is_set() -> None:
+    assert ChatMemory(lambda: None).word_weight() == "count"
+    assert ChatMemory(lambda: Config()).word_weight() == "count"
+    for value, weight in (("rare", "rare"), ("count", "count"), ("odd", "count")):
+        cfg = config(recall_word_weight=value)
+        assert ChatMemory(lambda cfg=cfg: cfg).word_weight() == weight  # type: ignore[misc]
